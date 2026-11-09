@@ -1,483 +1,1109 @@
 # 03. scalar の型と意味を決め、interpreter と rewrite を比較する
 
-## このステップで動かすもの
+整数演算は i32 wrap、DIV と MOD は床除算、SHR は算術 shift とする。f32 MAX は NaN を伝播し、ゼロ二つなら常に +0 を返す。動的 DIV、shift、float-to-int CAST の安全性は宣言 bounds と実入力の検査で保証する。導出できない bounds は安全と判定しない。型付き scalar IR を追加し、既存の二つの scalar example もこの IR に移す。
 
-[02-runtime-inputs.md](02-runtime-inputs.md) の scalar を三つの経路で評価する。
-書換え前 interpreter、書換え後 interpreter、CPU 生成コードを比較する。
-式の共有、dtype の検証、整数式の簡約をここで加える。
-元計画の第 2 章に対応し、後の添字計算用の scalar ALU をそろえる。
-以下の API、例名、コマンドと数値は未実装の作業計画である。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
-## 最小実装とデータ
+## 1. arena に `HashMap<NodeKey, NodeId>` を追加する。
+<!-- todo:03-001 -->
 
-`DType` は `Bool`、`I32`、`F32`、`Void` に限定する。
-`Scalar` は `Bool(bool)`、`I32(i32)`、`F32Bits(u32)` を使う案にする。
-`void` は効果の型であり、定数値や ALU 入力には使えない。
-`NodeKey` は演算、dtype、payload、入力番号から作る。
-f32 のキーはビット列とし、`+0` と `-0` を区別する。
-NaN もビット列を保持し、数値の `==` で intern しない。
-
-予定する入出力 IR は次の形になる。
-
-```text
-before: ADD(PARAM i32 slot=0, CONST i32 0)
-after:  PARAM i32 slot=0
-```
-
-`ADD`、`SUB`、`MUL`、`NEG` は同じ数値 dtype のみを受け取る。
-整数の加減乗算と左シフトは 32 bit の二の補数で wrap する契約にする。
-C は `uint32_t` で計算し、ビット列を i32 に戻して signed overflow を避ける。
-`XOR`、`AND`、`OR` は i32 または bool の同型二項にする。
-`SHL` と `SHR` は i32 とし、シフト数は `0 <= count < 32` に限る。
-右シフトは算術シフトとし、C の負整数 shift に頼らない helper を使う。
-`DIV` と `MOD` は床除算と対応する剰余にする。
-`-7 DIV 3 = -3`、`-7 MOD 3 = 2` が予定値になる。
-C の `/` と `%` をそのまま出すと負数で違うため、補正 helper を生成する。
-除数ゼロと `i32::MIN DIV -1` は定数なら検証時に拒否する。
-動的 DIV は宣言範囲から非ゼロと例外不在を証明できる式に限る。
-呼出し前に実際の入力が宣言範囲内かを検証する。
-`CMPLT`、`CMPEQ`、`CMPNE` は同型数値を受け取り bool を返す。
-`WHERE` は bool と同型二値を受け取り、その値の dtype を返す。
-`RECIP` は f32、`MAX` は同型数値にする。
-f32 MAX はどちらかが NaN なら NaN、両方ゼロなら `+0` を優先する契約にする。
-これは tinygrad の Python `max` の全挙動をそのまま移す契約ではない。
-`CAST` は明示操作とし、暗黙の i32 と f32 の混合は拒否する。
-f32 から i32 は有限かつ範囲内の値をゼロ方向に丸める。
-動的 cast の安全性を宣言範囲から証明できなければ、この版では拒否する。
-
-導出情報は `dtype(id)`、`bounds(id)`、`cost(root)` から始める。
-整数 bounds は保守的な区間とし、wrap の可能性があれば i32 全域へ広げる。
-f32 の区間だけで NaN が存在しないと扱わない。
-`cost` は到達可能な共有済み ALU 数を数え、実行時間とは呼ばない。
-
-## この章のファイル配置
-
-02 で抽出した Graph と pipeline を育てる。実行できる部品検証の main は book_03_intern に分け、Graph::intern、型導出、interpreter、rewrite の本体はそれぞれ既存モジュールへ追加する。
-
-次はこの章の終わりまでに触る関連ファイルの配置案である。現在のcheckoutの一覧ではない。各コミットでは、その下に示す部分だけを追加・変更する。
-
-```text
-chibigrad/
-├── examples/
-│   ├── book_03_intern.rs  # HashMap による共有と f32 bits を確認する std の独立例。
-│   └── scalar_rewrite.rs  # 書換え前後と C の三経路比較。
-├── src/
-│   ├── renderer/
-│   │   ├── c.rs  # 整数 wrap、床除算、算術右 shift と f32 helper の生成。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── runtime/
-│   │   ├── cpu.rs  # 宣言された入力範囲の呼出し前検証。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── interpret.rs  # 書換えから再利用する既存 ALU evaluator。
-│   ├── lib.rs  # 本体のモジュール宣言と公開APIの入口。
-│   ├── rewrite.rs  # bottom-up rewrite_add と呼出しごとの memo。
-│   ├── uop.rs  # 到達可能な ALU を数える cost と is_alu。
-│   └── verify.rs  # 動的 DIV、shift、CAST の安全性を生成前に検証する。
-├── tests/
-│   └── scalar_rewrite.rs  # 型、境界、特殊値と元グラフ保持の統合確認。
-└── Cargo.toml  # 既存のpackage設定。必要な依存だけを追加する。
-```
-
-生成Cやshaderは一時ディレクトリへ出力するため、このRustプロジェクトのツリーには含めない。コード冒頭のコメントで、生成元と生成先を確認する。
-
-## 小さなコミットで進める
-
-### コミット 1. 同じ式を共有し、従来の CPU 経路で動かす
-
-このコミットで触るファイルは次のとおり。既存の他のファイルは省略している。
-
-```text
-chibigrad/
-├── examples/
-│   ├── book_03_intern.rs  # [追加] HashMap による共有と f32 bits を確認する std の独立例。
-│   └── scalar_rewrite.rs  # [追加] 共有された式を従来の CPU 経路で実行する入口。
-├── src/
-│   ├── lib.rs  # 本体のモジュール宣言と公開APIの入口。
-│   └── uop.rs  # [変更] Graph の構造キーと Graph::intern。
-└── Cargo.toml  # 既存のpackage設定。必要な依存だけを追加する。
-```
-
-単独例は examples/book_03_intern.rs へ全体を置く。本体は src/uop.rs の Graph に intern 表を追加し、掲載した Graph::intern を実装する。既存のノード構築をこの入口へそろえ、Op と UOp の payload を f32 bits に変更する。examples/scalar_rewrite.rs では共有した (a+b)*(a+b) を作り、02 の compile と run へ渡す。
-
-
-既存の arena では同じ演算を二度作ると二つの番号になるため、今回はノードを構造で検索してから追加する。変更先候補は `src/uop.rs` の設計案 `Arena::intern(key)` である。key は演算種別、f32 dtype、定数なら `to_bits()`、PARAM なら slot、ALU なら順序付き入力番号列を持つ。HashMap に同じ key があれば既存の `NodeId` を返し、なければ Vec の末尾へ UOp を追加してから表へ登録する。値を評価して等しいかどうかを調べる処理ではない。
-
-例えば `%0=PARAM(0)`、`%1=PARAM(1)` に対して ADD(0,1) を二回作ると、最初の呼出しだけが `%2` を追加し、二回目も 2 を返す。その二つを掛ける MUL は入力 `[2,2]` になる。linearize は `%2` を一度だけ出力し、入力 2、3 なら ADD の中間値は 5、MUL の結果は 25 になる。ADD(1,0) は別 key とし、交換則による並べ替えはここへ混ぜない。
-
-f32 の key に数値の等値判定を使わない点を局所テストで固定する。`+0` と `-0` は bits が違うので別ノード、同じ NaN payload を二度作れば同じノード、違う payload なら別ノードになる予定である。ノード共有と CPU 実行の両方を確認し、HashMap の戻り番号だけで完了にしない。既存の dtype 固定の検証と C renderer はそのまま使い、以降の rewrite が新しい式を作るときにもこの入口を通るようにする。
-
-
-単独で実行できる例である。`src/uop.rs` の intern を最小の arena として切り出す。payload を `Op` に持たせた `UOp { op, src }` 自体が、この純粋部分集合の構造キーになる。
-
-Arena、局所 Op と main を含むブロック全体を独立例として保存する。本体の Graph 定義とは別である。
-
-```rust
-// examples/book_03_intern.rs（単独で実行する例）
-use std::collections::HashMap;
+```rust file=src/scalar.rs mode=write
+use crate::{Result, native::NativeLibrary};
+use std::{
+	collections::{HashMap, HashSet},
+	ffi::c_void,
+};
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DType {
+	Bool,
+	I32,
+	F32,
+	Void,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Value {
+	Bool(bool),
+	I32(i32),
+	F32Bits(u32),
+}
+impl Value {
+	pub fn f32(x: f32) -> Self {
+		Self::F32Bits(x.to_bits())
+	}
+	pub fn dtype(self) -> DType {
+		match self {
+			Self::Bool(_) => DType::Bool,
+			Self::I32(_) => DType::I32,
+			Self::F32Bits(_) => DType::F32,
+		}
+	}
+	pub fn number(self) -> f64 {
+		match self {
+			Self::Bool(x) => x as u8 as f64,
+			Self::I32(x) => x as f64,
+			Self::F32Bits(x) => f32::from_bits(x) as f64,
+		}
+	}
+	pub fn pack(self) -> u64 {
+		match self {
+			Self::Bool(x) => x as u64,
+			Self::I32(x) => x as u32 as u64,
+			Self::F32Bits(x) => x as u64,
+		}
+	}
+	pub fn unpack(dtype: DType, bits: u64) -> Result<Self> {
+		match dtype {
+			DType::Bool => Ok(Self::Bool(bits != 0)),
+			DType::I32 => Ok(Self::I32(bits as u32 as i32)),
+			DType::F32 => Ok(Self::F32Bits(bits as u32)),
+			DType::Void => Err("void has no value".into()),
+		}
+	}
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Bounds {
+	pub lo: i64,
+	pub hi: i64,
+}
+impl Bounds {
+	pub const I32: Self = Self {
+		lo: i32::MIN as i64,
+		hi: i32::MAX as i64,
+	};
+	pub fn new(lo: i64, hi: i64) -> Result<Self> {
+		if lo > hi {
+			Err("empty bounds".into())
+		} else {
+			Ok(Self { lo, hi })
+		}
+	}
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Alu {
+	Add,
+	Sub,
+	Mul,
+	Neg,
+	Xor,
+	And,
+	Or,
+	Shl,
+	Shr,
+	Div,
+	Mod,
+	Lt,
+	Eq,
+	Ne,
+	Where,
+	Recip,
+	Max,
+	Cast(DType),
+}
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Op { Const(u32), Param(usize), Add, Mul }
+pub enum SOp {
+	Const(Value),
+	Param {
+		slot: usize,
+		scope: usize,
+		dtype: DType,
+		bounds: Option<Bounds>,
+	},
+	Alu(Alu),
+}
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct UOp { op: Op, src: Vec<usize> }
-#[derive(Default)]
-struct Arena { nodes: Vec<UOp>, intern: HashMap<UOp, usize> }
-impl Arena {
-	fn add(&mut self, op: Op, src: Vec<usize>) -> usize {
-		let node = UOp { op, src };
-		if let Some(&id) = self.intern.get(&node) { return id; }
+pub struct SNode {
+	pub op: SOp,
+	pub inputs: Vec<usize>,
+	pub dtype: DType,
+	pub bounds: Option<Bounds>,
+}
+#[derive(Clone, Debug, Default)]
+pub struct ScalarGraph {
+	pub nodes: Vec<SNode>,
+	intern: HashMap<SNode, usize>,
+}
+impl ScalarGraph {
+	fn push(&mut self, node: SNode) -> usize {
+		if let Some(&id) = self.intern.get(&node) {
+			return id;
+		}
 		let id = self.nodes.len();
 		self.nodes.push(node.clone());
 		self.intern.insert(node, id);
 		id
 	}
-}
-fn main() {
-	let mut a = Arena::default();
-	let x = a.add(Op::Param(0), vec![]);
-	let y = a.add(Op::Param(1), vec![]);
-	let sum = a.add(Op::Add, vec![x,y]);
-	assert_eq!(sum, a.add(Op::Add, vec![x,y]));
-	assert_ne!(sum, a.add(Op::Add, vec![y,x]));
-	let square = a.add(Op::Mul, vec![sum,sum]);
-	assert_eq!(a.nodes[square].src, [sum,sum]);
-	assert_ne!(a.add(Op::Const(0.0f32.to_bits()), vec![]), a.add(Op::Const((-0.0f32).to_bits()), vec![]));
-	let nan = a.add(Op::Const(0x7fc00042), vec![]);
-	assert_eq!(nan, a.add(Op::Const(0x7fc00042), vec![]));
-}
-```
-
-`nodes` に追加する前の検索が、二度目の ADD を既存の番号へ戻す。キーの `src` は列なので `[x,y]` と `[y,x]` は別になる。`Const(u32)` はこのコミットの f32 bits 専用 payload で、次では `Const(Scalar)` に拡張する。効果がまだ存在しないので全ノードを intern できるが、05 の STORE と ALLOC にはこの規則をそのまま適用しない。
-
-この入力の途中経過を並べる。
-
-```text
-PARAM(0)->%0, PARAM(1)->%1
-ADD(%0,%1)->%2, ADD(%0,%1)->%2
-MUL(%2,%2)->%4（逆順 ADD を作ったため %3 は別ノード）
-+0 bits=0x00000000, -0 bits=0x80000000 -> distinct ids
-```
-
-- [ ] arena に `HashMap<NodeKey, NodeId>` を追加する。
-- [ ] f32 のビットキーと演算の入力順を保持する。
-- [ ] 同じ `a+b` を二回作ると同じ番号になるようにする。
-- [ ] `(a+b)*(a+b)` を C まで通し、入力 `2,3` で `25` を得る。
-
-このコミットでは f32 のままでよい。
-`a+b` と `b+a` の自動的な同一化はまだ行わない。
-
-
-組込み用の抜粋である。上の単独例を本体へ統合するときは、01 の `Graph.nodes: Vec<UOp>` を維持して、`intern: HashMap<UOp,NodeId>` を足す。ここから後の章では `Graph::intern(op, &[NodeId]) -> NodeId` に名前と署名を統一する。`NodeId` は `Copy + Eq + Hash`、`Op` と `UOp` は `Clone + Eq + Hash` を導出し、f32 payload は引き続き bits で持つ。
-
-既存 Graph の impl に intern を追加する。
-
-```rust
-// src/uop.rs（既存ファイルへ組み込む抜粋）
-impl Graph {
-	fn intern(&mut self, op: Op, src: &[NodeId]) -> NodeId {
-		let node = UOp { op, src: src.to_vec() };
-		if let Some(&id) = self.intern.get(&node) { return id; }
-		let id = NodeId(self.nodes.len());
-		self.nodes.push(node.clone());
-		self.intern.insert(node,id);
-		id
+	pub fn constant(&mut self, v: Value) -> usize {
+		let n = v.number();
+		let bounds = if n.is_finite() && n >= i32::MIN as f64 && n <= i32::MAX as f64 {
+			Some(Bounds {
+				lo: n.floor() as i64,
+				hi: n.ceil() as i64,
+			})
+		} else {
+			None
+		};
+		self.push(SNode {
+			op: SOp::Const(v),
+			inputs: vec![],
+			dtype: v.dtype(),
+			bounds,
+		})
 	}
-}
-```
-
-単独例の `Arena::add(Op::Add,vec![x,y])` は、本体では `graph.intern(Op::Add,&[x,y])` になる。src を借用する入口が必要な列だけを所有化するので、書換えや parser は同じ interner を呼べる。ALLOC と STORE を追加する 05 ではこの純粋ノード用入口と、固有 ID を発行する効果用入口を分ける。
-
-### コミット 2. 四つの dtype と interpreter を CPU にそろえる
-
-このコミットで触るファイルは次のとおり。既存の他のファイルは省略している。
-
-```text
-chibigrad/
-├── examples/
-│   └── scalar_rewrite.rs  # [変更] WHERE の両分岐と interpreter、CPU の比較。
-├── src/
-│   ├── renderer/
-│   │   ├── c.rs  # [変更] 検証済み dtype ごとの式と wrapper。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── runtime/
-│   │   ├── cpu.rs  # [変更] Bool と I32 の pack と型付き出力。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── interpret.rs  # [追加] 型付き値表、eval_add と eval_where。
-│   ├── lib.rs  # [変更] interpret の宣言と比較に使う API の公開。
-│   ├── uop.rs  # [変更] DType、Scalar、演算 payload と Scalar::dtype。
-│   └── verify.rs  # [変更] binary_type と型・入力数の検証。
-└── Cargo.toml  # 既存のpackage設定。必要な依存だけを追加する。
-```
-
-DType と Scalar は src/uop.rs に追加する。抜粋の binary_type は verify.rs、eval_add と eval_where は新しい interpret.rs に置き、src/lib.rs へ interpret の宣言を加える。interpreter が使う型と evaluator は crate 内で共用し、example が必要とする評価入口だけを公開する。renderer/c.rs と runtime/cpu.rs も同じ型規則と ABI を使うように広げる。
-
-新しいモジュールは、既存の宣言を残して次を追記する。内部の補助関数は各モジュールに置き、exampleから使う入口だけを公開する。
-
-```rust
-// src/lib.rs（モジュール宣言を追加）
-pub mod interpret;
-```
-
-
-演算の意味を Rust の interpreter と C 生成でそろえる。候補ファイルは `src/uop.rs` の `DType` と `Scalar`、`src/verify.rs` の設計案 `infer_type`、`src/interpret.rs` の `eval_alu` である。先に演算ごとの引数数と入力型、結果型の表を match で定める。例えば CMPLT は同型数値二つから Bool、WHERE は Bool 一つと同型値二つからその値の dtype を返す。型が合わないノードを interpreter や renderer が別々に補正しない。
-
-interpreter は既存の依存順を使い、各 NodeId の結果を型付き Scalar の表へ置く。`WHERE(a<3,a*2,a+1)` で a=2 なら比較は true、二枝は 4 と 3、選択結果は 4 になる。a=5 なら比較は false、二枝は 10 と 6、結果は 6 となる。純粋な scalar DAG の段階では両枝を評価してよいが、各枝自体が有効な演算でなければならない。後の guard 付きメモリアクセスをこの性質だけで実装しない。
-
-ABI は f32 の bits 規則を保ち、I32 は下位 32 bit の二の補数、Bool は 0 または 1 と定め、C でも対応する型へ戻す。出力 wrapper も root の dtype に合わせて読む。局所テストでは WHERE の二入力に加え、I32 と F32 の ADD、Void の定数を拒否する。F32 の演算ごとに f32 へ丸め、C の fast-math と積和縮約を止めて比較する。これで型検証、interpreter、CPU のいずれも同じ仕様に対して確認できる。
-
-
-組込み用の抜粋である。`src/verify.rs` の二項型導出と `src/interpret.rs` の評価を示す。`DType` と `Scalar` は本文の四型・三値型、`Op` は型付き payload を持つ。ここでは ADD と比較の差を取り出し、SUB、MUL、NEG も同じ型判定の数値集合へ追加する。
-
-binary_type と評価関数を責務ごとに分けて追加する。
-
-```rust
-// src/verify.rs（既存ファイルへ組み込む抜粋）
-fn binary_type(op: &Op, a: DType, b: DType) -> Result<DType, String> {
-	if a != b || !matches!(a, DType::I32 | DType::F32) {
-		return Err("expected two values of the same numeric dtype".into());
+	pub fn param(&mut self, slot: usize, dtype: DType, bounds: Option<Bounds>) -> Result<usize> {
+		self.scoped_param(0, slot, dtype, bounds)
 	}
-	match op {
-		Op::Add | Op::Sub | Op::Mul | Op::Max => Ok(a),
-		Op::CmpLt | Op::CmpEq | Op::CmpNe => Ok(DType::Bool),
-		_ => Err("not a binary numeric operation".into()),
-	}
-}
-// src/interpret.rs（既存ファイルへ組み込む抜粋）
-fn eval_add(a: Scalar, b: Scalar) -> Result<Scalar, String> {
-	match (a,b) {
-		(Scalar::I32(x), Scalar::I32(y)) => Ok(Scalar::I32(x.wrapping_add(y))),
-		(Scalar::F32Bits(x), Scalar::F32Bits(y)) => {
-			let value: f32 = f32::from_bits(x) + f32::from_bits(y);
-			Ok(Scalar::F32Bits(value.to_bits()))
+	pub fn scoped_param(
+		&mut self,
+		scope: usize,
+		slot: usize,
+		dtype: DType,
+		bounds: Option<Bounds>,
+	) -> Result<usize> {
+		if dtype == DType::Void {
+			return Err("void PARAM".into());
 		}
-		_ => Err("ADD dtype mismatch".into()),
+		if let Some(b) = bounds {
+			if b.lo > b.hi
+				|| dtype == DType::I32 && (b.lo < i32::MIN as i64 || b.hi > i32::MAX as i64)
+			{
+				return Err("invalid parameter bounds".into());
+			}
+		}
+		Ok(self.push(SNode {
+			op: SOp::Param {
+				slot,
+				scope,
+				dtype,
+				bounds,
+			},
+			inputs: vec![],
+			dtype,
+			bounds: bounds.or(if dtype == DType::I32 {
+				Some(Bounds::I32)
+			} else {
+				None
+			}),
+		}))
+	}
+	pub fn alu(&mut self, op: Alu, inputs: Vec<usize>) -> Result<usize> {
+		let (dtype, bounds) = self.infer(op, &inputs)?;
+		Ok(self.push(SNode {
+			op: SOp::Alu(op),
+			inputs,
+			dtype,
+			bounds,
+		}))
+	}
+	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
+		let arity = match op {
+			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
+			Alu::Where => 3,
+			_ => 2,
+		};
+		if inputs.len() != arity {
+			return Err("ALU arity mismatch".into());
+		}
+		let ns = inputs
+			.iter()
+			.map(|&id| self.nodes.get(id).ok_or("unknown scalar input".into()))
+			.collect::<Result<Vec<_>>>()?;
+		let t = ns[0].dtype;
+		let numeric = |t| t == DType::I32 || t == DType::F32;
+		let dtype = match op {
+			Alu::Where => {
+				if t != DType::Bool || ns[1].dtype != ns[2].dtype || ns[1].dtype == DType::Void {
+					return Err("WHERE type mismatch".into());
+				}
+				ns[1].dtype
+			}
+			Alu::Cast(target) => {
+				if target == DType::Void || t == DType::Void {
+					return Err("void CAST".into());
+				}
+				if t == DType::F32 && target == DType::I32 {
+					let b = ns[0].bounds.ok_or("unproven float-to-int CAST")?;
+					if b.lo < i32::MIN as i64 || b.hi > 2147483520 {
+						return Err("unsafe float-to-int CAST".into());
+					}
+				}
+				target
+			}
+			Alu::Recip => {
+				if t != DType::F32 {
+					return Err("RECIP requires f32".into());
+				}
+				t
+			}
+			Alu::Xor | Alu::And | Alu::Or => {
+				if !matches!(t, DType::I32 | DType::Bool) || ns[1].dtype != t {
+					return Err("bitwise type mismatch".into());
+				}
+				t
+			}
+			Alu::Shl | Alu::Shr => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("shift requires i32".into());
+				}
+				let b = ns[1].bounds.ok_or("unproven shift count")?;
+				if b.lo < 0 || b.hi >= 32 {
+					return Err("unsafe shift count".into());
+				}
+				t
+			}
+			Alu::Div | Alu::Mod => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("integer DIV/MOD require i32".into());
+				}
+				let a = ns[0].bounds.unwrap_or(Bounds::I32);
+				let b = ns[1].bounds.unwrap_or(Bounds::I32);
+				if b.lo <= 0 && b.hi >= 0 || a.lo == i32::MIN as i64 && b.lo <= -1 && b.hi >= -1 {
+					return Err("unsafe integer division".into());
+				}
+				t
+			}
+			Alu::Lt | Alu::Eq | Alu::Ne => {
+				if !numeric(t) || ns[1].dtype != t {
+					return Err("comparison type mismatch".into());
+				}
+				DType::Bool
+			}
+			_ => {
+				if !numeric(t) || ns.iter().any(|n| n.dtype != t) {
+					return Err("numeric type mismatch".into());
+				}
+				t
+			}
+		};
+		let bounds = if dtype == DType::Bool {
+			Some(Bounds { lo: 0, hi: 1 })
+		} else if dtype == DType::I32 {
+			let a = ns[0].bounds.unwrap_or(Bounds::I32);
+			let b = ns.get(1).and_then(|n| n.bounds).unwrap_or(Bounds::I32);
+			let raw = match op {
+				Alu::Add => Some((a.lo + b.lo, a.hi + b.hi)),
+				Alu::Sub => Some((a.lo - b.hi, a.hi - b.lo)),
+				Alu::Mul => {
+					let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+					Some((*p.iter().min().unwrap(), *p.iter().max().unwrap()))
+				}
+				_ => None,
+			};
+			Some(match raw {
+				Some((lo, hi)) if lo >= i32::MIN as i64 && hi <= i32::MAX as i64 => {
+					Bounds { lo, hi }
+				}
+				_ => Bounds::I32,
+			})
+		} else {
+			None
+		};
+		Ok((dtype, bounds))
+	}
+	pub fn order(&self, root: usize) -> Result<Vec<usize>> {
+		fn dfs(
+			g: &ScalarGraph,
+			id: usize,
+			seen: &mut HashSet<usize>,
+			order: &mut Vec<usize>,
+		) -> Result<()> {
+			let n = g.nodes.get(id).ok_or("invalid scalar root/input")?;
+			if seen.insert(id) {
+				for &x in &n.inputs {
+					if x >= id {
+						return Err("scalar cycle/forward reference".into());
+					}
+					dfs(g, x, seen, order)?
+				}
+				order.push(id)
+			}
+			Ok(())
+		}
+		let mut out = vec![];
+		dfs(self, root, &mut HashSet::new(), &mut out)?;
+		Ok(out)
+	}
+	pub fn verify(&self, root: usize, scope: usize) -> Result<()> {
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			match n.op {
+				SOp::Const(v) => {
+					let mut fresh = Self::default();
+					let expected = fresh.constant(v);
+					if n.dtype != v.dtype()
+						|| !n.inputs.is_empty()
+						|| n.bounds != fresh.nodes[expected].bounds
+					{
+						return Err("invalid CONST metadata".into());
+					}
+				}
+				SOp::Param {
+					slot,
+					scope: s,
+					dtype,
+					bounds,
+				} => {
+					let mut fresh = Self::default();
+					let expected = fresh.scoped_param(s, slot, dtype, bounds)?;
+					if s != scope
+						|| dtype != n.dtype
+						|| !n.inputs.is_empty()
+						|| n.bounds != fresh.nodes[expected].bounds
+					{
+						return Err("unbound PARAM scope or invalid bounds".into());
+					}
+				}
+				SOp::Alu(op) => {
+					let (t, b) = self.infer(op, &n.inputs)?;
+					if t != n.dtype || b != n.bounds {
+						return Err("invalid derived scalar metadata".into());
+					}
+				}
+			}
+		}
+		Ok(())
+	}
+	pub fn evaluate(&self, root: usize, inputs: &[Value]) -> Result<Value> {
+		self.evaluate_scoped(root, inputs, 0)
+	}
+	pub fn evaluate_scoped(&self, root: usize, inputs: &[Value], scope: usize) -> Result<Value> {
+		self.verify(root, scope)?;
+		self.validate_inputs(root, inputs)?;
+		let mut values = HashMap::new();
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let value = match n.op {
+				SOp::Const(v) => v,
+				SOp::Param { slot, .. } => inputs[slot],
+				SOp::Alu(op) => {
+					eval_alu(op, &n.inputs.iter().map(|x| values[x]).collect::<Vec<_>>())?
+				}
+			};
+			values.insert(id, value);
+		}
+		Ok(values[&root])
+	}
+	pub fn validate_inputs(&self, root: usize, inputs: &[Value]) -> Result<()> {
+		let mut slots = HashSet::new();
+		for id in self.order(root)? {
+			if let SOp::Param {
+				slot,
+				dtype,
+				bounds,
+				..
+			} = self.nodes[id].op
+			{
+				slots.insert(slot);
+				let v = *inputs.get(slot).ok_or("missing scalar input")?;
+				if v.dtype() != dtype {
+					return Err("scalar input dtype mismatch".into());
+				}
+				if let Some(b) = bounds {
+					let n = v.number();
+					if !n.is_finite() || n < b.lo as f64 || n > b.hi as f64 {
+						return Err("scalar input outside declared bounds".into());
+					}
+				}
+			}
+		}
+		if slots.len() != inputs.len() || (0..inputs.len()).any(|s| !slots.contains(&s)) {
+			return Err("extra or non-dense scalar slots".into());
+		}
+		Ok(())
+	}
+	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
+		self.verify(root, 0)?;
+		let mut out = Self::default();
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let new = match n.op {
+				SOp::Const(v) => out.constant(v),
+				SOp::Param {
+					slot,
+					scope,
+					dtype,
+					bounds,
+				} => out.scoped_param(scope, slot, dtype, bounds)?,
+				SOp::Alu(op) => {
+					let children = n.inputs.iter().map(|x| map[x]).collect::<Vec<_>>();
+					let constants = children
+						.iter()
+						.map(|&x| match out.nodes[x].op {
+							SOp::Const(v) => Some(v),
+							_ => None,
+						})
+						.collect::<Option<Vec<_>>>();
+					if let Some(values) = constants {
+						out.constant(eval_alu(op, &values)?)
+					} else if matches!(op, Alu::Add | Alu::Xor)
+						&& n.dtype == DType::I32
+						&& matches!(out.nodes[children[1]].op, SOp::Const(Value::I32(0)))
+					{
+						children[0]
+					} else if op == Alu::Where {
+						if let SOp::Const(Value::Bool(b)) = out.nodes[children[0]].op {
+							children[if b { 1 } else { 2 }]
+						} else {
+							out.alu(op, children)?
+						}
+					} else {
+						out.alu(op, children)?
+					}
+				}
+			};
+			map.insert(id, new);
+		}
+		Ok((out, map[&root]))
+	}
+	pub fn cost(&self, root: usize) -> Result<usize> {
+		Ok(self
+			.order(root)?
+			.iter()
+			.filter(|&&id| matches!(self.nodes[id].op, SOp::Alu(_)))
+			.count())
+	}
+	pub fn compile(&self, root: usize) -> Result<CompiledScalar> {
+		self.verify(root, 0)?;
+		let source = self.render(root)?;
+		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(CompiledScalar {
+			graph: self.clone(),
+			root,
+			source,
+			library,
+		})
 	}
 }
-fn eval_where(c: Scalar, a: Scalar, b: Scalar) -> Result<Scalar, String> {
-	if a.dtype() != b.dtype() { return Err("WHERE branch dtype mismatch".into()); }
-	match c {
-		Scalar::Bool(true) => Ok(a),
-		Scalar::Bool(false) => Ok(b),
-		_ => Err("WHERE condition must be bool".into()),
+pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
+	let a = v[0];
+	if let Alu::Cast(t) = op {
+		return Ok(match t {
+			DType::Bool => Value::Bool(a.number() != 0.),
+			DType::I32 => Value::I32(a.number() as i32),
+			DType::F32 => Value::f32(a.number() as f32),
+			DType::Void => return Err("void cast".into()),
+		});
+	}
+	if op == Alu::Where {
+		return Ok(if a == Value::Bool(true) { v[1] } else { v[2] });
+	}
+	if matches!(op, Alu::Lt | Alu::Eq | Alu::Ne) {
+		let b = v[1].number();
+		let a = a.number();
+		return Ok(Value::Bool(match op {
+			Alu::Lt => a < b,
+			Alu::Eq => a == b,
+			_ => a != b,
+		}));
+	}
+	Ok(match a {
+		Value::Bool(a) => {
+			let Value::Bool(b) = v[1] else {
+				return Err("bool operand mismatch".into());
+			};
+			Value::Bool(match op {
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				_ => return Err("invalid bool operation".into()),
+			})
+		}
+		Value::I32(a) => {
+			let b = if v.len() > 1 {
+				if let Value::I32(b) = v[1] {
+					b
+				} else {
+					return Err("i32 operand mismatch".into());
+				}
+			} else {
+				0
+			};
+			Value::I32(match op {
+				Alu::Add => a.wrapping_add(b),
+				Alu::Sub => a.wrapping_sub(b),
+				Alu::Mul => a.wrapping_mul(b),
+				Alu::Neg => a.wrapping_neg(),
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				Alu::Shl => a.wrapping_shl(b as u32),
+				Alu::Shr => a >> b,
+				Alu::Div | Alu::Mod => {
+					if b == 0 || (a == i32::MIN && b == -1) {
+						return Err("invalid division".into());
+					}
+					let q = a / b;
+					let r = a % b;
+					let q = q - if r != 0 && (r < 0) != (b < 0) { 1 } else { 0 };
+					if op == Alu::Div {
+						q
+					} else {
+						(a as i64 - q as i64 * b as i64) as i32
+					}
+				}
+				Alu::Max => a.max(b),
+				_ => return Err("invalid i32 operation".into()),
+			})
+		}
+		Value::F32Bits(a) => {
+			let a = f32::from_bits(a);
+			let b = if v.len() > 1 {
+				v[1].number() as f32
+			} else {
+				0.
+			};
+			Value::f32(match op {
+				Alu::Add => a + b,
+				Alu::Sub => a - b,
+				Alu::Mul => a * b,
+				Alu::Neg => -a,
+				Alu::Recip => a.recip(),
+				Alu::Max => {
+					if a.is_nan() || b.is_nan() {
+						f32::NAN
+					} else if a == 0. && b == 0. {
+						0.
+					} else {
+						a.max(b)
+					}
+				}
+				_ => return Err("invalid f32 operation".into()),
+			})
+		}
+	})
+}
+fn ctype(t: DType) -> &'static str {
+	match t {
+		DType::Bool => "uint32_t",
+		DType::I32 => "int32_t",
+		DType::F32 => "float",
+		DType::Void => "void",
+	}
+}
+pub const SCALAR_HELPERS: &str = "#include <stdint.h>\n#include <string.h>\n#include <math.h>\nstatic float chibi_bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nstatic int32_t chibi_i32(uint32_t x){int32_t y;memcpy(&y,&x,4);return y;}\nstatic int32_t chibi_div(int32_t a,int32_t b){int32_t q=a/b,r=a%b;return q-((r!=0)&&((r<0)!=(b<0)));}\nstatic int32_t chibi_mod(int32_t a,int32_t b){return (int32_t)((int64_t)a-(int64_t)chibi_div(a,b)*b);}\nstatic int32_t chibi_shr(int32_t a,int32_t b){uint32_t u=(uint32_t)a;return chibi_i32((u>>b)|((a<0&&b)?(~0u<<(32-b)):0u));}\nstatic float chibi_max(float a,float b){if(isnan(a)||isnan(b))return NAN;if(a==0.0f&&b==0.0f)return 0.0f;return a>b?a:b;}\n";
+impl ScalarGraph {
+	pub fn render(&self, root: usize) -> Result<String> {
+		self.verify(root, 0)?;
+		let mut source = SCALAR_HELPERS.to_string();
+		source.push_str("int chibi_entry(void*const* buffers,const uint64_t* scalars){\n");
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let expr = match n.op {
+				SOp::Const(Value::Bool(x)) => format!("{}u", x as u8),
+				SOp::Const(Value::I32(x)) => format!("chibi_i32({}u)", x as u32),
+				SOp::Const(Value::F32Bits(x)) => format!("chibi_bits({x}u)"),
+				SOp::Param { slot, dtype, .. } => match dtype {
+					DType::I32 => format!("chibi_i32((uint32_t)scalars[{slot}])"),
+					DType::F32 => format!("chibi_bits((uint32_t)scalars[{slot}])"),
+					_ => format!("(scalars[{slot}]!=0)"),
+				},
+				SOp::Alu(op) => {
+					let a = format!("v{}", n.inputs[0]);
+					let b = n.inputs.get(1).map(|x| format!("v{x}")).unwrap_or_default();
+					match op {
+						Alu::Add | Alu::Sub | Alu::Mul if n.dtype == DType::I32 => format!(
+							"chibi_i32((uint32_t){a} {} (uint32_t){b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								_ => "*",
+							}
+						),
+						Alu::Neg if n.dtype == DType::I32 => format!("chibi_i32(0u-(uint32_t){a})"),
+						Alu::Shl => format!("chibi_i32((uint32_t){a} << {b})"),
+						Alu::Shr => format!("chibi_shr({a},{b})"),
+						Alu::Div => format!("chibi_div({a},{b})"),
+						Alu::Mod => format!("chibi_mod({a},{b})"),
+						Alu::Max => {
+							if n.dtype == DType::F32 {
+								format!("chibi_max({a},{b})")
+							} else {
+								format!("({a}>{b}?{a}:{b})")
+							}
+						}
+						Alu::Recip => format!("(1.0f/{a})"),
+						Alu::Neg => format!("(-{a})"),
+						Alu::Where => format!("({a}?{b}:v{})", n.inputs[2]),
+						Alu::Cast(t) => {
+							if t == DType::Bool {
+								format!("({a}!=0)")
+							} else {
+								format!("(({}){a})", ctype(t))
+							}
+						}
+						_ => format!(
+							"({a} {} {b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								Alu::Mul => "*",
+								Alu::Xor => "^",
+								Alu::And => "&",
+								Alu::Or => "|",
+								Alu::Lt => "<",
+								Alu::Eq => "==",
+								Alu::Ne => "!=",
+								_ => unreachable!(),
+							}
+						),
+					}
+				}
+			};
+			source.push_str(&format!("{} v{id}={expr};\n", ctype(n.dtype)));
+		}
+		if self.nodes[root].dtype == DType::F32 {
+			source.push_str(&format!(
+				"uint32_t bits;memcpy(&bits,&v{root},4);*(uint64_t*)buffers[0]=bits;\n"
+			))
+		} else {
+			source.push_str(&format!("*(uint64_t*)buffers[0]=(uint32_t)v{root};\n"))
+		}
+		source.push_str("return 0;\n}\n");
+		Ok(source)
+	}
+}
+pub struct CompiledScalar {
+	graph: ScalarGraph,
+	root: usize,
+	pub source: String,
+	library: NativeLibrary,
+}
+impl CompiledScalar {
+	pub fn run(&self, inputs: &[Value]) -> Result<Value> {
+		self.graph.validate_inputs(self.root, inputs)?;
+		let scalars = inputs.iter().map(|v| v.pack()).collect::<Vec<_>>();
+		let mut output = 0u64;
+		let buffers = [(&mut output as *mut u64).cast::<c_void>()];
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(buffers.as_ptr(), scalars.as_ptr()) };
+		if status != 0 {
+			return Err(format!("scalar entry failed {status}"));
+		}
+		Value::unpack(self.graph.nodes[self.root].dtype, output)
 	}
 }
 ```
 
-`Scalar::dtype(&self)->DType` は variant をそのまま対応させる導出関数である。ADD の整数枝だけが wrap を選び、f32 枝は各命令で f32 の結果を bits に戻す。WHERE の条件と枝は別の型規則を持つので、数値二項演算の検証を使い回して bool を数値化しない。interpreter の値表にはこの `Scalar` を保存し、C でも同じ検証済み型に応じて式を選ぶ。
-
-この入力の途中経過を並べる。
-
-```text
-a=2: CMPLT(2,3)=true, MUL(2,2)=4, ADD(2,1)=3 -> WHERE=4
-a=5: CMPLT(5,3)=false, MUL(5,2)=10, ADD(5,1)=6 -> WHERE=6
-ADD(I32(2),F32Bits(2.0bits)) -> dtype mismatch
+```rust file=src/lib.rs mode=append
+pub mod scalar;
 ```
 
-- [ ] dtype の導出と各演算の入力数を一か所で検証する。
-- [ ] bool と i32 の ABI pack と C の復元処理を追加する。
-- [ ] 加減乗算、比較、WHERE、CAST を interpreter と renderer に加える。
-- [ ] void 定数と混合 dtype を検証時に拒否する。
-- [ ] `WHERE(a<3,a*2,a+1)` を `a=2` で `4`、`a=5` で `6` にする。
+```rust file=tests/scalar_rewrite.rs mode=write
+use chinigrad::{
+	Result,
+	scalar::{Alu, Bounds, DType, ScalarGraph, Value},
+};
 
-f32 interpreter は演算ごとに f32 へ丸める。
-C は fast-math を無効にし、積和の意図しない縮約を避ける。
-
-### コミット 3. 添字用 ALU と境界の契約を実行する
-
-このコミットで触るファイルは次のとおり。既存の他のファイルは省略している。
-
-```text
-chibigrad/
-├── examples/
-│   └── scalar_rewrite.rs  # [変更] 境界入力を interpreter と生成 C へ渡す。
-├── src/
-│   ├── renderer/
-│   │   ├── c.rs  # [変更] 整数 wrap、床除算、算術右 shift と f32 helper の生成。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── runtime/
-│   │   ├── cpu.rs  # [変更] 宣言された入力範囲の呼出し前検証。
-│   │   └── mod.rs  # 子モジュールを宣言する。
-│   ├── interpret.rs  # [変更] floor_div_mod、arithmetic_shr と特殊値の評価。
-│   ├── lib.rs  # 本体のモジュール宣言と公開APIの入口。
-│   ├── uop.rs  # [変更] RangeI32、bounds と prove_division。
-│   └── verify.rs  # [変更] 動的 DIV、shift、CAST の安全性を生成前に検証する。
-└── Cargo.toml  # 既存のpackage設定。必要な依存だけを追加する。
-```
-
-floor_div_mod と arithmetic_shr は interpret.rs に追加し、RangeI32 と prove_division は uop.rs の bounds 導出の近くに置く。renderer/c.rs は同じ契約の C helper を生成する。verify.rs は範囲証明を呼び、runtime/cpu.rs は pack より前に実値が宣言範囲内かを検査する。
-
-
-添字に使う整数演算は、Rust や C の既定動作をそのまま採用せず、本文の契約を `eval_alu` と C helper に実装する。候補は `src/interpret.rs` の設計案 `floor_div_mod`、`src/renderer/c.rs` の整数 helper、`src/uop.rs` の `bounds` である。最初に wrap する加減乗算を unsigned bits でそろえ、次に bit 演算と shift、最後に DIV と MOD を足す。算術右 shift は負値を符号拡張する helper とし、シフト数 32 を実行してから扱うことはしない。
-
-床除算の例では C の切捨て除算で `-7/3=-2`、余り `-1` をまず得る。余りが非ゼロで除数と符号が違う場合に商を 1 減らし、余りへ除数を足すと、商 -3、余り 2 となり `-7=(-3)*3+2` を保つ。ゼロ除数と最小整数を -1 で割る例は、その helper を呼ぶ前の検証対象にする。`(5 XOR 3) SHL 1` は bits 6 を左へ一つ動かして 12 になる。
-
-動的入力には宣言区間を付け、bounds を子から導出する。除数が `[1,3]` ならゼロを含まないが `[-1,1]` なら拒否する。run でも実値が宣言区間内か調べ、証明の前提を維持する。局所テストでは整数最大値への加算、負の DIV と MOD、不正 shift、範囲外入力を別々に比較する。RECIP の負のゼロと MAX の NaN も追加し、NaN は数値等値ではなく分類、ゼロは bits で照合する。これらの evaluator を次の定数畳み込みでも再利用する。
-
-
-組込み用の抜粋である。`src/interpret.rs` の床除算と `src/uop.rs` の範囲証明を、実行前のエラーも含めて示す。`RangeI32` は閉区間 `[lo,hi]` を持ち、生成前に `lo<=hi` が検証されている。
-
-evaluator と bounds の証明を分ける。
-
-```rust
-// src/interpret.rs（既存ファイルへ組み込む抜粋）
-fn floor_div_mod(a: i32, b: i32) -> Result<(i32,i32), String> {
-	if b == 0 || (a == i32::MIN && b == -1) { return Err("invalid division".into()); }
-	let (mut q, mut r) = (a / b, a % b);
-	if r != 0 && (r < 0) != (b < 0) {
-		q -= 1;
-		r += b;
-	}
-	Ok((q,r))
+#[test]
+fn arithmetic_and_shared_library() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let b = g.param(1, DType::F32, None)?;
+	let c = g.param(2, DType::F32, None)?;
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	assert_eq!(sum, g.alu(Alu::Add, vec![a, b])?);
+	let root = g.alu(Alu::Mul, vec![sum, c])?;
+	let p = g.compile(root)?;
+	assert_eq!(
+		p.run(&[Value::f32(2.), Value::f32(3.), Value::f32(4.)])?,
+		Value::f32(20.)
+	);
+	assert_eq!(
+		p.run(&[Value::f32(1.), Value::f32(2.), Value::f32(4.)])?,
+		Value::f32(12.)
+	);
+	assert!(p.run(&[]).is_err());
+	Ok(())
 }
-// src/uop.rs（既存ファイルへ組み込む抜粋）
-fn prove_division(a: RangeI32, b: RangeI32) -> Result<(), String> {
-	if b.lo <= 0 && 0 <= b.hi { return Err("divisor may be zero".into()); }
-	if a.lo == i32::MIN && b.lo <= -1 && -1 <= b.hi {
-		return Err("division may overflow".into());
+#[test]
+fn integer_contract_and_rewrite() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let x = g.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	let zero = g.constant(Value::I32(0));
+	let root = g.alu(Alu::Add, vec![x, zero])?;
+	let (r, y) = g.rewrite(root)?;
+	assert_eq!(r.cost(y)?, 0);
+	for x in [-7, 0, 5] {
+		assert_eq!(
+			g.evaluate(root, &[Value::I32(x)])?,
+			r.compile(y)?.run(&[Value::I32(x)])?
+		)
+	}
+	for (op, a, b, expected) in [
+		(Alu::Div, -7, 3, -3),
+		(Alu::Mod, -7, 3, 2),
+		(Alu::Add, i32::MAX, 1, i32::MIN),
+		(Alu::Shr, -8, 1, -4),
+		(Alu::Shl, 6, 1, 12),
+	] {
+		let a = g.constant(Value::I32(a));
+		let b = g.constant(Value::I32(b));
+		let y = g.alu(op, vec![a, b])?;
+		assert_eq!(g.compile(y)?.run(&[])?, Value::I32(expected));
+	}
+	let a = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Div, vec![a, zero]).is_err());
+	assert!(g.alu(Alu::Shl, vec![a, x]).is_err());
+	Ok(())
+}
+#[test]
+fn typed_failures_and_special_values() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let f = g.param(0, DType::F32, None)?;
+	let i = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Add, vec![f, i]).is_err());
+	assert!(g.alu(Alu::Cast(DType::I32), vec![f]).is_err());
+	assert!(g.param(1, DType::Void, None).is_err());
+	assert!(g.alu(Alu::Add, vec![i]).is_err());
+	assert!(g.compile(999).is_err());
+	let foreign = g.scoped_param(42, 0, DType::F32, None)?;
+	assert!(g.compile(foreign).is_err());
+	let minus = g.constant(Value::f32(-0.));
+	let plus = g.constant(Value::f32(0.));
+	assert_ne!(minus, plus);
+	let max = g.alu(Alu::Max, vec![minus, minus])?;
+	assert_eq!(g.compile(max)?.run(&[])?, Value::f32(0.));
+	let nan = g.constant(Value::F32Bits(0x7fc00042));
+	assert_eq!(nan, g.constant(Value::F32Bits(0x7fc00042)));
+	let max = g.alu(Alu::Max, vec![nan, plus])?;
+	assert!(g.compile(max)?.run(&[])?.number().is_nan());
+	let mut bounded = ScalarGraph::default();
+	let x = bounded.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	assert!(bounded.compile(x)?.run(&[Value::I32(6)]).is_err());
+	Ok(())
+}
+#[test]
+fn where_and_float_classification() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let three = g.constant(Value::f32(3.));
+	let two = g.constant(Value::f32(2.));
+	let one = g.constant(Value::f32(1.));
+	let cond = g.alu(Alu::Lt, vec![a, three])?;
+	let yes = g.alu(Alu::Mul, vec![a, two])?;
+	let no = g.alu(Alu::Add, vec![a, one])?;
+	let y = g.alu(Alu::Where, vec![cond, yes, no])?;
+	let plan = g.compile(y)?;
+	assert_eq!(plan.run(&[Value::f32(2.)])?, Value::f32(4.));
+	assert_eq!(plan.run(&[Value::f32(5.)])?, Value::f32(6.));
+	let (rewritten, root) = g.rewrite(y)?;
+	for value in [-7., 0., 5., f32::INFINITY, f32::NAN] {
+		let input = [Value::f32(value)];
+		let actual = plan.run(&input)?.number();
+		let reference = rewritten.evaluate(root, &input)?.number();
+		assert!(actual == reference || actual.is_nan() && reference.is_nan());
 	}
 	Ok(())
 }
-// src/interpret.rs（既存ファイルへ組み込む抜粋）
-fn arithmetic_shr(x: i32, count: u32) -> Result<i32, String> {
-	if count >= 32 { return Err("shift count must be below 32".into()); }
-	if count == 0 { return Ok(x); }
-	let bits = x as u32;
-	let sign = if x < 0 { u32::MAX << (32-count) } else { 0 };
-	Ok(((bits >> count) | sign) as i32)
+#[test]
+fn forged_scalar_bounds_are_rejected() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let x = g.param(0, DType::I32, None)?;
+	g.nodes[x].bounds = Some(Bounds::new(0, 1)?);
+	assert!(g.compile(x).is_err());
+	let value = g.constant(Value::f32(f32::NAN));
+	g.nodes[value].bounds = Some(Bounds::new(0, 1)?);
+	assert!(g.compile(value).is_err());
+	Ok(())
 }
 ```
 
-切捨て商と余りを求め、余りと除数の符号が違うときだけ床の方向へ一段動かす。`-7,3` では `q=-2,r=-1` が `q=-3,r=2` になる。`prove_division` は実値を知らない時点で危険な組が区間に含まれるかを調べ、run の区間検証がその前提を守る。C helper も先に例外を排除して同じ補正を行い、wrap の加減乗算は `uint32_t` 上で計算した bits を `memcpy` で `int32_t` に戻す。
-
-この入力の途中経過を並べる。
-
-```text
-floor_div_mod(-7,3) -> (-3,2), (-3)*3+2=-7
-floor_div_mod(7,-3) -> (-3,-2), (-3)*(-3)-2=7
-prove divisor [1,3] -> safe; [-1,1] -> reject
-arithmetic_shr(-8,1) -> -4; count=32 -> reject
-```
-
-- [ ] XOR、AND、OR、SHL、SHR、DIV、MOD を両経路に加える。
-- [ ] RECIP と MAX を本文の f32 契約で実行する。
-- [ ] bounds と動的入力の範囲検証を追加する。
-- [ ] 危険な DIV、shift、CAST は安全性を証明できなければ拒否する。
-- [ ] `((5 XOR 3) SHL 1)=12` と負数の DIV、MOD を C まで通す。
-
-境界の予定例は `i32::MAX+1 = i32::MIN`、シフト数 `32` はエラー。
-`RECIP(-0.0)` は負の無限大、`CMPLT(NaN,1)` は false を確認する。
-
-### コミット 4. bottom-up rewrite と cost を観測する
-
-このコミットで触るファイルは次のとおり。既存の他のファイルは省略している。
-
-```text
-chibigrad/
-├── examples/
-│   └── scalar_rewrite.rs  # [変更] 書換え前後と C の三経路比較。
-├── src/
-│   ├── interpret.rs  # [確認] 書換えから再利用する既存 ALU evaluator。
-│   ├── lib.rs  # 本体のモジュール宣言と公開APIの入口。
-│   ├── rewrite.rs  # [変更] bottom-up rewrite_add と呼出しごとの memo。
-│   └── uop.rs  # [変更] 到達可能な ALU を数える cost と is_alu。
-├── tests/
-│   └── scalar_rewrite.rs  # [追加] 型、境界、特殊値と元グラフ保持の統合確認。
-└── Cargo.toml  # 既存のpackage設定。必要な依存だけを追加する。
-```
-
-02 で移した恒等 rewrite を src/rewrite.rs で bottom-up の実装に置き換え、掲載した rewrite_add を置く。cost は src/uop.rs の導出情報として追加し、既存の linearize を使って到達可能な ALU だけを数える。eval_add は interpret.rs の実装を参照し、畳み込み用に複製しない。tests/scalar_rewrite.rs は公開された構築、書換え、評価、CPU 実行を組み合わせて比較する。
-
-
-rewrite の入力は元の root と不変なノード群、出力は新しい root と追加されたノードである。候補ファイル `src/rewrite.rs` の設計案 `rewrite_node(old, memo)` は、まず old の全入力を再帰的に書き換え、その戻り番号で同じ演算を intern し直す。次にその再構築ノードへ局所規則を適用する。`memo[old_id]=new_id` を今回の rewrite 呼出し内だけで保持すると、共有される部分式を重複処理せず、元の番号との対応も dump できる。
-
-`ADD(PARAM i32 slot=0, CONST i32 0)` なら PARAM と定数の処理後に ADD を検査し、I32 で右入力が 0 なので PARAM の番号を返す。旧 root は残るが、新 root から到達する ALU は一つ減る。`ADD(CONST 2,CONST 3)` は、両入力が定数であることを確認してから検証済み `eval_alu` で 5 を求め、CONST 5 を intern する。定数演算の意味を rewrite 内へもう一組書かない。f32 の零に関する恒等規則は使わない。
-
-設計案 `cost(root)` は visited 集合を使って到達可能な ALU だけを一度ずつ数える。arena 全体には古い ADD が残るので Vec の長さを cost としない。局所テストは入力 -7、0、5 に対し旧 root の interpreter、新 root の interpreter、新 root の C 実行を比較し、I32 x+0 の cost が 1 から 0 になることを調べる。dtype が同じこと、bounds が各実値を含むこと、旧 root の dump が変更されないことも確認する。値が合っていても元グラフを破壊する書換えは、この契約を満たさない。
-
-
-組込み用の抜粋である。`src/rewrite.rs` へ置く整数 ADD の bottom-up 書換えを示す。`Graph::intern(op,src)->NodeId` はコミット 1 の intern で、`Op::Const(Scalar)` と `Op::Add` を使う。`Scalar` は Copy、`NodeId` は番号として比較できる。
-
-rewrite_add は書換え、cost は Graph の導出情報として追加する。
-
-```rust
-// src/rewrite.rs（既存ファイルへ組み込む抜粋）
-fn rewrite_add(g: &mut Graph, old: NodeId, memo: &mut std::collections::HashMap<NodeId,NodeId>) -> NodeId {
-	if let Some(&id) = memo.get(&old) { return id; }
-	let node = g.nodes[old.0].clone();
-	let src: Vec<_> = node.src.iter().map(|&s| rewrite_add(g,s,memo)).collect();
-	let mut result = g.intern(node.op.clone(), &src);
-	if matches!(node.op, Op::Add) {
-		match (&g.nodes[src[0].0].op, &g.nodes[src[1].0].op) {
-			(Op::Const(a), Op::Const(b)) => {
-				let value = eval_add(*a,*b).expect("verified ADD");
-				result = g.intern(Op::Const(value), &[]);
-			}
-			(_, Op::Const(Scalar::I32(0))) if g.dtype(src[0]) == DType::I32 => result = src[0],
-			_ => {}
-		}
+```rust file=examples/scalar_const.rs mode=write
+use chinigrad::{
+	Result,
+	scalar::{ScalarGraph, Value},
+};
+fn main() -> Result<()> {
+	let args = std::env::args().skip(1).collect::<Vec<_>>();
+	let value = args
+		.iter()
+		.find(|s| !s.starts_with("--"))
+		.map(|s| s.parse::<f32>().map_err(|e| e.to_string()))
+		.transpose()?
+		.unwrap_or(7.);
+	let mut g = ScalarGraph::default();
+	let y = g.constant(Value::f32(value));
+	let plan = g.compile(y)?;
+	if args.iter().any(|s| s == "--dump-source") {
+		eprintln!("{}", plan.source)
 	}
-	memo.insert(old,result);
-	result
+	if args.iter().any(|s| s == "--dump-graph") {
+		eprintln!("{g:#?}")
+	}
+	let result = plan.run(&[])?;
+	assert_eq!(result, Value::f32(value));
+	println!("{}", result.number());
+	Ok(())
 }
-// src/uop.rs（既存ファイルへ組み込む抜粋）
-fn cost(g: &Graph, root: NodeId) -> usize {
-	linearize(g,root).iter().filter(|id| g.nodes[id.0].op.is_alu()).count()
+```
+
+```rust file=examples/scalar_arithmetic.rs mode=write
+use chinigrad::{
+	Result,
+	scalar::{Alu, ScalarGraph, Value},
+};
+fn main() -> Result<()> {
+	let args = std::env::args().skip(1).collect::<Vec<_>>();
+	let values = args
+		.iter()
+		.filter(|s| !s.starts_with("--"))
+		.map(|s| s.parse::<f32>().map_err(|e| e.to_string()))
+		.collect::<Result<Vec<_>>>()?;
+	let v = if values.is_empty() {
+		vec![2., 3., 4.]
+	} else {
+		values
+	};
+	if v.len() != 3 {
+		return Err("expected a b c".into());
+	}
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(v[0]));
+	let b = g.constant(Value::f32(v[1]));
+	let c = g.constant(Value::f32(v[2]));
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	let y = g.alu(Alu::Mul, vec![sum, c])?;
+	let plan = g.compile(y)?;
+	if args.iter().any(|s| s == "--dump-source") {
+		eprintln!("{}", plan.source)
+	}
+	if args.iter().any(|s| s == "--dump-graph") {
+		eprintln!("{g:#?}")
+	}
+	let result = plan.run(&[])?;
+	assert_eq!(result, Value::f32((v[0] + v[1]) * v[2]));
+	println!("{}", result.number());
+	Ok(())
 }
 ```
 
-`g.dtype(id)` はコミット 2 の型導出、`is_alu` は ADD、SUB、MUL などの scalar ALU を判別する match、`linearize` は 01 の共有を一度だけ訪れる DFS である。子を置換した後で局所規則を適用するため、子の定数化が親へ伝わる。`g.nodes[old]` には代入せず、新しいノードを追加するだけなので旧 root もそのまま評価できる。`eval_add` を再利用する定数枝と、I32 に限定した零の枝を分けることで f32 の符号付き零を保つ。
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
-この入力の途中経過を並べる。
-
-```text
-old: ADD(PARAM i32 %0, CONST i32 0), cost=1
-new: PARAM i32 %0, cost=0
-inputs -7,0,5 -> old interpreter == new interpreter == C
-old nodes: unchanged; arena length: unchanged or larger, reachable ALU: smaller
+```sh check
+cargo test --quiet --test scalar_rewrite
 ```
 
-- [ ] 子を先に再構築する rewrite を `match` で作る。
-- [ ] 検証済み ALU evaluator を定数畳み込みにも使う。
-- [ ] `i32 x+0 → x`、`x XOR 0 → x`、`WHERE(true,a,b) → a` を加える。
-- [ ] 前後の dtype、bounds、ALU 数を dump に出す。
-- [ ] 三つの実行経路を入力 `-7,0,5` と定数例で比較する。
+## 2. f32 のビットキーと演算の入力順を保持する。
+<!-- todo:03-002 -->
 
-f32 の `x*0 → 0` と `x+0 → x` はまだ加えない。
-`i32 x+0` の cost は `1` から `0` へ減る予定になる。
-元グラフを変更せず、新しい root を返す。
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
-## 完了確認
-
-以下はこの章で作る example とテストの予定コマンドである。
-
-```sh
-# 作業ディレクトリ: chibigrad/
-cargo test
-cargo run --example scalar_rewrite -- --case integer --dump-graph
-cargo run --example scalar_rewrite -- --case boundaries --dump-source
+```sh check
+cargo test --quiet --test scalar_rewrite
 ```
 
-- [ ] 床除算、wrap、shift、f32 の特殊値で三経路が合う。
-- [ ] NaN は `is_nan`、符号付きゼロはビット列で比較する。
-- [ ] 有限の一般 f32 は予定許容値 `atol=1e-6, rtol=1e-6` で比較する。
-- [ ] dtype 不一致、void 入力、範囲外入力は生成か呼出しの前に失敗する。
-- [ ] bounds が結果を含み、証明できない式を安全と判定しない。
-- [ ] 前章までの成功例も通る。
+## 3. 同じ `a+b` を二回作ると同じ番号になるようにする。
+<!-- todo:03-003 -->
 
-## tinygrad ソースとの対応
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
-参照 commit は `c22edff14c79310a9b2df62a78819cf77c8289fa`。
-行番号は checkout で確認した。意味の違いは右欄に記す。
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
 
-| 実在するシンボル | ソース | 役割 | chibigrad で簡略化する点 |
-|---|---|---|---|
-| `UOpMetaClass.__call__` | [ops.py](../../tinygrad/tinygrad/uop/ops.py#L181) | ノードを構造で共有 | Rust arena の intern 表にする |
-| `dtype_from_uop` | [ops.py](../../tinygrad/tinygrad/uop/ops.py#L116) | dtype の導出 | 四型と明示 cast にする |
-| `python_alu`, `exec_alu` | [ops.py](../../tinygrad/tinygrad/uop/ops.py#L1382) | ALU の参照評価 | MAX と整数 wrap は本文の契約を使う |
-| `UOp._min_max` | [ops.py](../../tinygrad/tinygrad/uop/ops.py#L1054) | 演算結果の区間 | 静的 i32 区間から始める |
-| `fold_const_alu`, `no_overflow` | [symbolic.py](../../tinygrad/tinygrad/uop/symbolic.py#L30) | 畳み込みと整数境界 | DSL を作らず `match` にする |
-| `Estimates.from_uops` | [renderer](../../tinygrad/tinygrad/renderer/__init__.py#L26) | 操作数とアクセス量 | scalar ALU 数だけを出す |
+## 4. `(a+b)*(a+b)` を C まで通し、入力 `2,3` で `25` を得る。
+<!-- todo:03-004 -->
 
-## 今は追加しないもの
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
-純粋関数と UIR は [04-functions-stack.md](04-functions-stack.md) で加える。
-メモリ操作の共有規則は [05](05-memory-runtime.md) で別途定義する。
-超越関数群は第 12 段階、symbolic shape は第 20 段階で加える。
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 5. dtype の導出と各演算の入力数を一か所で検証する。
+<!-- todo:03-005 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 6. bool と i32 の ABI pack と C の復元処理を追加する。
+<!-- todo:03-006 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 7. 加減乗算、比較、WHERE、CAST を interpreter と renderer に加える。
+<!-- todo:03-007 -->
+
+`tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite where_and_float_classification
+```
+
+## 8. void 定数と混合 dtype を検証時に拒否する。
+<!-- todo:03-008 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 9. `WHERE(a<3,a*2,a+1)` を `a=2` で `4`、`a=5` で `6` にする。
+<!-- todo:03-009 -->
+
+`tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite where_and_float_classification
+```
+
+## 10. XOR、AND、OR、SHL、SHR、DIV、MOD を両経路に加える。
+<!-- todo:03-010 -->
+
+`tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
+```
+
+## 11. RECIP と MAX を本文の f32 契約で実行する。
+<!-- todo:03-011 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 12. bounds と動的入力の範囲検証を追加する。
+<!-- todo:03-012 -->
+
+`tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
+```
+
+## 13. 危険な DIV、shift、CAST は安全性を証明できなければ拒否する。
+<!-- todo:03-013 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 14. `((5 XOR 3) SHL 1)=12` と負数の DIV、MOD を C まで通す。
+<!-- todo:03-014 -->
+
+`tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
+```
+
+## 15. 子を先に再構築する rewrite を `match` で作る。
+<!-- todo:03-015 -->
+
+`tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
+```
+
+## 16. 検証済み ALU evaluator を定数畳み込みにも使う。
+<!-- todo:03-016 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 17. `i32 x+0 → x`、`x XOR 0 → x`、`WHERE(true,a,b) → a` を加える。
+<!-- todo:03-017 -->
+
+`tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite where_and_float_classification
+```
+
+## 18. 前後の dtype、bounds、ALU 数を dump に出す。
+<!-- todo:03-018 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 19. 三つの実行経路を入力 `-7,0,5` と定数例で比較する。
+<!-- todo:03-019 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 20. 床除算、wrap、shift、f32 の特殊値で三経路が合う。
+<!-- todo:03-020 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 21. NaN は `is_nan`、符号付きゼロはビット列で比較する。
+<!-- todo:03-021 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 22. 有限の一般 f32 は予定許容値 `atol=1e-6, rtol=1e-6` で比較する。
+<!-- todo:03-022 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 23. dtype 不一致、void 入力、範囲外入力は生成か呼出しの前に失敗する。
+<!-- todo:03-023 -->
+
+`tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
+```
+
+## 24. bounds が結果を含み、証明できない式を安全と判定しない。
+<!-- todo:03-024 -->
+
+`tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
+```
+
+## 25. 前章までの成功例も通る。
+<!-- todo:03-025 -->
+
+`tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+```sh check
+cargo test --quiet --test scalar_rewrite
+```
+
+## 章末の累積確認
+
+前章までの example と test も同じ checkout で再ビルドする。
+
+```sh check
+cargo test --quiet --all-targets
+```

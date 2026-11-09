@@ -1,0 +1,4881 @@
+[
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 155,
+    "section": "## 毎回の完了条件",
+    "todo": "各小コミットで `cargo test` が通り、その時点の生成コードが実行できる。",
+    "id": "00-001"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 156,
+    "section": "## 毎回の完了条件",
+    "todo": "新しい機能の最小入力と期待値を確認する。",
+    "id": "00-002"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 157,
+    "section": "## 毎回の完了条件",
+    "todo": "不正な型、shape、添字のうち今回扱うケースを拒否できる。",
+    "id": "00-003"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 158,
+    "section": "## 毎回の完了条件",
+    "todo": "dump で、どの変換が何を取り除いたか確認する。",
+    "id": "00-004"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 159,
+    "section": "## 毎回の完了条件",
+    "todo": "interpreter、未最適化経路、tinygrad など、実装と異なる経路を比較先に使う。",
+    "id": "00-005"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 160,
+    "section": "## 毎回の完了条件",
+    "todo": "CPU と GPU の確認記録を分ける。CPU の成功で GPU を完了にしない。",
+    "id": "00-006"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 161,
+    "section": "## 毎回の完了条件",
+    "todo": "性能を扱う手順では、コンパイル、転送、起動、実行、同期を分けて記録する。",
+    "id": "00-007"
+  },
+  {
+    "file": "docs/00-roadmap.md",
+    "line": 162,
+    "section": "## 毎回の完了条件",
+    "todo": "ステップの実装が終わるまで、この計画のチェックボックスを完了にしない。",
+    "id": "00-008"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 168,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "Cargo package と `scalar_const` example を必要な分だけ追加する。",
+    "id": "01-001"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 169,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "`Const(f32)` と root を保持し、一つのノードを構築する。",
+    "id": "01-002"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 170,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "恒等 rewrite と依存順 linearize を経由して C を生成する。",
+    "id": "01-003"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 171,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "一時ディレクトリに C を書き、system clang を子プロセスとして起動する。",
+    "id": "01-004"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 172,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "生成実行ファイルを実行し、成功終了と標準出力 `7` を照合する。",
+    "id": "01-005"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 238,
+    "section": "### コミット 2. ADD と MUL を通して 20 を返す",
+    "todo": "`Add` と `Mul` に二つの `NodeId` を持たせる。",
+    "id": "01-006"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 239,
+    "section": "### コミット 2. ADD と MUL を通して 20 を返す",
+    "todo": "`Const(2)`, `Const(3)`, `Add`, `Const(4)`, `Mul` を組み立てる。",
+    "id": "01-007"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 240,
+    "section": "### コミット 2. ADD と MUL を通して 20 を返す",
+    "todo": "依存先を利用前に一度だけ並べる。",
+    "id": "01-008"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 241,
+    "section": "### コミット 2. ADD と MUL を通して 20 を返す",
+    "todo": "C renderer に加算と乗算を足し、生成コードを実行する。",
+    "id": "01-009"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 242,
+    "section": "### コミット 2. ADD と MUL を通して 20 を返す",
+    "todo": "第 1 コミットの定数の実行例も再実行する。",
+    "id": "01-010"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 305,
+    "section": "### コミット 3. 同じ経路の失敗と dump を見えるようにする",
+    "todo": "`--dump-graph` でノード番号、演算、入力を出す。",
+    "id": "01-011"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 306,
+    "section": "### コミット 3. 同じ経路の失敗と dump を見えるようにする",
+    "todo": "`--dump-source` で clang に渡した C を出す。",
+    "id": "01-012"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 307,
+    "section": "### コミット 3. 同じ経路の失敗と dump を見えるようにする",
+    "todo": "root の番号と演算の入力数を生成前に検証する。",
+    "id": "01-013"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 308,
+    "section": "### コミット 3. 同じ経路の失敗と dump を見えるようにする",
+    "todo": "clang 不在とコンパイル失敗を区別する。",
+    "id": "01-014"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 309,
+    "section": "### コミット 3. 同じ経路の失敗と dump を見えるようにする",
+    "todo": "stdout の値を読み、予定値と比較する実行テストを作る。",
+    "id": "01-015"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 326,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "`scalar_const` が生成コードを実行して `7` を返す。",
+    "id": "01-016"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 327,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "`scalar_arithmetic` が定数式 `(2+3)*4` を構築して `20` を返す。",
+    "id": "01-017"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 328,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "グラフで `ADD` の結果を `MUL` が参照している。",
+    "id": "01-018"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 329,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "source に実際の `+` と `*` が残っている。",
+    "id": "01-019"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 330,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "不正な root と入力数は clang の起動前にエラーになる。",
+    "id": "01-020"
+  },
+  {
+    "file": "docs/01-scalar-c.md",
+    "line": 331,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "初回から恒等 rewrite と linearize を通過する。",
+    "id": "01-021"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 179,
+    "section": "#include <stdlib.h>",
+    "todo": "scalar `Param` を追加し、`slot` の有効性を検証する。",
+    "id": "02-001"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 180,
+    "section": "#include <stdlib.h>",
+    "todo": "`a+b` の C 関数を生成し、example の入力を wrapper に渡す。",
+    "id": "02-002"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 181,
+    "section": "#include <stdlib.h>",
+    "todo": "入力を C の定数にせず、実行時に受け取る。",
+    "id": "02-003"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 182,
+    "section": "#include <stdlib.h>",
+    "todo": "前章の定数実行例も同じ renderer で通す。",
+    "id": "02-004"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 277,
+    "section": "#include <string.h>",
+    "todo": "固定 ABI の `chibi_entry` と wrapper を生成する。",
+    "id": "02-005"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 278,
+    "section": "#include <string.h>",
+    "todo": "macOS は clang の `-dynamiclib`、対応する Linux は `-shared -fPIC` を使う。",
+    "id": "02-006"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 279,
+    "section": "#include <string.h>",
+    "todo": "OS の動的 library 機構でロードし、入口を解決する。",
+    "id": "02-007"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 280,
+    "section": "#include <string.h>",
+    "todo": "library の所有物を `CompiledScalar` に保持する。",
+    "id": "02-008"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 281,
+    "section": "#include <string.h>",
+    "todo": "`a+b` を compile、load、run まで通し、結果 `5` を読む。",
+    "id": "02-009"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 393,
+    "section": "### コミット 3. `(a+b)*c` を一度コンパイルして二回使う",
+    "todo": "PARAM 三つで式を作る `scalar_inputs` example を追加する。",
+    "id": "02-010"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 394,
+    "section": "### コミット 3. `(a+b)*c` を一度コンパイルして二回使う",
+    "todo": "compile と run を別の呼出しにする。",
+    "id": "02-011"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 395,
+    "section": "### コミット 3. `(a+b)*c` を一度コンパイルして二回使う",
+    "todo": "二回目はスロットのビット列だけを更新する。",
+    "id": "02-012"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 396,
+    "section": "### コミット 3. `(a+b)*c` を一度コンパイルして二回使う",
+    "todo": "同じ入口と library を使ったことを example の計数で示す。",
+    "id": "02-013"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 397,
+    "section": "### コミット 3. `(a+b)*c` を一度コンパイルして二回使う",
+    "todo": "source の dump に入力値が含まれないことを確かめる。",
+    "id": "02-014"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 467,
+    "section": "### コミット 4. 呼出し前の検証と library の寿命を確認する",
+    "todo": "不足、余剰、存在しないスロットを run 前に拒否する。",
+    "id": "02-015"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 468,
+    "section": "### コミット 4. 呼出し前の検証と library の寿命を確認する",
+    "todo": "symbol 不在は library path と入口名を含むエラーにする。",
+    "id": "02-016"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 469,
+    "section": "### コミット 4. 呼出し前の検証と library の寿命を確認する",
+    "todo": "compile 失敗と run の入力エラーを区別する。",
+    "id": "02-017"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 470,
+    "section": "### コミット 4. 呼出し前の検証と library の寿命を確認する",
+    "todo": "所有物の破棄で library と一時ファイルを解放する。",
+    "id": "02-018"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 488,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "成功例で `20`、`12` を得る。",
+    "id": "02-019"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 489,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "compile の予定計数が `1`、run が `2` になる。",
+    "id": "02-020"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 490,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "生成 C は実行時 scalar スロットを参照する。",
+    "id": "02-021"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 491,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "入力不足では FFI を実行しない。",
+    "id": "02-022"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 492,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "前章の定数例も成功する。",
+    "id": "02-023"
+  },
+  {
+    "file": "docs/02-runtime-inputs.md",
+    "line": 493,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "library の所有物を破棄した後に関数ポインタだけが公開されない。",
+    "id": "02-024"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 159,
+    "section": "#[derive(Default)]",
+    "todo": "arena に `HashMap<NodeKey, NodeId>` を追加する。",
+    "id": "03-001"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 160,
+    "section": "#[derive(Default)]",
+    "todo": "f32 のビットキーと演算の入力順を保持する。",
+    "id": "03-002"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 161,
+    "section": "#[derive(Default)]",
+    "todo": "同じ `a+b` を二回作ると同じ番号になるようにする。",
+    "id": "03-003"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 162,
+    "section": "#[derive(Default)]",
+    "todo": "`(a+b)*(a+b)` を C まで通し、入力 `2,3` で `25` を得る。",
+    "id": "03-004"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 274,
+    "section": "### コミット 2. 四つの dtype と interpreter を CPU にそろえる",
+    "todo": "dtype の導出と各演算の入力数を一か所で検証する。",
+    "id": "03-005"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 275,
+    "section": "### コミット 2. 四つの dtype と interpreter を CPU にそろえる",
+    "todo": "bool と i32 の ABI pack と C の復元処理を追加する。",
+    "id": "03-006"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 276,
+    "section": "### コミット 2. 四つの dtype と interpreter を CPU にそろえる",
+    "todo": "加減乗算、比較、WHERE、CAST を interpreter と renderer に加える。",
+    "id": "03-007"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 277,
+    "section": "### コミット 2. 四つの dtype と interpreter を CPU にそろえる",
+    "todo": "void 定数と混合 dtype を検証時に拒否する。",
+    "id": "03-008"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 278,
+    "section": "### コミット 2. 四つの dtype と interpreter を CPU にそろえる",
+    "todo": "`WHERE(a<3,a*2,a+1)` を `a=2` で `4`、`a=5` で `6` にする。",
+    "id": "03-009"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 359,
+    "section": "### コミット 3. 添字用 ALU と境界の契約を実行する",
+    "todo": "XOR、AND、OR、SHL、SHR、DIV、MOD を両経路に加える。",
+    "id": "03-010"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 360,
+    "section": "### コミット 3. 添字用 ALU と境界の契約を実行する",
+    "todo": "RECIP と MAX を本文の f32 契約で実行する。",
+    "id": "03-011"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 361,
+    "section": "### コミット 3. 添字用 ALU と境界の契約を実行する",
+    "todo": "bounds と動的入力の範囲検証を追加する。",
+    "id": "03-012"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 362,
+    "section": "### コミット 3. 添字用 ALU と境界の契約を実行する",
+    "todo": "危険な DIV、shift、CAST は安全性を証明できなければ拒否する。",
+    "id": "03-013"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 363,
+    "section": "### コミット 3. 添字用 ALU と境界の契約を実行する",
+    "todo": "`((5 XOR 3) SHL 1)=12` と負数の DIV、MOD を C まで通す。",
+    "id": "03-014"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 437,
+    "section": "### コミット 4. bottom-up rewrite と cost を観測する",
+    "todo": "子を先に再構築する rewrite を `match` で作る。",
+    "id": "03-015"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 438,
+    "section": "### コミット 4. bottom-up rewrite と cost を観測する",
+    "todo": "検証済み ALU evaluator を定数畳み込みにも使う。",
+    "id": "03-016"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 439,
+    "section": "### コミット 4. bottom-up rewrite と cost を観測する",
+    "todo": "`i32 x+0 → x`、`x XOR 0 → x`、`WHERE(true,a,b) → a` を加える。",
+    "id": "03-017"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 440,
+    "section": "### コミット 4. bottom-up rewrite と cost を観測する",
+    "todo": "前後の dtype、bounds、ALU 数を dump に出す。",
+    "id": "03-018"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 441,
+    "section": "### コミット 4. bottom-up rewrite と cost を観測する",
+    "todo": "三つの実行経路を入力 `-7,0,5` と定数例で比較する。",
+    "id": "03-019"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 458,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "床除算、wrap、shift、f32 の特殊値で三経路が合う。",
+    "id": "03-020"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 459,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "NaN は `is_nan`、符号付きゼロはビット列で比較する。",
+    "id": "03-021"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 460,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "有限の一般 f32 は予定許容値 `atol=1e-6, rtol=1e-6` で比較する。",
+    "id": "03-022"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 461,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dtype 不一致、void 入力、範囲外入力は生成か呼出しの前に失敗する。",
+    "id": "03-023"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 462,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "bounds が結果を含み、証明できない式を安全と判定しない。",
+    "id": "03-024"
+  },
+  {
+    "file": "docs/03-uop-rewrites.md",
+    "line": 463,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "前章までの成功例も通る。",
+    "id": "03-025"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 173,
+    "section": "#[derive(Clone)]",
+    "todo": "`FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。",
+    "id": "04-001"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 174,
+    "section": "#[derive(Clone)]",
+    "todo": "PARAM の intern key に所属関数を含める。",
+    "id": "04-002"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 175,
+    "section": "#[derive(Clone)]",
+    "todo": "interpreter が呼出しごとに引数環境を作るようにする。",
+    "id": "04-003"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 176,
+    "section": "#[derive(Clone)]",
+    "todo": "C 生成前に body を capture なしで inline する。",
+    "id": "04-004"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 177,
+    "section": "#[derive(Clone)]",
+    "todo": "`f(2,3)=10` と `f(5,1)=12` を CPU まで通す。",
+    "id": "04-005"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 243,
+    "section": "### コミット 2. STACK と静的 INDEX で複数の結果を選ぶ",
+    "todo": "同型 scalar の STACK を interpreter と型導出へ加える。",
+    "id": "04-006"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 244,
+    "section": "### コミット 2. STACK と静的 INDEX で複数の結果を選ぶ",
+    "todo": "静的 INDEX の型と `0 <= index < len` を検証する。",
+    "id": "04-007"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 245,
+    "section": "### コミット 2. STACK と静的 INDEX で複数の結果を選ぶ",
+    "todo": "CALL の結果に固定長 STACK を許し、各要素を inline する。",
+    "id": "04-008"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 246,
+    "section": "### コミット 2. STACK と静的 INDEX で複数の結果を選ぶ",
+    "todo": "`pair(2,3)` から `5` と `-1` を取り出して C まで通す。",
+    "id": "04-009"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 327,
+    "section": "### コミット 3. dump した最小 UIR を読み戻して同じ計算をする",
+    "todo": "対応演算だけの printer と parser を追加する。",
+    "id": "04-010"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 328,
+    "section": "### コミット 3. dump した最小 UIR を読み戻して同じ計算をする",
+    "todo": "入力番号、関数名、dtype を検証してから arena へ入れる。",
+    "id": "04-011"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 329,
+    "section": "### コミット 3. dump した最小 UIR を読み戻して同じ計算をする",
+    "todo": "f32 の特殊値もビット列で往復するようにする。",
+    "id": "04-012"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 330,
+    "section": "### コミット 3. dump した最小 UIR を読み戻して同じ計算をする",
+    "todo": "`pair` の UIR を出力し、読み戻したグラフから C を生成する。",
+    "id": "04-013"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 331,
+    "section": "### コミット 3. dump した最小 UIR を読み戻して同じ計算をする",
+    "todo": "読み戻し前後で `5` と `-1` が一致することを assertion で確かめる。",
+    "id": "04-014"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 411,
+    "section": "### コミット 4. 境界の違反を assertion とエラーで止める",
+    "todo": "未束縛 PARAM と他関数の PARAM の直接参照を拒否する。",
+    "id": "04-015"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 412,
+    "section": "### コミット 4. 境界の違反を assertion とエラーで止める",
+    "todo": "CALL の引数不足、dtype 不一致、再帰を拒否する。",
+    "id": "04-016"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 413,
+    "section": "### コミット 4. 境界の違反を assertion とエラーで止める",
+    "todo": "INDEX の負数と長さ以上の値を拒否する。",
+    "id": "04-017"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 414,
+    "section": "### コミット 4. 境界の違反を assertion とエラーで止める",
+    "todo": "`assert_uop` が意図的に誤った予定値で失敗することを確認する。",
+    "id": "04-018"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 430,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "二つの呼出しで値を混同せず、`10` と `12` を返す。",
+    "id": "04-019"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 431,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "STACK の選択結果が `5` と `-1` になる。",
+    "id": "04-020"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 432,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "UIR の出力、入力、実行が一往復する。",
+    "id": "04-021"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 433,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "異なる関数の PARAM が同じ NodeId に共有されない。",
+    "id": "04-022"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 434,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "誤った予定値と不正な UIR の assertion が実際に失敗する。",
+    "id": "04-023"
+  },
+  {
+    "file": "docs/04-functions-stack.md",
+    "line": 435,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "scalar の前章までの例も同じ pipeline で成功する。",
+    "id": "04-024"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 179,
+    "section": "#include <stdint.h>",
+    "todo": "BUFFER の束縛と ALLOC の固有 ID を追加する。",
+    "id": "05-001"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 180,
+    "section": "#include <stdint.h>",
+    "todo": "メモリ INDEX、LOAD、STORE を C と検証用 interpreter に加える。",
+    "id": "05-002"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 181,
+    "section": "#include <stdint.h>",
+    "todo": "buffer の PARAM を固定 ABI のポインタ配列へ接続する。",
+    "id": "05-003"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 182,
+    "section": "#include <stdint.h>",
+    "todo": "入力の長さと dtype を呼出し前に照合する。",
+    "id": "05-004"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 183,
+    "section": "#include <stdint.h>",
+    "todo": "`[10,20,30]` から生成コードで `31` を得る。",
+    "id": "05-005"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 276,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "効果を依存順に実行し、到達可能な STORE を消さない。",
+    "id": "05-006"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 277,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "AFTER の返す storage identity と状態を区別する。",
+    "id": "05-007"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 278,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "同じ位置へ `1`、次に `2` を書き、その後に読んで `2` を返す。",
+    "id": "05-008"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 279,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "LOAD の共有キーへ状態を含め、異なる時点の読出しを共有しない。",
+    "id": "05-009"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 280,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "複数の効果を持つ CALL の出力を AFTER から読めるようにする。",
+    "id": "05-010"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 355,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "`SHRINK(x,1,3)` と base offset を導出する。",
+    "id": "05-011"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 356,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "view の INDEX 0 を元 buffer の INDEX 1 へ変換する。",
+    "id": "05-012"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 357,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "storage_base と read、write の集合を dump に出す。",
+    "id": "05-013"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 358,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "二入力 `[1,2,3]`, `[10,20,30]` を展開して `[11,22,33]` を作る。",
+    "id": "05-014"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 359,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "同じ長さの二つの ALLOC が互いを上書きしないことを確かめる。",
+    "id": "05-015"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 433,
+    "section": "#[derive(Clone)]",
+    "todo": "dtype、アドレス kind、保存領域の可変性を検証する。",
+    "id": "05-016"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 434,
+    "section": "#[derive(Clone)]",
+    "todo": "SHRINK の `0 <= start <= end <= len` を検証する。",
+    "id": "05-017"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 435,
+    "section": "#[derive(Clone)]",
+    "todo": "静的 INDEX が view の範囲内にあることを検証する。",
+    "id": "05-018"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 436,
+    "section": "#[derive(Clone)]",
+    "todo": "未初期化出力の LOAD と AFTER の循環を拒否する。",
+    "id": "05-019"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 437,
+    "section": "#[derive(Clone)]",
+    "todo": "`len*itemsize` と offset の overflow をホスト上の checked 演算で拒否する。",
+    "id": "05-020"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 455,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "固定アクセスの結果が `31`、view の結果が `20` になる。",
+    "id": "05-021"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 456,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "二入力の三要素加算が `[11,22,33]` になる。",
+    "id": "05-022"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 457,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "書込み前後の LOAD が state を区別し、最終値 `2` を読む。",
+    "id": "05-023"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 458,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump の base identity は view 作成前後で一致する。",
+    "id": "05-024"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 459,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "accesses が入力を read、出力を write として列挙する。",
+    "id": "05-025"
+  },
+  {
+    "file": "docs/05-memory-runtime.md",
+    "line": 460,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "範囲外、型不一致、未初期化、効果循環が実行前にエラーになる。",
+    "id": "05-026"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 159,
+    "section": "### コミット 1. 展開済みの三要素加算を単一 RANGE に変える",
+    "todo": "RANGE と END を検証、interpreter、C renderer へ追加する。",
+    "id": "06-001"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 160,
+    "section": "### コミット 1. 展開済みの三要素加算を単一 RANGE に変える",
+    "todo": "body に入ると添字を束縛し、END でスコープを閉じる。",
+    "id": "06-002"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 161,
+    "section": "### コミット 1. 展開済みの三要素加算を単一 RANGE に変える",
+    "todo": "LOAD と STORE の範囲を RANGE bounds から証明する。",
+    "id": "06-003"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 162,
+    "section": "### コミット 1. 展開済みの三要素加算を単一 RANGE に変える",
+    "todo": "三要素加算を既存の固定 ABI で実行する。",
+    "id": "06-004"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 163,
+    "section": "### コミット 1. 展開済みの三要素加算を単一 RANGE に変える",
+    "todo": "第五章の固定添字の例も引き続き通す。",
+    "id": "06-005"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 232,
+    "section": "### コミット 2. 二重ループと内側の添字を動かす",
+    "todo": "builder に外側 body 内で内側 RANGE を作る操作を加える。",
+    "id": "06-006"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 233,
+    "section": "### コミット 2. 二重ループと内側の添字を動かす",
+    "todo": "END が内側、外側の順に閉じることを検証する。",
+    "id": "06-007"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 234,
+    "section": "### コミット 2. 二重ループと内側の添字を動かす",
+    "todo": "`offset = row*3+col` を作り、各反復で LOAD と STORE を行う。",
+    "id": "06-008"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 235,
+    "section": "### コミット 2. 二重ループと内側の添字を動かす",
+    "todo": "`[1,2,3,4,5,6]` のコピーが同じ六要素を返すようにする。",
+    "id": "06-009"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 302,
+    "section": "### コミット 3. 空と一要素の範囲を実行する",
+    "todo": "RANGE 0 と RANGE 1 を interpreter と C で実行する。",
+    "id": "06-010"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 303,
+    "section": "### コミット 3. 空と一要素の範囲を実行する",
+    "todo": "空の body が入力を一度も LOAD しないようにする。",
+    "id": "06-011"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 304,
+    "section": "### コミット 3. 空と一要素の範囲を実行する",
+    "todo": "空出力には有効なホスト所有物を用意し、ポインタを dereference しない。",
+    "id": "06-012"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 305,
+    "section": "### コミット 3. 空と一要素の範囲を実行する",
+    "todo": "一要素加算 `2+10` を生成コードから `12` として読む。",
+    "id": "06-013"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 376,
+    "section": "### コミット 4. スコープ違反と添字 overflow を拒否する",
+    "todo": "閉じた RANGE の値を別の body で使うグラフを拒否する。",
+    "id": "06-014"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 377,
+    "section": "### コミット 4. スコープ違反と添字 overflow を拒否する",
+    "todo": "交差する END、重複 END、未終了 RANGE を拒否する。",
+    "id": "06-015"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 378,
+    "section": "### コミット 4. スコープ違反と添字 overflow を拒否する",
+    "todo": "`INDEX(x,i+1)` が N 要素を越える場合を生成前に拒否する。",
+    "id": "06-016"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 379,
+    "section": "### コミット 4. スコープ違反と添字 overflow を拒否する",
+    "todo": "bounds の積が i32 を越えるケースを拒否する。",
+    "id": "06-017"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 380,
+    "section": "### コミット 4. スコープ違反と添字 overflow を拒否する",
+    "todo": "`--dump-kernel` に各命令の開いている軸を出す。",
+    "id": "06-018"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 397,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "単一ループの結果が `[11,22,33]` になる。",
+    "id": "06-019"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 398,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "二重ループのコピーが `[1,2,3,4,5,6]` になる。",
+    "id": "06-020"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 399,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "空は空配列、一要素は `[12]` を返す。",
+    "id": "06-021"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 400,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "END の直前には対応する RANGE が開いている。",
+    "id": "06-022"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 401,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "最外側 END の後に未束縛の軸が残らない。",
+    "id": "06-023"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 402,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "すべてのメモリアクセスを bounds と保存領域長から証明できる。",
+    "id": "06-024"
+  },
+  {
+    "file": "docs/06-loops.md",
+    "line": 403,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "範囲外、スコープ違反、添字 overflow は実行前に失敗する。",
+    "id": "06-025"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 160,
+    "section": "### コミット 1. accumulator を更新して総和を返す",
+    "todo": "REG allocation と初期化の region を実装する。",
+    "id": "07-001"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 161,
+    "section": "### コミット 1. accumulator を更新して総和を返す",
+    "todo": "反復内 LOAD と STORE を interpreter と C で順に実行する。",
+    "id": "07-002"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 162,
+    "section": "### コミット 1. accumulator を更新して総和を返す",
+    "todo": "ループ後の LOAD を END の完了へ依存させる。",
+    "id": "07-003"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 163,
+    "section": "### コミット 1. accumulator を更新して総和を返す",
+    "todo": "`[1,2,3,4]` の総和を生成コードで `10` にする。",
+    "id": "07-004"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 164,
+    "section": "### コミット 1. accumulator を更新して総和を返す",
+    "todo": "長さ 0 では初期値 `0` を返す。",
+    "id": "07-005"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 229,
+    "section": "#include <stdint.h>",
+    "todo": "外側 RANGE の body に accumulator 初期化を置く。",
+    "id": "07-006"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 230,
+    "section": "#include <stdint.h>",
+    "todo": "内側 RANGE で列を累積する。",
+    "id": "07-007"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 231,
+    "section": "#include <stdint.h>",
+    "todo": "内側 END の後、外側 END の前に行の出力を STORE する。",
+    "id": "07-008"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 232,
+    "section": "#include <stdint.h>",
+    "todo": "`[1,2,3,4,5,6]` の行和を `[6,15]` にする。",
+    "id": "07-009"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 233,
+    "section": "#include <stdint.h>",
+    "todo": "空の列数なら各行を `0` にする。",
+    "id": "07-010"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 305,
+    "section": "### コミット 3. 三重ループの手書き GEMM を動かす",
+    "todo": "`i`、`j`、`k` の三軸と row-major 添字を手で作る。",
+    "id": "07-011"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 306,
+    "section": "### コミット 3. 三重ループの手書き GEMM を動かす",
+    "todo": "各 `(i,j)` で accumulator をゼロへ戻す。",
+    "id": "07-012"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 307,
+    "section": "### コミット 3. 三重ループの手書き GEMM を動かす",
+    "todo": "reduction 軸 k の END の後に出力を STORE する。",
+    "id": "07-013"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 308,
+    "section": "### コミット 3. 三重ループの手書き GEMM を動かす",
+    "todo": "2×3 と 3×2 の入力を既存 CPU runtime で呼ぶ。",
+    "id": "07-014"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 309,
+    "section": "### コミット 3. 三重ループの手書き GEMM を動かす",
+    "todo": "ホストの独立した三重ループと結果を比較する。",
+    "id": "07-015"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 373,
+    "section": "### コミット 4. 二重ループの小さい convolution を動かす",
+    "todo": "出力位置 p と kernel 位置 k を RANGE で作る。",
+    "id": "07-016"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 374,
+    "section": "### コミット 4. 二重ループの小さい convolution を動かす",
+    "todo": "`x[p+k]*w[k]` を累積する。",
+    "id": "07-017"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 375,
+    "section": "### コミット 4. 二重ループの小さい convolution を動かす",
+    "todo": "`output_len=input_len-kernel_len+1` を checked 演算で求める。",
+    "id": "07-018"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 376,
+    "section": "### コミット 4. 二重ループの小さい convolution を動かす",
+    "todo": "`x=[1,2,3,4]`, `w=[2,1]` を `[4,7,10]` にする。",
+    "id": "07-019"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 377,
+    "section": "### コミット 4. 二重ループの小さい convolution を動かす",
+    "todo": "kernel が入力より長い場合を明確な未対応エラーにする。",
+    "id": "07-020"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 395,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "総和が `10`、行和が `[6,15]` になる。",
+    "id": "07-021"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 396,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "空の総和と列数 0 の行和が加算の初期値を返す。",
+    "id": "07-022"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 397,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "GEMM が `[[22,28],[49,64]]`、convolution が `[4,7,10]` になる。",
+    "id": "07-023"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 398,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump に高水準 REDUCE がなく、累積を行う LOAD と STORE がある。",
+    "id": "07-024"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 399,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "accumulator の初期化が正しい外側 region にある。",
+    "id": "07-025"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 400,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "入力を変えた二回目の run でも前回の accumulator が残らない。",
+    "id": "07-026"
+  },
+  {
+    "file": "docs/07-scalar-reductions.md",
+    "line": 401,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "一般 f32 は前章までの予定許容誤差で interpreter と CPU を比較する。",
+    "id": "07-027"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 160,
+    "section": "### コミット 1. shape 付き加算一つを既存 kernel へ落とす",
+    "todo": "shape を scalar と rank 1 に限定して導出する。",
+    "id": "08-001"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 161,
+    "section": "### コミット 1. shape 付き加算一つを既存 kernel へ落とす",
+    "todo": "同じ長さの入力二つから output RANGE を作る。",
+    "id": "08-002"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 162,
+    "section": "### コミット 1. shape 付き加算一つを既存 kernel へ落とす",
+    "todo": "ALU の座標を入力へ伝え、INDEX と LOAD を生成する。",
+    "id": "08-003"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 163,
+    "section": "### コミット 1. shape 付き加算一つを既存 kernel へ落とす",
+    "todo": "高水準加算から `[1,2,3]+[10,20,30]=[11,22,33]` を得る。",
+    "id": "08-004"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 164,
+    "section": "### コミット 1. shape 付き加算一つを既存 kernel へ落とす",
+    "todo": "長さ不一致を kernel 生成前に拒否する。",
+    "id": "08-005"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 266,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "scalar と長さ 1 の入力に EXPAND を加える。",
+    "id": "08-006"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 267,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "入力の singleton 座標を 0 にする。",
+    "id": "08-007"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 268,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "MUL の出力を新規 buffer に保存し、次の ADD が読むようにする。",
+    "id": "08-008"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 269,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "`x*2+1` を `[3,5,7]` にする。",
+    "id": "08-009"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 270,
+    "section": "#[derive(Clone,Copy)]",
+    "todo": "`[1]` の bias `[10]` を展開し、`x+b` を `[11,12,13]` にする。",
+    "id": "08-010"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 338,
+    "section": "### コミット 3. REDUCE ADD を累積ループへ変換する",
+    "todo": "REDUCE の入力 shape と出力 scalar を検証する。",
+    "id": "08-011"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 339,
+    "section": "### コミット 3. REDUCE ADD を累積ループへ変換する",
+    "todo": "reduction 軸 k と accumulator の初期化を生成する。",
+    "id": "08-012"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 340,
+    "section": "### コミット 3. REDUCE ADD を累積ループへ変換する",
+    "todo": "前章の逐次累積と同じ低水準 IR へ変換する。",
+    "id": "08-013"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 341,
+    "section": "### コミット 3. REDUCE ADD を累積ループへ変換する",
+    "todo": "`[1,2,3]` の総和を `6` にする。",
+    "id": "08-014"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 342,
+    "section": "### コミット 3. REDUCE ADD を累積ループへ変換する",
+    "todo": "`sum(x*2)` を中間 MUL と別 reduction kernel で `12` にする。",
+    "id": "08-015"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 418,
+    "section": "#[derive(Clone,PartialEq,Eq,Hash)]",
+    "todo": "REDUCE MAX の初期値を f32 の負の無限大にする。",
+    "id": "08-016"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 419,
+    "section": "#[derive(Clone,PartialEq,Eq,Hash)]",
+    "todo": "第三章の MAX の特殊値契約を interpreter と C で維持する。",
+    "id": "08-017"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 420,
+    "section": "#[derive(Clone,PartialEq,Eq,Hash)]",
+    "todo": "`max([-5,-2,-7])=-2` を既存 CPU 経路で実行する。",
+    "id": "08-018"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 421,
+    "section": "#[derive(Clone,PartialEq,Eq,Hash)]",
+    "todo": "同じノードを二つの出力 RANGE から lower する fixture を作る。",
+    "id": "08-019"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 422,
+    "section": "#[derive(Clone,PartialEq,Eq,Hash)]",
+    "todo": "軸の漏れ、違う座標の誤共有、scalar の保存長の誤りを検証する。",
+    "id": "08-020"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 439,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "高水準の `x*2+1` が `[3,5,7]` になる。",
+    "id": "08-021"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 440,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "affine の実行 kernel は二つで、中間 buffer が一つある。",
+    "id": "08-022"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 441,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "総和が `6`、`sum(x*2)` が `12`、MAX が `-2` になる。",
+    "id": "08-023"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 442,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "scalar の出力 storage は一要素、shape は `[]` になる。",
+    "id": "08-024"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 443,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "backend 入力に EXPAND と高水準 REDUCE が残らない。",
+    "id": "08-025"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 444,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "各 kernel の RANGE は閉じ、INDEX はその kernel の座標を使う。",
+    "id": "08-026"
+  },
+  {
+    "file": "docs/08-shapes-rangeify.md",
+    "line": 445,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "shape 不一致と不正 EXPAND は実行前にエラーになる。",
+    "id": "08-027"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 152,
+    "section": "### コミット 1. 単一消費先の要素演算を融合する",
+    "todo": "元グラフから consumer 数を集める。",
+    "id": "09-001"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 153,
+    "section": "### コミット 1. 単一消費先の要素演算を融合する",
+    "todo": "単一消費先の ADD と MUL の境界を materialize しない。",
+    "id": "09-002"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 154,
+    "section": "### コミット 1. 単一消費先の要素演算を融合する",
+    "todo": "lower で同じ出力座標を producer へ伝える。",
+    "id": "09-003"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 155,
+    "section": "### コミット 1. 単一消費先の要素演算を融合する",
+    "todo": "`(x+1)*2` を単一 kernel で `[4,6,8]` にする。",
+    "id": "09-004"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 156,
+    "section": "### コミット 1. 単一消費先の要素演算を融合する",
+    "todo": "前章の非融合経路とも出力を比較する。",
+    "id": "09-005"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 247,
+    "section": "### コミット 2. reduction の入力側を融合する",
+    "todo": "`sum(x*w+1)` の reduction 座標を要素演算へ伝える。",
+    "id": "09-006"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 248,
+    "section": "### コミット 2. reduction の入力側を融合する",
+    "todo": "reduction の外側出力と内側 k のスコープを区別する。",
+    "id": "09-007"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 249,
+    "section": "### コミット 2. reduction の入力側を融合する",
+    "todo": "LOAD、MUL、ADD、accumulator 更新を同じ body に作る。",
+    "id": "09-008"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 250,
+    "section": "### コミット 2. reduction の入力側を融合する",
+    "todo": "`x=[1,2,3,4]`, `w=[2,3,4,5]` の結果を `44` にする。",
+    "id": "09-009"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 251,
+    "section": "### コミット 2. reduction の入力側を融合する",
+    "todo": "入力側の一時配列がなく、一つの reduction kernel になることを確認する。",
+    "id": "09-010"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 321,
+    "section": "### コミット 3. STAGE と複数消費先を実際に分割する",
+    "todo": "明示 STAGE を非融合境界として扱う。",
+    "id": "09-011"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 322,
+    "section": "### コミット 3. STAGE と複数消費先を実際に分割する",
+    "todo": "producer の出力を ALLOC、STORE、AFTER に変える。",
+    "id": "09-012"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 323,
+    "section": "### コミット 3. STAGE と複数消費先を実際に分割する",
+    "todo": "consumer が新しい PARAM から保存済みの値を読むようにする。",
+    "id": "09-013"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 324,
+    "section": "### コミット 3. STAGE と複数消費先を実際に分割する",
+    "todo": "`(STAGE(x+1))*2` を二 kernel で `[4,6,8]` にする。",
+    "id": "09-014"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 325,
+    "section": "### コミット 3. STAGE と複数消費先を実際に分割する",
+    "todo": "`t=x+1; y=t*2; z=t+3` を三 kernel で実行する。",
+    "id": "09-015"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 456,
+    "section": "### コミット 4. 閉じた kernel graph と Plan を動かす",
+    "todo": "各 body の外部 storage と scalar を PARAM に正規化する。",
+    "id": "09-016"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 457,
+    "section": "### コミット 4. 閉じた kernel graph と Plan を動かす",
+    "todo": "kernel の署名、CALL 引数、出力 state を照合する verifier を追加する。",
+    "id": "09-017"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 458,
+    "section": "### コミット 4. 閉じた kernel graph と Plan を動かす",
+    "todo": "producer と consumer の辺から実行順を作り、循環なら拒否する。",
+    "id": "09-018"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 459,
+    "section": "### コミット 4. 閉じた kernel graph と Plan を動かす",
+    "todo": "既存の CPU compile と run を Plan の kernel 列へ接続する。",
+    "id": "09-019"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 460,
+    "section": "### コミット 4. 閉じた kernel graph と Plan を動かす",
+    "todo": "同じ Plan に新しい重みを渡して、二回目の出力を確認する。",
+    "id": "09-020"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 538,
+    "section": "### コミット 5. 分割の漏れと古い実体化の再利用を検出する",
+    "todo": "body の未束縛 PARAM、自由 RANGE、STORE 先の漏れを拒否する。",
+    "id": "09-021"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 539,
+    "section": "### コミット 5. 分割の漏れと古い実体化の再利用を検出する",
+    "todo": "外側 kernel の NodeId が body に直接残った例を拒否する。",
+    "id": "09-022"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 540,
+    "section": "### コミット 5. 分割の漏れと古い実体化の再利用を検出する",
+    "todo": "二つの違う座標で同じ producer を使う fixture を実行する。",
+    "id": "09-023"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 541,
+    "section": "### コミット 5. 分割の漏れと古い実体化の再利用を検出する",
+    "todo": "元グラフを run の前後で dump し、構造が変わらないことを確認する。",
+    "id": "09-024"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 542,
+    "section": "### コミット 5. 分割の漏れと古い実体化の再利用を検出する",
+    "todo": "入力の長さと dtype が署名と違う場合、実行開始前に拒否する。",
+    "id": "09-025"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 560,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "chain は一 kernel、STAGE は二 kernel、fanout は三 kernel になる。",
+    "id": "09-026"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 561,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "非融合と融合の値が `[4,6,8]` で一致する。",
+    "id": "09-027"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 562,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "fanout の二出力が `[4,6,8]` と `[5,6,7]` になる。",
+    "id": "09-028"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 563,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同じ Plan の再実行で `44` から `14` へ変わり、再コンパイルしない。",
+    "id": "09-029"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 564,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "閉じた body に未束縛の storage と RANGE が残らない。",
+    "id": "09-030"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 565,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump で各 consumer が producer 完了後の state を読む。",
+    "id": "09-031"
+  },
+  {
+    "file": "docs/09-fusion-fission.md",
+    "line": 566,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "純粋な元グラフが run 前後で同じ構造を保つ。",
+    "id": "09-032"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 197,
+    "section": "### 1. 二次元の加算と broadcast を実行する",
+    "todo": "出力の二次元 RANGE と row-major の平坦化を追加する。",
+    "id": "10-001"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 198,
+    "section": "### 1. 二次元の加算と broadcast を実行する",
+    "todo": "shape を右揃えし、入力側の長さ 1 の軸を座標 0 にする。",
+    "id": "10-002"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 199,
+    "section": "### 1. 二次元の加算と broadcast を実行する",
+    "todo": "`[2,3] + [3]` と `[2,1] + [1,3]` を CPU で実行する。",
+    "id": "10-003"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 200,
+    "section": "### 1. 二次元の加算と broadcast を実行する",
+    "todo": "`[2,3] + [2]` は broadcast 不成立として codegen 前に拒否する。",
+    "id": "10-004"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 295,
+    "section": "### 2. reshape と permute を合成する",
+    "todo": "要素数が等しい reshape だけを受け付ける。",
+    "id": "10-005"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 296,
+    "section": "### 2. reshape と permute を合成する",
+    "todo": "permute の軸が重複せず、全軸を一度ずつ含むことを検証する。",
+    "id": "10-006"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 297,
+    "section": "### 2. reshape と permute を合成する",
+    "todo": "論理的な平坦化と座標の復元を rangeify に追加する。",
+    "id": "10-007"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 298,
+    "section": "### 2. reshape と permute を合成する",
+    "todo": "転置後の reshape を CPU 実行し、連続化した場合とも比較する。",
+    "id": "10-008"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 372,
+    "section": "### 3. shrink と安全な pad を実行する",
+    "todo": "shrink の半開区間 `start..end` を入力側の offset に変換する。",
+    "id": "10-009"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 373,
+    "section": "### 3. shrink と安全な pad を実行する",
+    "todo": "`0 <= start <= end <= input_size` を各軸で検証する。",
+    "id": "10-010"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 374,
+    "section": "### 3. shrink と安全な pad を実行する",
+    "todo": "pad の有効条件と、条件成立時だけ実行する LOAD を生成する。",
+    "id": "10-011"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 375,
+    "section": "### 3. shrink と安全な pad を実行する",
+    "todo": "pad の外側はゼロを返し、無効なポインタへの LOAD を作らない。",
+    "id": "10-012"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 376,
+    "section": "### 3. shrink と安全な pad を実行する",
+    "todo": "非対称 pad と shrink の合成を interpreter と生成 C で照合する。",
+    "id": "10-013"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 451,
+    "section": "### 4. flip と stack を同じ経路に通す",
+    "todo": "flip の座標を `size-1-coordinate` にする。",
+    "id": "10-014"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 452,
+    "section": "### 4. flip と stack を同じ経路に通す",
+    "todo": "flip の軸の範囲と重複を検証する。",
+    "id": "10-015"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 453,
+    "section": "### 4. flip と stack を同じ経路に通す",
+    "todo": "stack の先頭座標で入力を選び、残りの座標を各入力に渡す。",
+    "id": "10-016"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 454,
+    "section": "### 4. flip と stack を同じ経路に通す",
+    "todo": "入力選択の分岐内だけで該当入力を LOAD する。",
+    "id": "10-017"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 455,
+    "section": "### 4. flip と stack を同じ経路に通す",
+    "todo": "shape が異なる stack と、未知の軸指定を拒否する。",
+    "id": "10-018"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 474,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "整数で表せる上記の期待値は `f32` でも厳密に一致する。",
+    "id": "10-019"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 475,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "kernel IR に抽象 movement が残らず、添字式と条件付き LOAD になる。",
+    "id": "10-020"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 476,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "元グラフの movement ノードは実行後にも残る。",
+    "id": "10-021"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 477,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "`tests/movement.rs` に不正 shape、軸重複、負の区間の拒否例を追加する。",
+    "id": "10-022"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 478,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同じ NodeId を異なる座標で読む例が、順序と値の両方で正しい。",
+    "id": "10-023"
+  },
+  {
+    "file": "docs/10-movement.md",
+    "line": 479,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "空の reshape、permute、shrink はメモリアクセスとゼロ除算を起こさない。",
+    "id": "10-024"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 165,
+    "section": "#[derive(Clone)]",
+    "todo": "PARAM とホスト配列を結び付ける Tensor のコンストラクタを追加する。",
+    "id": "11-001"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 166,
+    "section": "#[derive(Clone)]",
+    "todo": "`add`、`mul`、`sum`、movement のメソッドを graph builder に委譲する。",
+    "id": "11-002"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 167,
+    "section": "#[derive(Clone)]",
+    "todo": "`Tensor` 演算内で暗黙にコンパイルや実行を始めない。",
+    "id": "11-003"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 168,
+    "section": "#[derive(Clone)]",
+    "todo": "graph を出力してから compile し、既存の CPU runtime で実行する。",
+    "id": "11-004"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 248,
+    "section": "### 2. rank 2 の matmul を合成して実行する",
+    "todo": "縮約次元 K の一致を検証する。",
+    "id": "11-005"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 249,
+    "section": "### 2. rank 2 の matmul を合成して実行する",
+    "todo": "上記の reshape、permute、MUL、SUM の式を Tensor メソッドで作る。",
+    "id": "11-006"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 250,
+    "section": "### 2. rank 2 の matmul を合成して実行する",
+    "todo": "出力の shape `[M,N]` と累積の初期化位置を確認する。",
+    "id": "11-007"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 251,
+    "section": "### 2. rank 2 の matmul を合成して実行する",
+    "todo": "手書きの三重ループと `M=2,N=2,K=3` の結果を比較する。",
+    "id": "11-008"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 252,
+    "section": "### 2. rank 2 の matmul を合成して実行する",
+    "todo": "同じ A を転置ありと転置なしで読む式を別々の添字で下げる。",
+    "id": "11-009"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 333,
+    "section": "### 3. 小さな窓を作って conv を実行する",
+    "todo": "`KH,KW` 個の SHRINK と STACK で窓を組み立てる。",
+    "id": "11-010"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 334,
+    "section": "### 3. 小さな窓を作って conv を実行する",
+    "todo": "座標順を明示し、window の shape を dump に出す。",
+    "id": "11-011"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 335,
+    "section": "### 3. 小さな窓を作って conv を実行する",
+    "todo": "窓と重みの積を `C,KH,KW` について縮約する。",
+    "id": "11-012"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 336,
+    "section": "### 3. 小さな窓を作って conv を実行する",
+    "todo": "出力の保存順を NCHW にそろえる。",
+    "id": "11-013"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 337,
+    "section": "### 3. 小さな窓を作って conv を実行する",
+    "todo": "手書き conv の参照ループをテスト側に置いて比較する。",
+    "id": "11-014"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 413,
+    "section": "### 4. bias と zero padding を合成する",
+    "todo": "conv の前に PAD を挿入し、出力 shape の計算に反映する。",
+    "id": "11-015"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 414,
+    "section": "### 4. bias と zero padding を合成する",
+    "todo": "channel ごとの bias `[O]` を reshape して加算する。",
+    "id": "11-016"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 415,
+    "section": "### 4. bias と zero padding を合成する",
+    "todo": "matmul の後の bias と同じ broadcast 規則を使う。",
+    "id": "11-017"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 416,
+    "section": "### 4. bias と zero padding を合成する",
+    "todo": "stride、dilation、groups の未対応値を明示的に拒否する。",
+    "id": "11-018"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 417,
+    "section": "### 4. bias と zero padding を合成する",
+    "todo": "pad の外側を読む可能性がある LOAD を分岐内へ保持する。",
+    "id": "11-019"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 436,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "予定例の期待値が一致し、手書きループとも一致する。",
+    "id": "11-020"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 437,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "graph に matmul と conv 専用の実行器への抜け道がない。",
+    "id": "11-021"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 438,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "reduction の初期化が出力要素ごとに一回だけ実行される。",
+    "id": "11-022"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 439,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "学習用重みを CONST として intern せず、入力値を差し替えられる。",
+    "id": "11-023"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 440,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "非正方行列、複数 channel、複数 output channel の小例を固定値で比較する。",
+    "id": "11-024"
+  },
+  {
+    "file": "docs/11-tensor-gemm-conv.md",
+    "line": 441,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "graph、schedule、生成 C の順序から同じ計算であると追える。",
+    "id": "11-025"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 159,
+    "section": "#include <stdint.h>",
+    "todo": "SQRT の dtype と入力数を verifier に追加する。",
+    "id": "12-001"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 160,
+    "section": "#include <stdint.h>",
+    "todo": "interpreter と C renderer の sqrt をそろえる。",
+    "id": "12-002"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 161,
+    "section": "#include <stdint.h>",
+    "todo": "コンパイルされた共有ライブラリから sqrtf を解決できるようにする。",
+    "id": "12-003"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 162,
+    "section": "#include <stdint.h>",
+    "todo": "通常値、-0、負値、Inf、NaN を分類して比較する。",
+    "id": "12-004"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 238,
+    "section": "#include <math.h>",
+    "todo": "SIN、LOG2、EXP2 を elementwise として rangeify に通す。",
+    "id": "12-005"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 239,
+    "section": "#include <math.h>",
+    "todo": "C 側を sinf、log2f、exp2f に下げる。",
+    "id": "12-006"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 240,
+    "section": "#include <math.h>",
+    "todo": "`exp` と自然対数を定数の積と既存 UOp の合成で追加する。",
+    "id": "12-007"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 241,
+    "section": "#include <math.h>",
+    "todo": "特殊値の期待する分類と定義域を API の説明に書く。",
+    "id": "12-008"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 242,
+    "section": "#include <math.h>",
+    "todo": "`exp2(log2(x))` を正の小さい配列で実行する。",
+    "id": "12-009"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 348,
+    "section": "### 3. exp2 と log2 の範囲を縮めて多項式に下げる",
+    "todo": "exp2 は `x=q+r`、`r∈[-0.5,0.5]` に分けて Horner 形式で評価する。",
+    "id": "12-010"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 349,
+    "section": "### 3. exp2 と log2 の範囲を縮めて多項式に下げる",
+    "todo": "`2^q` の再構成を定義し、整数変換の範囲を検査する。",
+    "id": "12-011"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 350,
+    "section": "### 3. exp2 と log2 の範囲を縮めて多項式に下げる",
+    "todo": "log2 は `x=2^e*m` に分け、m を限られた区間に正規化する。",
+    "id": "12-012"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 351,
+    "section": "### 3. exp2 と log2 の範囲を縮めて多項式に下げる",
+    "todo": "係数、近似区間、次数、出典または係数生成方法を実装の近くに残す。",
+    "id": "12-013"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 352,
+    "section": "### 3. exp2 と log2 の範囲を縮めて多項式に下げる",
+    "todo": "各段階を UOp にして既存 rewrite と renderer へ通す。",
+    "id": "12-014"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 436,
+    "section": "### 4. sin の引数還元と近似を実行する",
+    "todo": "周期と象限を求め、短い区間へ還元して符号を復元する。",
+    "id": "12-015"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 437,
+    "section": "### 4. sin の引数還元と近似を実行する",
+    "todo": "区間内だけの奇多項式を Horner 形式で評価する。",
+    "id": "12-016"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 438,
+    "section": "### 4. sin の引数還元と近似を実行する",
+    "todo": "`|x|<=32` の境界、π の倍数、その両隣をテストする。",
+    "id": "12-017"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 439,
+    "section": "### 4. sin の引数還元と近似を実行する",
+    "todo": "大きな有限値と Inf、NaN を libm 経路に分岐する。",
+    "id": "12-018"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 440,
+    "section": "### 4. sin の引数還元と近似を実行する",
+    "todo": "高水準 SIN と近似展開後のグラフを両方 dump できるようにする。",
+    "id": "12-019"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 460,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "通常値の許容誤差と特殊値の分類を分けて判定する。",
+    "id": "12-020"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 461,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "sqrt(-0) の sign bit、log2(0) の -Inf、exp2(-Inf) の 0 を検査する。",
+    "id": "12-021"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 462,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "固定 seed の有限値集合と、区間境界の隣接 f32 を比較する。",
+    "id": "12-022"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 463,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "近似対象外の値を libm に戻す分岐が生成コードに残る。",
+    "id": "12-023"
+  },
+  {
+    "file": "docs/12-math-functions.md",
+    "line": 464,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "近似を選ばない既存 example の数値が変わらない。",
+    "id": "12-024"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 177,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "純粋な graph と target を受け取る gradient API を追加する。",
+    "id": "13-001"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 178,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "scalar seed と逆 topological walk を実装する。",
+    "id": "13-002"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 179,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "ADD の各入力に seed、MUL の各入力に他方との積を渡す。",
+    "id": "13-003"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 180,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "SUB の入力へ `(g,-g)`、NEG の入力へ `-g` を渡す。",
+    "id": "13-004"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 181,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "RECIP の入力へ `-g/(x*x)` を渡し、浮動小数点の除算を MUL と RECIP の合成にそろえる。",
+    "id": "13-005"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 182,
+    "section": "### 1. scalar の四則に必要な演算を微分して実行する",
+    "todo": "勾配の graph を通常の compile と Plan に渡す。",
+    "id": "13-006"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 271,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "複数経路からの勾配を同じ表へ ADD する。",
+    "id": "13-007"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 272,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "同じ shared node を一度だけ逆向きに処理する。",
+    "id": "13-008"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 273,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "DETACH の前向き値を維持し、入力への寄与を止める。",
+    "id": "13-009"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 274,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "非 scalar loss の seed が未指定、または shape 不一致なら拒否する。",
+    "id": "13-010"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 275,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "到達しない target と未対応演算のエラーを区別する。",
+    "id": "13-011"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 356,
+    "section": "### 3. SUM、broadcast、movement を逆にたどる",
+    "todo": "SUM の勾配を元の軸へ broadcast する。",
+    "id": "13-012"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 357,
+    "section": "### 3. SUM、broadcast、movement を逆にたどる",
+    "todo": "各 src への寄与を unbroadcast してから蓄積する。",
+    "id": "13-013"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 358,
+    "section": "### 3. SUM、broadcast、movement を逆にたどる",
+    "todo": "RESHAPE を入力 shape、PERMUTE を逆 permutation に戻す。",
+    "id": "13-014"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 359,
+    "section": "### 3. SUM、broadcast、movement を逆にたどる",
+    "todo": "SHRINK の逆を zero PAD、PAD の逆を SHRINK とする。",
+    "id": "13-015"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 360,
+    "section": "### 3. SUM、broadcast、movement を逆にたどる",
+    "todo": "FLIP の逆を同じ FLIP、STACK の逆を各入力への slice とする。",
+    "id": "13-016"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 437,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "RECIP を f32 の純粋演算として通し、微分を `-g*recip(x)*recip(x)` にする。",
+    "id": "13-017"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 438,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "SQRT の微分を `g/(2*sqrt(x))` として作る。",
+    "id": "13-018"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 439,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "SIN の微分を `g*sin(π/2-x)` として作る。",
+    "id": "13-019"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 440,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "LOG2 の微分を `g/(x*ln(2))`、EXP2 を `g*exp2(x)*ln(2)` にする。",
+    "id": "13-020"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 441,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "近似展開より前に微分し、数学関数単位の規則を適用する。",
+    "id": "13-021"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 518,
+    "section": "### 5. 有限差分と既存 pipeline の両方で検証する",
+    "todo": "テスト側に中央差分 `(f(x+h)-f(x-h))/(2*h)` を追加する。",
+    "id": "13-022"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 519,
+    "section": "### 5. 有限差分と既存 pipeline の両方で検証する",
+    "todo": "`h=1e-3` と `h=5e-4` の両方で極端に不安定な点を除いて比較する。",
+    "id": "13-023"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 520,
+    "section": "### 5. 有限差分と既存 pipeline の両方で検証する",
+    "todo": "scalar、共有枝、broadcast、movement、matmul の重みを小例で検査する。",
+    "id": "13-024"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 521,
+    "section": "### 5. 有限差分と既存 pipeline の両方で検証する",
+    "todo": "libm モードを基準にし、近似モードの誤差を微分器の誤りと分ける。",
+    "id": "13-025"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 541,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "勾配の出力 shape が target と一致し、共有枝の寄与が欠落しない。",
+    "id": "13-026"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 542,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "backward 用の独立した数値実行器を作らず、生成 C を実行する。",
+    "id": "13-027"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 543,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "graph dump に元の前向きと新しい勾配の両方が残る。",
+    "id": "13-028"
+  },
+  {
+    "file": "docs/13-autodiff.md",
+    "line": 544,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "DETACH と gradient の要求が backend 入力に残らない。",
+    "id": "13-029"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 168,
+    "section": "### 1. 線形回帰の一回の更新を実行する",
+    "todo": "パラメータのスロット番号とホスト配列を対応させる。",
+    "id": "14-001"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 169,
+    "section": "### 1. 線形回帰の一回の更新を実行する",
+    "todo": "scalar の平均二乗誤差を作り、w の gradient を compile する。",
+    "id": "14-002"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 170,
+    "section": "### 1. 線形回帰の一回の更新を実行する",
+    "todo": "SGD のホスト更新と、新しい入力バッファの bind を実装する。",
+    "id": "14-003"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 171,
+    "section": "### 1. 線形回帰の一回の更新を実行する",
+    "todo": "compiler 呼出し回数と Plan 実行回数を表示する。",
+    "id": "14-004"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 262,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "比較と WHERE を追加し、WHERE の値側の枝にだけ勾配を伝える。",
+    "id": "14-005"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 263,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "ReLU を WHERE で作り、正の枝だけに勾配を伝える。",
+    "id": "14-006"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 264,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "`[2,2] → [2,2] → [2,2]` の小型 fixture で MLP を組む。",
+    "id": "14-007"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 265,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "初期重みを明示配列にし、最初の loss と gradient を記録する。",
+    "id": "14-008"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 266,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "bias の unbroadcast がバッチ方向を足し戻すことを確認する。",
+    "id": "14-009"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 267,
+    "section": "### 2. 小さな MLP の前向きと更新を実行する",
+    "todo": "更新後の loss を同じ Plan で再実行する。",
+    "id": "14-010"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 372,
+    "section": "### 3. IDX fixture と MNIST のローカル読込みを実行する",
+    "todo": "`tests/fixtures` に合成した 2 件の 28×28 IDX を作る手順を置く。",
+    "id": "14-011"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 373,
+    "section": "### 3. IDX fixture と MNIST のローカル読込みを実行する",
+    "todo": "最初の画像は全 0、次は全 255、ラベルは `[0,1]` とする。",
+    "id": "14-012"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 374,
+    "section": "### 3. IDX fixture と MNIST のローカル読込みを実行する",
+    "todo": "header を検証して、正規化後の全 0 と全 1 を確認する。",
+    "id": "14-013"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 375,
+    "section": "### 3. IDX fixture と MNIST のローカル読込みを実行する",
+    "todo": "不正 magic、短い payload、件数不一致を専用エラーにする。",
+    "id": "14-014"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 376,
+    "section": "### 3. IDX fixture と MNIST のローカル読込みを実行する",
+    "todo": "実データのファイルパスと subset 件数を CLI から受け取る。",
+    "id": "14-015"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 461,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "MAX reduction、比較、WHERE を interpreter と C renderer に通す。",
+    "id": "14-016"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 462,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "log-softmax と one-hot cross entropy を既存数学関数から合成する。",
+    "id": "14-017"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 463,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "`logits=[1000,1000]` の loss が `ln(2)` になることを確認する。",
+    "id": "14-018"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 464,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "MNIST の先頭 128 件、batch=16、固定初期値で 20 step を実行する。",
+    "id": "14-019"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 465,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "初期化 seed、学習率、subset、バッチ順、数学モードをログに残す。",
+    "id": "14-020"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 466,
+    "section": "### 4. stable cross entropy と固定 subset 学習を実行する",
+    "todo": "test subset を学習から除き、評価の損失と正解率を別に表示する。",
+    "id": "14-021"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 487,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "fixture のテストはネットワークと外部 MNIST を必要としない。",
+    "id": "14-022"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 488,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同じ環境、同じ seed で loss と重み更新を許容誤差内で再現する。",
+    "id": "14-023"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 489,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "前向きと backward の graph が実行後にも残る。",
+    "id": "14-024"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 490,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "Plan の再利用中に重みの差替えが結果へ反映される。",
+    "id": "14-025"
+  },
+  {
+    "file": "docs/14-sgd-mnist.md",
+    "line": 491,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "非有限な loss が出た step を表示し、成功として扱わない。",
+    "id": "14-026"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 238,
+    "section": "#include <metal_stdlib>",
+    "todo": "利用可能な Metal device を検出し、未対応時の明示的エラーを作る。",
+    "id": "15-001"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 239,
+    "section": "#include <metal_stdlib>",
+    "todo": "静的 f32 の加算用 MSL を共通 kernel IR から生成する。",
+    "id": "15-002"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 240,
+    "section": "#include <metal_stdlib>",
+    "todo": "公開 API で library と pipeline を作り、build error を返す。",
+    "id": "15-003"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 241,
+    "section": "#include <metal_stdlib>",
+    "todo": "shared buffer の入力を書き、4 thread を dispatch する。",
+    "id": "15-004"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 242,
+    "section": "#include <metal_stdlib>",
+    "todo": "完了待ち後に出力を読み、CPU の値と比較する。",
+    "id": "15-005"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 344,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "groups を `ceil(N/L)` で計算し、掛算 overflow を検査する。",
+    "id": "15-006"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 345,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "`i<N` の内側に LOAD と STORE の両方を置く。",
+    "id": "15-007"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 346,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "device と pipeline の上限を使って local size を検証する。",
+    "id": "15-008"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 347,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "N=1、L-1、L、L+1、257 を同じ lowering で実行する。",
+    "id": "15-009"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 348,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "N=0 は host 側で空出力を返し、ゼロ個の group を dispatch しない。",
+    "id": "15-010"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 349,
+    "section": "#[cfg(not(target_os = \"macos\"))]",
+    "todo": "Plan の入力 buffer を差し替えて再実行する。",
+    "id": "15-011"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 448,
+    "section": "#include <metal_stdlib>",
+    "todo": "出力の平坦 ID を多次元座標へ復元する。",
+    "id": "15-012"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 449,
+    "section": "#include <metal_stdlib>",
+    "todo": "movement と broadcast を CPU と同じ座標変換から生成する。",
+    "id": "15-013"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 450,
+    "section": "#include <metal_stdlib>",
+    "todo": "pad の有効条件が成立した場合だけ device buffer を LOAD する。",
+    "id": "15-014"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 451,
+    "section": "#include <metal_stdlib>",
+    "todo": "無効 LOAD の値を事後に WHERE で隠す実装を拒否する。",
+    "id": "15-015"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 452,
+    "section": "#include <metal_stdlib>",
+    "todo": "CPU、interpreter、Metal の三つの値を比較する。",
+    "id": "15-016"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 554,
+    "section": "#include <metal_stdlib>",
+    "todo": "一つの thread が一行を担当し、列方向を逐次累積する。",
+    "id": "15-017"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 555,
+    "section": "#include <metal_stdlib>",
+    "todo": "matmul は一つの thread が一出力 `(m,n)` を担当する。",
+    "id": "15-018"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 556,
+    "section": "#include <metal_stdlib>",
+    "todo": "reduction の初期値を各 thread のローカル変数に置く。",
+    "id": "15-019"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 557,
+    "section": "#include <metal_stdlib>",
+    "todo": "CPU と同じ shape graph から reduction と matmul を作る。",
+    "id": "15-020"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 558,
+    "section": "#include <metal_stdlib>",
+    "todo": "小型 MLP の前向きと勾配にも同じ backend を選べるようにする。",
+    "id": "15-021"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 578,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "CPU 用テストは Metal がない環境でも実行できる。",
+    "id": "15-022"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 579,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "未対応機器の skip を、実機の数値比較成功として報告しない。",
+    "id": "15-023"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 580,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "GPU の build error と command buffer の実行エラーを別々に伝える。",
+    "id": "15-024"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 581,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "結果を読む前の完了待ちとリソースの寿命が runtime に集約される。",
+    "id": "15-025"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 582,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "MSL に未対応 UOp が残る場合はコンパイル前に拒否する。",
+    "id": "15-026"
+  },
+  {
+    "file": "docs/15-metal.md",
+    "line": 583,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "空の加算をテストし、Metal 呼出しなしで空の結果を得る。",
+    "id": "15-027"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 222,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "platform と device を列挙し、明示指定できる入口を追加する。",
+    "id": "16-001"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 223,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "f32 加算の kernel source を共通 IR から生成する。",
+    "id": "16-002"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 224,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "program build と kernel 作成、buffer の bind を実装する。",
+    "id": "16-003"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 225,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "入力転送、NDRange、同期読出しを一巡させる。",
+    "id": "16-004"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 226,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "各 OpenCL エラーに API 名と戻り値を含める。",
+    "id": "16-005"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 319,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "共通 launch から global_work_size を計算する関数を作る。",
+    "id": "16-006"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 320,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "N=257、local=64 では global=320 を渡す。",
+    "id": "16-007"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 321,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "`i<N` の内側でだけ LOAD と STORE を実行する。",
+    "id": "16-008"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 322,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "N=1、L-1、L、L+1 を CPU と比較する。",
+    "id": "16-009"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 323,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "N=0 は host 側で空出力を返し、ゼロサイズ NDRange を投入しない。",
+    "id": "16-010"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 324,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "local size が機器の上限を越えたら起動前に拒否する。",
+    "id": "16-011"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 427,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "二次元の平坦 ID を shape の座標へ戻す。",
+    "id": "16-012"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 428,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "broadcast、転置後 reshape、shrink、pad を共通 lowering から生成する。",
+    "id": "16-013"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 429,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "pad の LOAD 自体を有効条件の分岐内に置く。",
+    "id": "16-014"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 430,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "SQRT、SIN、LOG2、EXP2 を OpenCL の通常の数学関数へ下げる。",
+    "id": "16-015"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 431,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "native 高速近似関数は明示的な別モードにする。",
+    "id": "16-016"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 517,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "一つの work item に一行の逐次 SUM を担当させる。",
+    "id": "16-017"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 518,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "matmul の出力 `(m,n)` を一つの work item に割り当てる。",
+    "id": "16-018"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 519,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "reduction の累積を work item ごとに初期化する。",
+    "id": "16-019"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 520,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "CPU と OpenCL の出力、勾配を小さい固定値で比較する。",
+    "id": "16-020"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 521,
+    "section": "# Cargo.toml（このexampleの登録）",
+    "todo": "新しい重みを同じ Plan の入力 slot に渡して再実行する。",
+    "id": "16-021"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 541,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "in-order queue で前の転送と kernel の順序が守られる。",
+    "id": "16-022"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 542,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "非同期 read を開始しただけの値を、完了した値として返さない。",
+    "id": "16-023"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 543,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "device の不在、build 失敗、起動失敗を別々の診断にする。",
+    "id": "16-024"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 544,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "機器がないときは source 検査と未実施の実機項目を分けて記録する。",
+    "id": "16-025"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 545,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "runtime の API 呼出し以外に OpenCL 固有のロジックを広げない。",
+    "id": "16-026"
+  },
+  {
+    "file": "docs/16-opencl.md",
+    "line": 546,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "空の加算をテストし、NDRange の投入なしで空の結果を得る。",
+    "id": "16-027"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 177,
+    "section": "### 1. 端数を持つ loop split を実行する",
+    "todo": "`i=outer*tile+inner` への置換を kernel IR に追加する。",
+    "id": "17-001"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 178,
+    "section": "### 1. 端数を持つ loop split を実行する",
+    "todo": "outer の範囲を切上げ、元範囲の guard を作る。",
+    "id": "17-002"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 179,
+    "section": "### 1. 端数を持つ loop split を実行する",
+    "todo": "無効な要素の LOAD と STORE を guard の内側に置く。",
+    "id": "17-003"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 180,
+    "section": "### 1. 端数を持つ loop split を実行する",
+    "todo": "tile=0、負値、添字の overflow を起動前に拒否する。",
+    "id": "17-004"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 181,
+    "section": "### 1. 端数を持つ loop split を実行する",
+    "todo": "split 前と split 後を同じ入力で実行する。",
+    "id": "17-005"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 257,
+    "section": "### 2. 安全な loop interchange と小さい unroll を実行する",
+    "todo": "独立した出力軸の順序を入れ替える変換を追加する。",
+    "id": "17-006"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 258,
+    "section": "### 2. 安全な loop interchange と小さい unroll を実行する",
+    "todo": "reduction 軸の再順序化は初版では明示的に禁止する。",
+    "id": "17-007"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 259,
+    "section": "### 2. 安全な loop interchange と小さい unroll を実行する",
+    "todo": "小さい inner RANGE を定数座標ごとに複製する。",
+    "id": "17-008"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 260,
+    "section": "### 2. 安全な loop interchange と小さい unroll を実行する",
+    "todo": "RANGE とローカル変数を複製先の scope ごとに作り直す。",
+    "id": "17-009"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 261,
+    "section": "### 2. 安全な loop interchange と小さい unroll を実行する",
+    "todo": "展開後にも tail guard と累積の初期化位置を維持する。",
+    "id": "17-010"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 342,
+    "section": "#include <string.h>",
+    "todo": "UPCAST 軸を固定個数の scalar 値へ展開する。",
+    "id": "17-011"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 343,
+    "section": "#include <string.h>",
+    "todo": "連続した width=4 の f32 を vector 型へまとめる変換を別に追加する。",
+    "id": "17-012"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 344,
+    "section": "#include <string.h>",
+    "todo": "vector LOAD/STORE の合法性を調べ、misalignment には安全な方法を使う。",
+    "id": "17-013"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 345,
+    "section": "#include <string.h>",
+    "todo": "端数は scalar loop に残し、full vector の範囲外 LOAD を避ける。",
+    "id": "17-014"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 346,
+    "section": "#include <string.h>",
+    "todo": "vector 非対応 backend は scalar へ戻す。",
+    "id": "17-015"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 447,
+    "section": "### 4. CPU の出力を複数 worker に分けて実行する",
+    "todo": "CPU runtime に固定数の worker と join を追加する。",
+    "id": "17-016"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 448,
+    "section": "### 4. CPU の出力を複数 worker に分けて実行する",
+    "todo": "出力区間を重複と欠落がないように分割する。",
+    "id": "17-017"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 449,
+    "section": "### 4. CPU の出力を複数 worker に分けて実行する",
+    "todo": "区間の begin/end と引数表を worker ごとに持つ。",
+    "id": "17-018"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 450,
+    "section": "### 4. CPU の出力を複数 worker に分けて実行する",
+    "todo": "worker が同じ compiler やキャッシュへ同時に書かないよう、compile を先に完了する。",
+    "id": "17-019"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 451,
+    "section": "### 4. CPU の出力を複数 worker に分けて実行する",
+    "todo": "thread 数 1、2、3、出力数より多い場合を比較する。",
+    "id": "17-020"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 536,
+    "section": "### 5. capability と変換ごとの比較をそろえる",
+    "todo": "backend ごとに vector 幅、CPU thread、LOCAL、shared memory の可否を明示する。",
+    "id": "17-021"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 537,
+    "section": "### 5. capability と変換ごとの比較をそろえる",
+    "todo": "未対応変換を黙って別の意味で実行しない。",
+    "id": "17-022"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 538,
+    "section": "### 5. capability と変換ごとの比較をそろえる",
+    "todo": "split、unroll、vector、thread を単独で検証した後に組み合わせる。",
+    "id": "17-023"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 539,
+    "section": "### 5. capability と変換ごとの比較をそろえる",
+    "todo": "compile、転送、実行、同期を別に測れる計測点だけを追加する。",
+    "id": "17-024"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 560,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "split と unroll の後にも scope と buffer 境界の verifier が通る。",
+    "id": "17-025"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 561,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "未対応 vector の fallback と CPU thread 数 1 が基準版と一致する。",
+    "id": "17-026"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 562,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "出力ごとの所有区間が明確で、reduction の累積を共有しない。",
+    "id": "17-027"
+  },
+  {
+    "file": "docs/17-loop-optimizations.md",
+    "line": 563,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "GPU local と CPU worker の capability を独立して表示する。",
+    "id": "17-028"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 189,
+    "section": "### 1. LOCAL へ部分和を書き、lane 0 がまとめる",
+    "todo": "LOCAL storage と BARRIER を verifier、linearize、renderer に追加する。",
+    "id": "18-001"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 190,
+    "section": "### 1. LOCAL へ部分和を書き、lane 0 がまとめる",
+    "todo": "各 lane が `col=chunk*L+lane` の部分和を逐次計算する。",
+    "id": "18-002"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 191,
+    "section": "### 1. LOCAL へ部分和を書き、lane 0 がまとめる",
+    "todo": "全 lane が LOCAL の自分の位置に一つ書く。",
+    "id": "18-003"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 192,
+    "section": "### 1. LOCAL へ部分和を書き、lane 0 がまとめる",
+    "todo": "barrier 後だけ LOCAL を読み、lane 0 が一出力を書く。",
+    "id": "18-004"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 193,
+    "section": "### 1. LOCAL へ部分和を書き、lane 0 がまとめる",
+    "todo": "Metal と OpenCL の両方に同じ IR を下げる。",
+    "id": "18-005"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 283,
+    "section": "#include <metal_stdlib>",
+    "todo": "stride を L/2、L/4、…、1 として LOCAL の二要素を足す。",
+    "id": "18-006"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 284,
+    "section": "#include <metal_stdlib>",
+    "todo": "`lane<stride` の分岐では加算と LOCAL STORE だけを行う。",
+    "id": "18-007"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 285,
+    "section": "#include <metal_stdlib>",
+    "todo": "各 stride の後の barrier は全 lane が実行する位置に置く。",
+    "id": "18-008"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 286,
+    "section": "#include <metal_stdlib>",
+    "todo": "最終結果の global STORE は lane 0 だけに限定する。",
+    "id": "18-009"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 287,
+    "section": "#include <metal_stdlib>",
+    "todo": "LOCAL の read-after-write と write-after-read の依存を保つ。",
+    "id": "18-010"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 379,
+    "section": "### 3. 端数、複数行、LOCAL の再利用を実行する",
+    "todo": "N=1、L-1、L、L+1、257 の部分和を同じ規則で作る。",
+    "id": "18-011"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 380,
+    "section": "### 3. 端数、複数行、LOCAL の再利用を実行する",
+    "todo": "二次元の行和では group ID を row として使う。",
+    "id": "18-012"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 381,
+    "section": "### 3. 端数、複数行、LOCAL の再利用を実行する",
+    "todo": "input の無効 LOAD と output の無効 STORE を別々に guard する。",
+    "id": "18-013"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 382,
+    "section": "### 3. 端数、複数行、LOCAL の再利用を実行する",
+    "todo": "LOCAL を同じ kernel のループで再利用する場合、次の書込み前に barrier を入れる。",
+    "id": "18-014"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 383,
+    "section": "### 3. 端数、複数行、LOCAL の再利用を実行する",
+    "todo": "非 2 冪の local を明示的に拒否し、無言で誤った tree を作らない。",
+    "id": "18-015"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 511,
+    "section": "### 4. group をまたぐ SUM は二つの kernel で実行する",
+    "todo": "大きな入力を固定 chunk に分け、各 group の部分和を GLOBAL に保存する。",
+    "id": "18-016"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 512,
+    "section": "### 4. group をまたぐ SUM は二つの kernel で実行する",
+    "todo": "部分和バッファを次 kernel の PARAM slot に bind する。",
+    "id": "18-017"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 513,
+    "section": "### 4. group をまたぐ SUM は二つの kernel で実行する",
+    "todo": "二つの kernel の依存を schedule に明示する。",
+    "id": "18-018"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 514,
+    "section": "### 4. group をまたぐ SUM は二つの kernel で実行する",
+    "todo": "同じ queue 上の順序と最後の読出し完了を runtime で保証する。",
+    "id": "18-019"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 515,
+    "section": "### 4. group をまたぐ SUM は二つの kernel で実行する",
+    "todo": "単一 workgroup の barrier を全 GPU の barrier として扱わない。",
+    "id": "18-020"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 535,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "整数として正確に表せる小例は、期待値と厳密に一致する。",
+    "id": "18-021"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 536,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "通常の f32 は加算順序の差を考慮し、`1e-5+1e-5*abs(reference)` を初期目標にする。",
+    "id": "18-022"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 537,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "正負が相殺する入力と大小が混在する入力も比較する。",
+    "id": "18-023"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 538,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "barrier を通る回数が lane の ID と入力の有効性で変わらない。",
+    "id": "18-024"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 539,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同じ入力を繰り返して偶然の一回の成功に依存していないことを確認する。",
+    "id": "18-025"
+  },
+  {
+    "file": "docs/18-parallel-reduction.md",
+    "line": 540,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "実機未実施の backend を数値一致済みとして報告しない。",
+    "id": "18-026"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 161,
+    "section": "### 19a. CPU の縮約を分割する",
+    "todo": "`i,j,k` の逐次 GEMM を比較用の設定で呼び出せるようにする。",
+    "id": "19-001"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 162,
+    "section": "### 19a. CPU の縮約を分割する",
+    "todo": "`k=ko*TK+ki` とする変換を入れ、端数は `k<K` で守る。",
+    "id": "19-002"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 163,
+    "section": "### 19a. CPU の縮約を分割する",
+    "todo": "`M,N` のタイル分割を追加し、最初は各タイル内の計算順を変えない。",
+    "id": "19-003"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 164,
+    "section": "### 19a. CPU の縮約を分割する",
+    "todo": "小さな register 累積配列を C に出し、初期化を K ループの外に置く。",
+    "id": "19-004"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 165,
+    "section": "### 19a. CPU の縮約を分割する",
+    "todo": "出力タイルの並列化は17の CPU thread 経路を使い、同じ出力要素を複数 thread が書かないようにする。",
+    "id": "19-005"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 241,
+    "section": "### 19b. GPU の A と B を local memory に置く",
+    "todo": "Metal で A の `TM*TK`、B の `TK*TN` の local buffer を確保する。",
+    "id": "19-006"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 242,
+    "section": "### 19b. GPU の A と B を local memory に置く",
+    "todo": "lane ごとの協調 LOAD を作り、範囲外は LOAD を実行せず local にゼロを保存する。",
+    "id": "19-007"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 243,
+    "section": "### 19b. GPU の A と B を local memory に置く",
+    "todo": "保存後の barrier と、計算後に local buffer を再利用する前の barrier を入れる。",
+    "id": "19-008"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 244,
+    "section": "### 19b. GPU の A と B を local memory に置く",
+    "todo": "無効な出力 lane も barrier を通し、最後の global STORE だけを guard する。",
+    "id": "19-009"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 245,
+    "section": "### 19b. GPU の A と B を local memory に置く",
+    "todo": "同じ IR を OpenCL に出し、`groups` と `local` の積を実際の global size とする。",
+    "id": "19-010"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 327,
+    "section": "### 19c. layout と convolution を一つずつ変える",
+    "todo": "まず B の local buffer のみを転置し、協調 LOAD と計算時 INDEX の両方を変更する。",
+    "id": "19-011"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 328,
+    "section": "### 19c. layout と convolution を一つずつ変える",
+    "todo": "local pitch の padding を一つ追加し、確保 byte 数と INDEX の最大値を検証する。",
+    "id": "19-012"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 329,
+    "section": "### 19c. layout と convolution を一つずつ変える",
+    "todo": "vector LOAD は連続性、alignment、範囲を確認できる内側だけに適用する。",
+    "id": "19-013"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 330,
+    "section": "### 19c. layout と convolution を一つずつ変える",
+    "todo": "conv の出力座標と縮約座標を GEMM と同じタイルへ写像する。",
+    "id": "19-014"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 331,
+    "section": "### 19c. layout と convolution を一つずつ変える",
+    "todo": "まず stride=1、padding=0、groups=1 の direct conv を扱い、次に padding と stride を追加する。",
+    "id": "19-015"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 406,
+    "section": "#[derive(Clone, PartialEq, Eq)]",
+    "todo": "Plan の各 kernel が読む範囲と書く範囲を storage base 単位で集計する。",
+    "id": "19-016"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 407,
+    "section": "#[derive(Clone, PartialEq, Eq)]",
+    "todo": "入力、出力、学習パラメータ、KV cache、外部へ返した view を再利用対象から外す。",
+    "id": "19-017"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 408,
+    "section": "#[derive(Clone, PartialEq, Eq)]",
+    "todo": "単一 queue の完了順を前提に、中間 buffer の最初の利用と最後の利用を求める。",
+    "id": "19-018"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 409,
+    "section": "#[derive(Clone, PartialEq, Eq)]",
+    "todo": "まず同じ device、dtype、サイズ、alignment の確保だけを free list で再利用する。",
+    "id": "19-019"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 410,
+    "section": "#[derive(Clone, PartialEq, Eq)]",
+    "todo": "同じ kernel 内で読まれる buffer を、その kernel の出力に割り当てない。",
+    "id": "19-020"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 492,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "cache key に backend、device capability、生成 source、clang 等の compiler 識別、flags、ABI version を含める。",
+    "id": "19-021"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 493,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "shape 特化、tile、dtype、math 設定が source 以外で決まる場合も key に含める。",
+    "id": "19-022"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 494,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "cache hit の binary と cold compile の binary で、同じ数値結果を確認する。",
+    "id": "19-023"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 495,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "Plan の入力スロットに違う A、B、重みを渡し、コードを再利用して結果が変わることを確かめる。",
+    "id": "19-024"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 496,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "計測記録に compile、確保、host/device 転送、kernel、同期、全体の区間を分けて出す。",
+    "id": "19-025"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 497,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "浮動小数点 ALU の回数にループの反復数と launch の担当数を掛ける FLOP 見積りを追加する。",
+    "id": "19-026"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 498,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "数学的に必要な仕事と、padding した tile で実行する仕事の見積りを別に出す。",
+    "id": "19-027"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 526,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "整数値の小例は上記の期待値と一致する。",
+    "id": "19-028"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 527,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "固定 seed の f32 入力は scalar f64 reference に対し `abs_err <= 1e-4 + 1e-4*abs(ref)` を初期基準とする。",
+    "id": "19-029"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 528,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "大きい K では誤差を記録し、加算順の差を理由に無条件で許容値を広げない。",
+    "id": "19-030"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 529,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "`M,N,K=1` と tile 前後の寸法、ゼロ入力、負値、非連続 view を試す。",
+    "id": "19-031"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 530,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump で全 lane の barrier 到達、local buffer 内の添字、出力の単独書込みを確認する。",
+    "id": "19-032"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 531,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "再利用を無効にした結果、再利用した結果、cache hit の結果が一致する。",
+    "id": "19-033"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 532,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "まだ測っていない backend を「高速化済み」「実機確認済み」と書かない。",
+    "id": "19-034"
+  },
+  {
+    "file": "docs/19-fast-gemm-conv.md",
+    "line": 533,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "FLOP の見積りが上記の20と24になり、tile の端数を増やしても有効仕事の数は変わらない。",
+    "id": "19-035"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 169,
+    "section": "#include <stdint.h>",
+    "todo": "VarSpec と Bindings を追加し、未束縛、二重指定、範囲外を起動前に拒否する。",
+    "id": "20-001"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 170,
+    "section": "#include <stdint.h>",
+    "todo": "02と03の固定 ABI の scalar slot を使い、VarId から slot への対応を追加する。",
+    "id": "20-002"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 171,
+    "section": "#include <stdint.h>",
+    "todo": "`RANGE(N)` を C の実行時ループ上限へ出す。",
+    "id": "20-003"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 172,
+    "section": "#include <stdint.h>",
+    "todo": "容量17の buffer に N=1、3、17を渡し、毎回異なる論理長の結果を返す。",
+    "id": "20-004"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 173,
+    "section": "#include <stdint.h>",
+    "todo": "純粋な元グラフを置換せず、束縛値を runtime の実行記録に置く。",
+    "id": "20-005"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 246,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "`Dim::Expr(NodeId)` を必要な次元式だけに追加し、`2*N` を式のまま運ぶ。",
+    "id": "20-006"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 247,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "`sum(x)` の縮約 RANGE に N を使い、初期値を実行ごとに設定する。",
+    "id": "20-007"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 248,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "`reshape([N,2])` の必要要素数と入力の論理要素数を実行時に検証する。",
+    "id": "20-008"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 249,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "同じ変数を使った broadcast は許可し、別変数の等値は Bindings で確認する。",
+    "id": "20-009"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 250,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "動的 shrink と pad の有効範囲を guard として INDEX に渡す。",
+    "id": "20-010"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 251,
+    "section": "### 20b. 縮約と movement の制約を検証する",
+    "todo": "確定できないアクセスを安全とみなさず、guard を生成するか未対応として拒否する。",
+    "id": "20-011"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 321,
+    "section": "### 20c. GPU の端数を束縛値で守る",
+    "todo": "Metal の引数領域に N を置き、論理長から group 数を決める。",
+    "id": "20-012"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 322,
+    "section": "### 20c. GPU の端数を束縛値で守る",
+    "todo": "`i<N` を LOAD と STORE の両方へ伝え、容量だけを guard に使わない。",
+    "id": "20-013"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 323,
+    "section": "### 20c. GPU の端数を束縛値で守る",
+    "todo": "local reduction では無効 lane に0を与え、全 lane を barrier に到達させる。",
+    "id": "20-014"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 324,
+    "section": "### 20c. GPU の端数を束縛値で守る",
+    "todo": "OpenCL の scalar 引数と NDRange を同じ束縛値で設定する。",
+    "id": "20-015"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 325,
+    "section": "### 20c. GPU の端数を束縛値で守る",
+    "todo": "GPU に送る値と host で検証した値が同じになるよう、一回の Bindings を固定する。",
+    "id": "20-016"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 408,
+    "section": "#[derive(PartialEq, Eq, Hash)]",
+    "todo": "generic kernel の key に VarId の正規化情報、上下限、制約、ABI を含める。",
+    "id": "20-017"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 409,
+    "section": "#[derive(PartialEq, Eq, Hash)]",
+    "todo": "generic kernel の key に毎回の N の値を混ぜず、1、3、17で同じコードを再利用する。",
+    "id": "20-018"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 410,
+    "section": "#[derive(PartialEq, Eq, Hash)]",
+    "todo": "`N=16` を条件とする特化版を一つ追加し、条件不成立なら generic に戻す。",
+    "id": "20-019"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 411,
+    "section": "#[derive(PartialEq, Eq, Hash)]",
+    "todo": "特化 key には N=16 と tile 条件を含め、N=17でその binary を選ばないようにする。",
+    "id": "20-020"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 412,
+    "section": "#[derive(PartialEq, Eq, Hash)]",
+    "todo": "添字式の memo key に node、出力座標、RANGE の scope を含めるか、scope 内に cache を閉じる。",
+    "id": "20-021"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 434,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "N の下限、上限、その外側、未束縛で期待どおり成功またはエラーになる。",
+    "id": "20-022"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 435,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "整数の小例は期待値と完全一致する。",
+    "id": "20-023"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 436,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "f32 の generic、specialized、静的版は `abs_err <= 1e-5 + 1e-5*abs(ref)` を初期基準として比較する。",
+    "id": "20-024"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 437,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "RANGE の上限と buffer の容量を区別して dump に表示する。",
+    "id": "20-025"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 438,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "動的 reshape の積、GEMM の K、broadcast の等値を起動前に検証する。",
+    "id": "20-026"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 439,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "Plan を連続再実行しても、束縛値と累積値が前回から残らない。",
+    "id": "20-027"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 440,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同じ node を転置前後で利用して、添字 cache が座標を混同しない。",
+    "id": "20-028"
+  },
+  {
+    "file": "docs/20-symbolic-shapes.md",
+    "line": 441,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "GPU での失敗は CPU の成功で置き換えず、backend 別に確認結果を残す。",
+    "id": "20-029"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 135,
+    "section": "#[derive(Clone)]",
+    "todo": "名前と ParamId を明示登録し、weight、bias、永続 buffer の一覧を得る。",
+    "id": "21-001"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 136,
+    "section": "#[derive(Clone)]",
+    "todo": "最初は教育用の短い JSON metadata と little-endian f32 payload を保存する。",
+    "id": "21-002"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 137,
+    "section": "#[derive(Clone)]",
+    "todo": "dtype、shape、要素数、byte 数を検査してから新しい CPU buffer を作る。",
+    "id": "21-003"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 138,
+    "section": "#[derive(Clone)]",
+    "todo": "state 全体の検証が終わってから入れ替え、不完全な load でモデルを半分更新しない。",
+    "id": "21-004"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 139,
+    "section": "#[derive(Clone)]",
+    "todo": "元の値24、load 後の24、差替え後の5を生成 C の実行結果で比較する。",
+    "id": "21-005"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 222,
+    "section": "### 21b. safetensors の f32 を読む",
+    "todo": "8 byte の header 長、JSON header、data 部分の開始位置を検査する。",
+    "id": "21-006"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 223,
+    "section": "### 21b. safetensors の f32 を読む",
+    "todo": "各 tensor の `dtype`、`shape`、`data_offsets` を読み、積と byte 計算の overflow を拒否する。",
+    "id": "21-007"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 224,
+    "section": "### 21b. safetensors の f32 を読む",
+    "todo": "payload 内の範囲、長さの一致、不正な重なり、重複した名前を検証する。",
+    "id": "21-008"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 225,
+    "section": "### 21b. safetensors の f32 を読む",
+    "todo": "未知 dtype と不正な header を明示エラーにし、f32 に推測変換しない。",
+    "id": "21-009"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 226,
+    "section": "### 21b. safetensors の f32 を読む",
+    "todo": "Rust の safetensors reader と独立に作った小 fixture で byte と数値を照合する。",
+    "id": "21-010"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 297,
+    "section": "### 21c. model へ厳密に state を入れる",
+    "todo": "必須 key の欠落、想定外 key、shape 不一致、dtype 不一致を一度に報告する。",
+    "id": "21-011"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 298,
+    "section": "### 21c. model へ厳密に state を入れる",
+    "todo": "strict load を標準にし、一部 load を明示要求した時だけ欠落を許す。",
+    "id": "21-012"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 299,
+    "section": "### 21c. model へ厳密に state を入れる",
+    "todo": "名前を Plan の入力 slot に解決し、同じコンパイル済み Plan を再実行する。",
+    "id": "21-013"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 300,
+    "section": "### 21c. model へ厳密に state を入れる",
+    "todo": "永続 buffer を保存と load に含め、optimizer が更新する parameter 一覧からは外す。",
+    "id": "21-014"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 301,
+    "section": "### 21c. model へ厳密に state を入れる",
+    "todo": "Metal と OpenCL では検証済み CPU state を転送し、CPU 版の出力と比較する。",
+    "id": "21-015"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 386,
+    "section": "### 21d. URL と SHA-256 を付けて取得する",
+    "todo": "manifest に固定 revision を含む URL、期待 byte 数、SHA-256、保存名を記録する。",
+    "id": "21-016"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 387,
+    "section": "### 21d. URL と SHA-256 を付けて取得する",
+    "todo": "まずローカル HTTP fixture server から小ファイルを取得する test を作る。",
+    "id": "21-017"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 388,
+    "section": "### 21d. URL と SHA-256 を付けて取得する",
+    "todo": "一時ファイルへ保存し、byte 数と SHA-256 が一致した後だけ cache 名に rename する。",
+    "id": "21-018"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 389,
+    "section": "### 21d. URL と SHA-256 を付けて取得する",
+    "todo": "既存 cache と直接指定されたローカルファイルも、load の前に同じ digest 検査を通す。",
+    "id": "21-019"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 390,
+    "section": "### 21d. URL と SHA-256 を付けて取得する",
+    "todo": "通信失敗、途中切断、digest 不一致では未検証ファイルを model loader に渡さない。",
+    "id": "21-020"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 486,
+    "section": "### 21e. 次章の checkpoint に必要な dtype と shard を加える",
+    "todo": "F16 と BF16 の payload を読む場合は型を保持し、最初の実行用に明示的な f32 変換を用意する。",
+    "id": "21-021"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 487,
+    "section": "### 21e. 次章の checkpoint に必要な dtype と shard を加える",
+    "todo": "ゼロ、有限値、非正規数、無限大、NaN を使って各変換を独立の reference と比較する。",
+    "id": "21-022"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 488,
+    "section": "### 21e. 次章の checkpoint に必要な dtype と shard を加える",
+    "todo": "shard index から必要ファイルを列挙し、全 shard の digest を確認した後に state を構築する。",
+    "id": "21-023"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 489,
+    "section": "### 21e. 次章の checkpoint に必要な dtype と shard を加える",
+    "todo": "index 内の名前と各 shard の metadata、必要 key の集合を照合する。",
+    "id": "21-024"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 490,
+    "section": "### 21e. 次章の checkpoint に必要な dtype と shard を加える",
+    "todo": "config と tokenizer の各ファイルも manifest の検証対象にする。",
+    "id": "21-025"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 511,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "f32 は roundtrip 前後の byte と数値が一致し、線形層が24を返す。",
+    "id": "21-026"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 512,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "SHA-256 不一致では header 解析、buffer 確保、device 転送を始めない。",
+    "id": "21-027"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 513,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dtype、名前、shape、offset の破損 fixture をそれぞれ拒否する。",
+    "id": "21-028"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 514,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump で weight の PARAM slot を確認し、重みが定数に折り畳まれていない。",
+    "id": "21-029"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 515,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "device の小例は CPU reference に対し `abs_err <= 1e-5 + 1e-5*abs(ref)` とする。",
+    "id": "21-030"
+  },
+  {
+    "file": "docs/21-model-io.md",
+    "line": 516,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "大きなモデルなしで、保存、load、取得、破損時の経路を検証できる。",
+    "id": "21-031"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 149,
+    "section": "### 22a. embedding、norm、attention を小入力で通す",
+    "todo": "token ID の範囲を検査し、embedding の行選択を INDEX と LOAD へ落とす。",
+    "id": "22-001"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 150,
+    "section": "### 22a. embedding、norm、attention を小入力で通す",
+    "todo": "RMSNorm を `x*rsqrt(mean(x*x)+eps)*weight` で組み立てる。",
+    "id": "22-002"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 151,
+    "section": "### 22a. embedding、norm、attention を小入力で通す",
+    "todo": "softmax を `m=detach(max(scores))` の減算、exp、sum、除算で組み立て、行和を確認する。",
+    "id": "22-003"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 152,
+    "section": "### 22a. embedding、norm、attention を小入力で通す",
+    "todo": "RoPE を偶数の head dimension と位置から作り、位置0で入力と一致させる。",
+    "id": "22-004"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 153,
+    "section": "### 22a. embedding、norm、attention を小入力で通す",
+    "todo": "`QK^T/sqrt(d)`、causal mask、softmax、V の積を既存 Tensor 演算で作る。",
+    "id": "22-005"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 234,
+    "section": "### 22b. 1層の Transformer から logits を返す",
+    "todo": "小 config と明示登録した state を用意し、embedding から output projection までを通す。",
+    "id": "22-006"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 235,
+    "section": "### 22b. 1層の Transformer から logits を返す",
+    "todo": "pre-norm、attention residual、norm、gated MLP、residual、最終 norm の順を固定する。",
+    "id": "22-007"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 236,
+    "section": "### 22b. 1層の Transformer から logits を返す",
+    "todo": "MLP を `down(silu(gate(x))*up(x))` とし、bias の有無を fixture に固定する。",
+    "id": "22-008"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 237,
+    "section": "### 22b. 1層の Transformer から logits を返す",
+    "todo": "最初に全重みゼロの fixture を動かし、全 logits が0になることを確認する。",
+    "id": "22-009"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 238,
+    "section": "### 22b. 1層の Transformer から logits を返す",
+    "todo": "次に固定された非ゼロの重みを使い、独立 reference の各層出力を fixture に保存する。",
+    "id": "22-010"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 318,
+    "section": "### 22c. 公開 Qwen の config と重み名を対応させる",
+    "todo": "21の manifest に固定 revision の全ファイルと SHA-256 を登録する。",
+    "id": "22-011"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 319,
+    "section": "### 22c. 公開 Qwen の config と重み名を対応させる",
+    "todo": "対象の model type と config の必要項目を検証し、未対応方式をエラーにする。",
+    "id": "22-012"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 320,
+    "section": "### 22c. 公開 Qwen の config と重み名を対応させる",
+    "todo": "embedding、全 layer、norm、output の名前と shape を一対一に照合する。",
+    "id": "22-013"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 321,
+    "section": "### 22c. 公開 Qwen の config と重み名を対応させる",
+    "todo": "Q/K/V の bias を読み、projection 行列の出力軸と入力軸を確認する。",
+    "id": "22-014"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 322,
+    "section": "### 22c. 公開 Qwen の config と重み名を対応させる",
+    "todo": "tied embedding を一つの ParamId へ結び、重複保存された重みがあれば整合性を確認する。",
+    "id": "22-015"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 419,
+    "section": "### 22d. tokenizer と全 layer の prefill を照合する",
+    "todo": "固定版の tokenizer library を使い、21で検証した tokenizer.json と設定を読み込む。",
+    "id": "22-016"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 420,
+    "section": "### 22d. tokenizer と全 layer の prefill を照合する",
+    "todo": "空白、日本語、改行、特殊 token の ID 列を公式 tokenizer の固定 fixture と一致させる。",
+    "id": "22-017"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 421,
+    "section": "### 22d. tokenizer と全 layer の prefill を照合する",
+    "todo": "chat template は最初は使わず、同じ生テキストと token ID を reference に渡す。",
+    "id": "22-018"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 422,
+    "section": "### 22d. tokenizer と全 layer の prefill を照合する",
+    "todo": "全24 layer を f32 で実行し、embedding、層境界、最終 logits を reference と比較する。",
+    "id": "22-019"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 423,
+    "section": "### 22d. tokenizer と全 layer の prefill を照合する",
+    "todo": "容量を超える入力は起動前に拒否し、まず context=16など短い容量で一つの次 token を出す。",
+    "id": "22-020"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 491,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "layer ごとに K と V の固定容量 buffer を持ち、読取り専用の実行時入力スロットへ渡す。",
+    "id": "22-021"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 492,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "`start_pos+T<=context` を検証し、RoPE の絶対位置と書込み位置を一致させる。",
+    "id": "22-022"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 493,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "既存の有効 prefix と今回の K/V を新規出力 buffer へ保存し、その AFTER を attention が読むようにする。",
+    "id": "22-023"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 494,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "実行完了後に新しい cache 出力を次回の入力スロットへ束縛し、元の入力 buffer は変更しない。",
+    "id": "22-024"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 495,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "prefill と1 token decode を、cache なしで prefix 全体を再計算した logits と比較する。",
+    "id": "22-025"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 496,
+    "section": "### 22e. 新しい cache 出力を束縛して逐次生成する",
+    "todo": "新しい prompt の開始時に cache の有効長を初期化し、greedy 生成と EOS 終了を追加する。",
+    "id": "22-026"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 519,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "小例の causal 平均、softmax 行和、RoPE 位置0が期待どおりになる。",
+    "id": "22-027"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 520,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "f32 の小 fixture は `abs_err <= 1e-5 + 1e-4*abs(ref)` を初期基準に各層を比較する。",
+    "id": "22-028"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 521,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "実モデルは各層と logits を `abs_err <= 1e-3 + 1e-3*abs(ref)` で比較し、最大誤差を残す。",
+    "id": "22-029"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 522,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "argmax の一致だけで数値検証を終えず、近接した logits の差も記録する。",
+    "id": "22-030"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 523,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "cache 有無と chunk 分割の違いで同じ prefix の logits が許容値内になる。",
+    "id": "22-031"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 524,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump に token ID、shape、head 対応、位置、cache 有効長を出し、重みの全内容は出さない。",
+    "id": "22-032"
+  },
+  {
+    "file": "docs/22-transformer-qwen.md",
+    "line": 525,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "Metal と OpenCL は CPU fixture と比較し、未実行 backend は未確認と記録する。",
+    "id": "22-033"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 163,
+    "section": "### 23a. attention の各中間値を基準として固定する",
+    "todo": "通常版の score、mask 後の score、softmax、O を小入力で取り出す。",
+    "id": "23-001"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 164,
+    "section": "### 23a. attention の各中間値を基準として固定する",
+    "todo": "head dimension と scale を検証し、shape 不一致を起動前に拒否する。",
+    "id": "23-002"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 165,
+    "section": "### 23a. attention の各中間値を基準として固定する",
+    "todo": "causal、非 causal、padding mask、全 mask 行を別 fixture にする。",
+    "id": "23-003"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 166,
+    "section": "### 23a. attention の各中間値を基準として固定する",
+    "todo": "位置0だけを前提にせず、query 開始位置5などの絶対位置も test に入れる。",
+    "id": "23-004"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 167,
+    "section": "### 23a. attention の各中間値を基準として固定する",
+    "todo": "全 mask 行を含む stable reference を Rust の scalar f64 と既存 f32 graph の両方で動かす。",
+    "id": "23-005"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 256,
+    "section": "### 23b. CPU で1行の online softmax を実行する",
+    "todo": "key 軸を小さな tile に分割し、m、l、u を C の累積値として保持する。",
+    "id": "23-006"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 257,
+    "section": "### 23b. CPU で1行の online softmax を実行する",
+    "todo": "tile を読み進めるたびに m の変更で既存の l と u を補正する。",
+    "id": "23-007"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 258,
+    "section": "### 23b. CPU で1行の online softmax を実行する",
+    "todo": "有効 key がない tile は状態を更新せず、全 mask 行を明示的に処理する。",
+    "id": "23-008"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 259,
+    "section": "### 23b. CPU で1行の online softmax を実行する",
+    "todo": "最後の不完全 tile を guard し、無効な K と V の LOAD を生成しない。",
+    "id": "23-009"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 260,
+    "section": "### 23b. CPU で1行の online softmax を実行する",
+    "todo": "tile 幅1、2、3、8で通常版と同じ結果を得る。",
+    "id": "23-010"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 348,
+    "section": "### 23c. GPU の local memory に Q/K/V の tile を置く",
+    "todo": "まず一つの group が query の小タイルを担当し、K と V を順に local memory へ運ぶ。",
+    "id": "23-011"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 349,
+    "section": "### 23c. GPU の local memory に Q/K/V の tile を置く",
+    "todo": "QK と PV は通常の f32 積和を使い、hardware matrix 命令はまだ使わない。",
+    "id": "23-012"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 350,
+    "section": "### 23c. GPU の local memory に Q/K/V の tile を置く",
+    "todo": "全 lane が LOAD 後と local buffer 再利用前の barrier を通る構造にする。",
+    "id": "23-013"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 351,
+    "section": "### 23c. GPU の local memory に Q/K/V の tile を置く",
+    "todo": "query と key の端数を別々に guard し、無効 lane に単位元を与える。",
+    "id": "23-014"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 352,
+    "section": "### 23c. GPU の local memory に Q/K/V の tile を置く",
+    "todo": "Metal で検証後、同じ kernel IR を OpenCL に出して通常版と比較する。",
+    "id": "23-015"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 439,
+    "section": "### 23d. GQA と dispatcher を model へ接続する",
+    "todo": "query head から KV head への対応を追加し、K/V の全複製を避ける。",
+    "id": "23-016"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 440,
+    "section": "### 23d. GQA と dispatcher を model へ接続する",
+    "todo": "対応 dtype、寸法、local memory、mask、勾配要求を条件として選択する。",
+    "id": "23-017"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 441,
+    "section": "### 23d. GQA と dispatcher を model へ接続する",
+    "todo": "未対応条件では22の通常 attention を選び、選択理由を dump に残す。",
+    "id": "23-018"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 442,
+    "section": "### 23d. GQA と dispatcher を model へ接続する",
+    "todo": "学習 graph はこの章では通常版へ固定し、forward-only kernel を微分可能と扱わない。",
+    "id": "23-019"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 443,
+    "section": "### 23d. GQA と dispatcher を model へ接続する",
+    "todo": "model の logits と cache 有効長を通常版に照合してから、計測用の設定を追加する。",
+    "id": "23-020"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 466,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "基準例の出力は期待値と一致する。",
+    "id": "23-021"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 467,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "CPU、GPU、通常版を f64 reference に対し `abs_err <= 1e-4 + 1e-4*abs(ref)` で比較する。",
+    "id": "23-022"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 468,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "query/key 長の1、tile直前、tile一致、tile直後と、GQA 比率1、2を検証する。",
+    "id": "23-023"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 469,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "全 mask 行、空の有効 key、後半 tile が最大の score、極端な有限 score を試す。",
+    "id": "23-024"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 470,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "無効領域の NaN が有効出力へ流れず、全 mask 行は0になって NaN を含まない。",
+    "id": "23-025"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 471,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump で全 lane の barrier と、local buffer の再利用依存を確認する。",
+    "id": "23-026"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 472,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "一つの学習 step が通常版の forward と backward を通り、未定義 gradient を隠さない。",
+    "id": "23-027"
+  },
+  {
+    "file": "docs/23-flash-attention.md",
+    "line": 473,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "実機を使っていない backend と、未測定の速度を確認済みとして記述しない。",
+    "id": "23-028"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 153,
+    "section": "### 24a. loss と embedding の backward を最小入力で通す",
+    "todo": "全位置の logits を返す学習入口を追加し、KV cache と sampling を使わない。",
+    "id": "24-001"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 154,
+    "section": "### 24a. loss と embedding の backward を最小入力で通す",
+    "todo": "target の範囲、有効位置、安定した cross entropy を検査する。",
+    "id": "24-002"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 155,
+    "section": "### 24a. loss と embedding の backward を最小入力で通す",
+    "todo": "embedding/gather の backward を追加し、繰り返し token の寄与を加算する。",
+    "id": "24-003"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 156,
+    "section": "### 24a. loss と embedding の backward を最小入力で通す",
+    "todo": "最初は各語彙行が全 token 位置を走査する reduction で実装し、GPU の書込み競合を避ける。",
+    "id": "24-004"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 157,
+    "section": "### 24a. loss と embedding の backward を最小入力で通す",
+    "todo": "RMSNorm、SiLU、softmax、RoPE、GQA、tied weight の勾配を13の規則と合成して検証する。",
+    "id": "24-005"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 241,
+    "section": "### 24b. SGD で一つの batch を反復する",
+    "todo": "token を一つずらした target を作り、入力と target の位置を dump する。",
+    "id": "24-006"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 242,
+    "section": "### 24b. SGD で一つの batch を反復する",
+    "todo": "forward、loss、gradient、SGD 更新を一回の step として既存 runtime で動かす。",
+    "id": "24-007"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 243,
+    "section": "### 24b. SGD で一つの batch を反復する",
+    "todo": "step の先頭で gradient を初期化し、前回分を意図せず加えない。",
+    "id": "24-008"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 244,
+    "section": "### 24b. SGD で一つの batch を反復する",
+    "todo": "Plan の入力 slot に更新後の parameter を渡し、次の step で新しい値を読む。",
+    "id": "24-009"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 245,
+    "section": "### 24b. SGD で一つの batch を反復する",
+    "todo": "CPU の loss と更新を scalar reference に比較し、その後 Metal と OpenCL でも小例を比較する。",
+    "id": "24-010"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 352,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "m、v、step、bias correction、weight decay を持つ f32 AdamW を追加する。",
+    "id": "24-011"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 353,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "scalar parameter の一回の更新を数式の reference に一致させる。",
+    "id": "24-012"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 354,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "gradient norm と非有限値を検査し、必要なら設定された閾値で clipping する。",
+    "id": "24-013"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 355,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "microbatch ごとの loss の平均ではなく、有効 token 数に応じて gradient を重み付けする。",
+    "id": "24-014"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 356,
+    "section": "#[derive(Clone, Copy)]",
+    "todo": "full batch と勾配蓄積した更新を、同じデータ順と dropout=0 で比較する。",
+    "id": "24-015"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 453,
+    "section": "### 24d. optimizer とデータ位置を含めて再開する",
+    "todo": "model state、m、v、step、学習率 scheduler、乱数 generator の状態を保存する。",
+    "id": "24-016"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 454,
+    "section": "### 24d. optimizer とデータ位置を含めて再開する",
+    "todo": "dataset の digest、tokenizer/config の識別、epoch、次の読出し位置、shuffle 状態も保存する。",
+    "id": "24-017"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 455,
+    "section": "### 24d. optimizer とデータ位置を含めて再開する",
+    "todo": "蓄積中間の checkpoint は最初は拒否し、optimizer step 完了後の境界だけで保存する。",
+    "id": "24-018"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 456,
+    "section": "### 24d. optimizer とデータ位置を含めて再開する",
+    "todo": "device の完了待ち後に一時ディレクトリへ書き、全ファイルと manifest の検証後に確定する。",
+    "id": "24-019"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 457,
+    "section": "### 24d. optimizer とデータ位置を含めて再開する",
+    "todo": "新しいプロセスで検証と load を行い、連続10 step と5 step後の保存・再開を比較する。",
+    "id": "24-020"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 528,
+    "section": "### 24e. 同じ学習経路を実際の Qwen の全 layer に広げる",
+    "todo": "22の manifest を読み、BF16 checkpoint を f32 parameter として準備する。",
+    "id": "24-021"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 529,
+    "section": "### 24e. 同じ学習経路を実際の Qwen の全 layer に広げる",
+    "todo": "全 layer と語彙を保ったまま、短い sequence と microbatch=1でメモリ見積りを出す。",
+    "id": "24-022"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 530,
+    "section": "### 24e. 同じ学習経路を実際の Qwen の全 layer に広げる",
+    "todo": "実際の一意 parameter 数Pを数え、f32 の重み・勾配・m・vだけで `16*P` byte を要することを記録する。",
+    "id": "24-023"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 531,
+    "section": "### 24e. 同じ学習経路を実際の Qwen の全 layer に広げる",
+    "todo": "activation、logits、通常 attention の score、再利用 workspace の peak を別に加える。",
+    "id": "24-024"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 532,
+    "section": "### 24e. 同じ学習経路を実際の Qwen の全 layer に広げる",
+    "todo": "小さな検証済みデータで一回の forward、backward、全 parameter 更新、保存、再開を順に実行する。",
+    "id": "24-025"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 557,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "repeated token の期待勾配と uniform logits の `ln(4)` を確認する。",
+    "id": "24-026"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 558,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "小 graph の有限差分は中央差分、初期幅 `1e-3`、基準 `abs_err <= 3e-3 + 3e-2*abs(ref)` で検査する。",
+    "id": "24-027"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 559,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "幅を変えて安定性も確認し、非有限値や桁落ちを「勾配一致」として通さない。",
+    "id": "24-028"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 560,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "一回の parameter 更新を f32 reference と `abs_err <= 1e-5 + 1e-4*abs(ref)` で比較する。",
+    "id": "24-029"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 561,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "full batch と蓄積、連続実行と再開を同じ dropout=0 の条件で比較する。",
+    "id": "24-030"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 562,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "同一 CPU 経路の再開は byte 一致を目標にし、GPU の加算順が異なる場合は許容値と最大差を記録する。",
+    "id": "24-031"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 563,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "dump で flash forward-only が学習に選ばれず、weight が PARAM のままであることを確認する。",
+    "id": "24-032"
+  },
+  {
+    "file": "docs/24-llm-training.md",
+    "line": 564,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "小 LLM の学習成功、全 Qwen の見積り、全 Qwen の実行結果を別々に記録する。",
+    "id": "24-033"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 138,
+    "section": "### 25a. capability と fallback を実際の GEMM に接続する",
+    "todo": "Metal device の family、API が返す実行幅、threadgroup 上限、local byte 上限を取得する。",
+    "id": "25-001"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 139,
+    "section": "### 25a. capability と fallback を実際の GEMM に接続する",
+    "todo": "必要な行列型と演算を持つ小 shader をコンパイルし、失敗理由を capability に保存する。",
+    "id": "25-002"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 140,
+    "section": "### 25a. capability と fallback を実際の GEMM に接続する",
+    "todo": "capability が使えない場合も19の f32 GEMM を実行し、同じ出力を得る。",
+    "id": "25-003"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 141,
+    "section": "### 25a. capability と fallback を実際の GEMM に接続する",
+    "todo": "capability を test 用に無効にし、通常経路を強制して確認する。",
+    "id": "25-004"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 142,
+    "section": "### 25a. capability と fallback を実際の GEMM に接続する",
+    "todo": "cache key に device capability、型、compiler と ABI の識別を含める。",
+    "id": "25-005"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 211,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "まず公開の simdgroup load と store を使い、8x8の tile を一つだけ計算する。",
+    "id": "25-006"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 212,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "行列の row/column 順、leading dimension、転置指定を入力 layout と照合する。",
+    "id": "25-007"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 213,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "shader で I@A と A@I を計算し、19の通常積和と CPU reference に比較する。",
+    "id": "25-008"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 214,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "行列の一箇所だけが1の basis 入力で、出力座標の対応を検証する。",
+    "id": "25-009"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 215,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "shader を既存の Metal compiler、buffer bind、dispatch、同期、読出しの経路で動かす。",
+    "id": "25-010"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 302,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "既存の `sum(A[i,k]*B[k,j], k)` の形と dtype を認識する。",
+    "id": "25-011"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 303,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "MatrixTile を生成し、対応しない stride、型、alignment は通常版へ戻す。",
+    "id": "25-012"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 304,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "K=16、24で部分和を次の行列演算の accumulator に渡す。",
+    "id": "25-013"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 305,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "M/N/K が8の倍数でない場合は、まず通常版へ戻して数値を保つ。",
+    "id": "25-014"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 306,
+    "section": "#include <metal_simdgroup_matrix>",
+    "todo": "次のコミットで端数を local tile にゼロ詰めし、無効 LOAD と STORE を guard する。",
+    "id": "25-015"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 396,
+    "section": "### 25d. dtype と測定を一条件ずつ広げる",
+    "todo": "capability が許す場合だけ、F16 入力と f32 累積を追加する。",
+    "id": "25-016"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 397,
+    "section": "### 25d. dtype と測定を一条件ずつ広げる",
+    "todo": "変換後の実 F16 入力値を f64 へ上げた reference と比較し、入力量子化の差を分ける。",
+    "id": "25-017"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 398,
+    "section": "### 25d. dtype と測定を一条件ずつ広げる",
+    "todo": "負値、ゼロ、打消し、大きさの異なる値、K の複数 tile を確認する。",
+    "id": "25-018"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 399,
+    "section": "### 25d. dtype と測定を一条件ずつ広げる",
+    "todo": "通常版、行列命令版、fallback の同一入力を比べ、選択経路を記録する。",
+    "id": "25-019"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 400,
+    "section": "### 25d. dtype と測定を一条件ずつ広げる",
+    "todo": "正しさの確認後に compile、転送、kernel、同期、全体の計測を分ける。",
+    "id": "25-020"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 475,
+    "section": "### 25e. 一つの独立課題を同じ検証経路で完成させる",
+    "todo": "論文の演算一つ、compiler 変換一つ、または新しい device 一つを対象として選ぶ。",
+    "id": "25-021"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 476,
+    "section": "### 25e. 一つの独立課題を同じ検証経路で完成させる",
+    "todo": "入力、出力、数式、比較用の既存実装、対応 dtype と shape を短い仕様にする。",
+    "id": "25-022"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 477,
+    "section": "### 25e. 一つの独立課題を同じ検証経路で完成させる",
+    "todo": "最初に既存 pipeline の baseline example を動かし、同じ入出力で拡張を差し替える。",
+    "id": "25-023"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 478,
+    "section": "### 25e. 一つの独立課題を同じ検証経路で完成させる",
+    "todo": "小入力の期待値、ランダム比較、境界値、必要なら gradient 比較を追加する。",
+    "id": "25-024"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 479,
+    "section": "### 25e. 一つの独立課題を同じ検証経路で完成させる",
+    "todo": "device と commit、再現コマンド、結果、未対応範囲を project の記録へ残す。",
+    "id": "25-025"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 511,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "identity と basis の期待値に一致し、K の部分和が失われない。",
+    "id": "25-026"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 512,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "f32 は `abs_err <= 1e-4 + 1e-4*abs(ref)` を初期基準として全要素を比較する。",
+    "id": "25-027"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 513,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "F16 入力と f32 累積は、量子化済み入力 reference に `abs_err <= 1e-3 + 1e-3*abs(ref)` で比較する。",
+    "id": "25-028"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 514,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "許容値が満たせない場合は誤差の原因と対象範囲を調べ、無条件で閾値を広げない。",
+    "id": "25-029"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 515,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "capability 無効、非対応型、不正 shape、端数のケースで安全に fallback またはエラーになる。",
+    "id": "25-030"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 516,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "実行経路と数値の両方を確認し、source 内の命令名だけで完了にしない。",
+    "id": "25-031"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 517,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "小 MLP と LLM の一回の更新を回帰確認し、lowering の変更が勾配の意味を変えない。",
+    "id": "25-032"
+  },
+  {
+    "file": "docs/25-hardware-extensions.md",
+    "line": 518,
+    "section": "# 作業ディレクトリ: chibigrad/",
+    "todo": "独立課題は baseline と拡張を同じコマンドで比較でき、未確認の実機を明示する。",
+    "id": "25-033"
+  }
+]

@@ -1,182 +1,162 @@
-# chibigrad を小さな実行可能なステップで作る
+# chibigrad を番号順に写経して作る
 
-Rust で教育用 ML コンパイラを作るための TODO である。まず小さな UOp を C にして実行する。その経路を残したまま、配列、ループ、shape、自動微分、GPU、実モデルへ広げる。
+01章から25章までのコードを保存し、各確認コマンドを実行して、一つのRustプロジェクトを育てます。定数7のC生成から始め、実行時入力、配列、Tensor、自動微分、GPU、モデル保存、Qwenの推論と学習へ進みます。
 
-全体の背景は [全体計画](chibigrad-plan.md) に残す。このファイルを入口に、番号順の詳細手順を進める。各詳細手順のチェックボックスは、実装と確認が完了してから記録する。この文書作成時点では chibigrad の実装はない。
+このcheckoutの `src/main.rs` と `Cargo.toml` は写経を始める前の状態です。教材の完成コードは各章のファイル指定付きブロックにあります。写経先には別の空ディレクトリを用意します。crate名は既存の `chinigrad` を使います。
 
-## 一つのコミットで実行結果まで確認する
+## 保存先と操作を読む
 
-1. 対象ステップの前提と tinygrad 対応表を読む。
-2. 最初の小コミットだけを実装する。
-3. 既存テストと、そのコミットの入力例を実行する。
-4. 出力、エラー、IR dump を確認し、実行記録を残す。
-5. 次の小コミットへ進む。
+コードブロックの `file=` が写経先プロジェクトからの相対パスです。親ディレクトリがなければ作ります。
 
-全ファイルの enum、trait、空の pass を先に作らない。最初の実装は `Const(7)` を生成 C 経由で実行できればよい。後の機能が必要とするデータは、その機能を実行できる変更と一緒に追加する。
+| 指定 | 操作 |
+|---|---|
+| `mode=write` | 指定ファイル全体をコードで置き換える |
+| `mode=append` | 指定ファイルの末尾へコードを追加する |
+| `mode=replace item="fn name("` | 指定の同名関数全体を置き換える。直前の `#[test]` などの属性は残す |
+| `sh check` | 直前までの保存を終えてから、写経先プロジェクトのrootで実行する |
+| `sh check requires=metal` | Metalの実機がある場合に実行する |
 
-ここでいう全体のパイプラインは、その時点で対応する入力から実行結果までの経路を意味する。初回から GPU や高水準 Tensor API を実装する意味ではない。
+置換対象の `item` は一箇所だけに一致します。同じ関数名がある場合は、掲載した宣言の先頭全体で対象を特定します。生成C、IR、図、期待出力のブロックはRustファイルへ保存しません。`file=` のないコマンドや確認出力もソースへ貼りません。
 
-各詳細手順の `cargo run --example ...`、テストファイル、Rust API は、そのステップで作る予定のものである。現在存在する実行コマンドや検証済み実装として扱わない。手順の実装時には、記載されたコマンドが実際に動く状態にしてから完了とする。
+同じ機能を異なるTODOの観点から説明する節では、既出の関数を再掲して置き換えます。実装するTODOには実装関数を、期待値や拒否条件を確かめるTODOにはテスト関数を掲載します。テストの補助関数と型は前の節で保存済みです。確認コマンドはコードが揃う位置に置いてあります。
 
-## コードを読みながら一つずつ動かす
+## 実行環境を用意する
 
-各コミットは、追加する処理の導入、コード、コードの読み方、小さい入力での確認、作業チェックの順で読む。本文では変数、座標、保存領域の状態がどう変わるかを追う。チェック項目へ進む前に、掲載した入力がどの値を経て出力になるかを説明できることを確かめる。
+Rust 1.98.1とC11対応Clangで確認します。CPU runtimeは64bitのmacOSとLinuxを対象にします。macOSではXcode Command Line ToolsとmacOS SDKが必要です。掲載したdriverが `xcrun` でSDKを取得します。LinuxではClang、標準C開発ヘッダと動的loaderが必要です。
 
-コードブロックには次の区別がある。
+15章以降はCargoが固定versionの依存を取得するためネットワークが必要です。Metalは対応するmacOSとdevice、OpenCLは利用可能なplatform、device、driverを別に用意します。featureを有効にしてビルドできても実機計算の確認にはなりません。
 
-- **単独で実行できる例。** 必要な型と `main`、または test を含む Rust の小プログラムである。それぞれを別のファイルに保存して実行する。複数の例の `main` を一つのファイルへ連結しない。
-- **組込み用の抜粋。** その章までに作った `Graph`、builder、runtime へ追加する型や関数である。直前の説明にある型と補助関数を使う。ファイル全体ではないため、そのブロックだけをコンパイルする使い方はしない。
-- **外部 API の疑似コード。** Metal、OpenCL、ファイル形式の parser などを接続する順序と契約を示す。選ぶ binding やライブラリの正確な関数名へ置き換える。疑似コードがそのままビルドできるとは扱わない。
+実データを使う確認は条件付きです。MNIST、公開Qwen重み、tokenizer、公式reference用Python環境の準備は対応章に掲載します。Qwenの重みは約0.99GBです。BF16をf32へ展開し、コピーとworkspaceも作るので、ファイル容量以上のRAMが必要です。全parameterのAdamW学習は24章の見積りを先に実行します。
 
-Rust の単独例は、たとえば次のコマンドで確認する。これは実装予定の `cargo run --example ...` とは別に、本文中のコードを読むための使い方である。
+## 章を番号順に進める
+
+- [01. 定数 7 を C にして実行し、加算と乗算で 20 を返す](01-scalar-c.md)
+- [02. 同じ生成コードへ実行時入力を渡して 20 と 12 を返す](02-runtime-inputs.md)
+- [03. scalar の型と意味を決め、interpreter と rewrite を比較する](03-uop-rewrites.md)
+- [04. 純粋関数を CALL し、STACK と INDEX を UIR から実行する](04-functions-stack.md)
+- [05. バッファの LOAD と STORE を安全な順序で CPU 実行する](05-memory-runtime.md)
+- [06. RANGE と END から安全なループを生成する](06-loops.md)
+- [07. scalar の累積ループで総和、行和、GEMM と convolution を動かす](07-scalar-reductions.md)
+- [08. 一次元の shape と REDUCE を添字付きループへ変換する](08-shapes-rangeify.md)
+- [09. 融合と分割で閉じた kernel graph を作り、Plan を再実行する](09-fusion-fission.md)
+- [10. 多次元の座標変換で movement を実行する](10-movement.md)
+- [11. Tensor の合成演算で matmul と conv を動かす](11-tensor-gemm-conv.md)
+- [12. 数学関数を実行し、近似と値域の責任を分ける](12-math-functions.md)
+- [13. 純粋なグラフから勾配グラフを作って実行する](13-autodiff.md)
+- [14. 同じ実行計画を再利用して SGD と MNIST 学習を動かす](14-sgd-mnist.md)
+- [15. Metal の公開 API で実際の Graph を実行する](15-metal.md)
+- [16. OpenCL の公開 API で同じ Graph を実行する](16-opencl.md)
+- [17. loop split、unroll、vector、CPU worker を実行する](17-loop-optimizations.md)
+- [18. LOCAL と一様な barrier で並列縮約する](18-parallel-reduction.md)
+- [19. GEMM と conv のタイル、確保の再利用、compile cache を動かす](19-fast-gemm-conv.md)
+- [20. 上限付きの shape を束縛して同じ kernel を動かす](20-symbolic-shapes.md)
+- [21. モデルの重みを保存し、検証したファイルから再実行する](21-model-io.md)
+- [22. 小さな Transformer を通し、実際の Qwen checkpoint で次の token を計算する](22-transformer-qwen.md)
+- [23. 通常 attention と online attention を同じモデルで比べる](23-flash-attention.md)
+- [24. 小さな LLM を学習し、checkpoint から同じ更新を再開する](24-llm-training.md)
+- [25. 実行して確認した行列 capability と RMSNorm 拡張を使う](25-hardware-extensions.md)
+
+## 写経した結果を自動で再現する
+
+この節のコマンドは、教材checkoutのrootで実行します。`tools/replay_docs.py` はMarkdownの `file=` ブロックだけを、指定した別ディレクトリへ順に適用します。出力先には空のディレクトリを指定します。既存ファイルを持つ出力先と、このcheckout内への出力は拒否します。
 
 ```sh
-rustc --edition=2021 /tmp/chibi_example.rs -o /tmp/chibi_example
-/tmp/chibi_example
+uv run python tools/replay_docs.py --self-test
+uv run python tools/replay_docs.py --lint
+uv run python tools/replay_docs.py --output /tmp/chibigrad-book --check --report /tmp/chibigrad-book-report.json
 ```
 
-`#[test]` を含む単独例は `rustc --edition=2021 --test` で test 実行ファイルを作る。assertion が通ったことと、章全体の compiler pipeline が完成したことは区別する。C、MSL、OpenCL のコードは、それぞれ対応する生成先の言語であり、Rust のファイルへ直接貼らない。
+3行目はCPUの確認を実行します。`requires` のある確認は、指定した能力を持つ環境で `--capability metal`、`--capability opencl`、`--capability mnist`、`--capability qwen`、`--capability loopback` を追加して実行します。複数ある場合はオプションを繰り返します。各章のデータ準備コマンドと実行時の環境変数も先に設定します。実機・データがなければ結果は `NOT_RUN` です。
 
-先に単独例でループや座標変換の意味を確かめ、その処理を組込み用の抜粋の位置へ移す。最後に既存の graph、lowering、renderer、runtime を通す確認へ戻る。GPU の単独ホスト例が通っても、GPU kernel の実機確認は対応する章の手順で別に行う。
+`--through 02` なら02章までを展開します。途中の状態を比較する場合は、別の空ディレクトリを指定します。`--lint` の697項目は見出しとコード配置の構造検査です。数値の正しさは、実行したテストと外部referenceとの比較で判断します。
 
-## ファイルツリーと配置コメントを読む
+## 全章に適用する確認
 
-各章の「この章のファイル配置」は、その章の終わりまでに触る関連ファイルを示す。各コミット直下のツリーは、その変更で編集・追加・確認する部分だけを示す。前の章で作った他のファイルは残る。ツリーは教材の配置案であり、現在のcheckoutに全ファイルが存在するという意味ではない。
+以下の8節は各章の実装を終えた後に使います。コマンドは、特記しない限り写経先のrootで実行します。
 
-01では `examples/scalar_const.rs` の中だけで小さな全体を動かす。02で実行時入力と共有ライブラリが必要になった時に、共通処理を `src` へ移す。後の章でも、新しい処理が動くコミットと一緒にモジュールを追加する。各章のツリーを見て、将来の空ファイルを先に用意する必要はない。
+### 00-001 各小コミットで `cargo test` が通り、その時点の生成コードが実行できる。
 
-コードの先頭にあるパスを、配置先として読む。
+<!-- todo:00-001 -->
 
-```text
-// src/uop.rs（既存ファイルへ組み込む抜粋）
-// examples/book_03_intern.rs（単独で実行する例）
-// src/renderer/c.rs が生成するコード。生成先: <一時ディレクトリ>/kernel.c
-// src/runtime/metal.rs（外部APIの疑似コード）
+章末にそれまでのテストをまとめて実行します。本文中の期待値をホストの代入だけで作らず、生成Cを実行するfixtureを通します。
+
+```sh
+cargo test --all-targets
 ```
 
-`src` の抜粋は、そのファイルの型や関数へ追加する。置換する関数は直前の説明に従う。一つのブロック内で配置コメントが変わる場合は、次のコメントまでをそれぞれのファイルに分ける。単独例の `main` や検証専用の小さい型を、本体のモジュールへ重複して貼り付けない。`examples/book_*.rs` は部品の意味を確かめるプログラムであり、通常のコンパイラ経路を動かす `examples/scalar_inputs.rs` などとは分けて保存する。
+### 00-002 新しい機能の最小入力と期待値を確認する。
 
-新規モジュールは `src/lib.rs`、または `src/runtime/mod.rs` のような親の `mod.rs` から宣言する。初登場するコミットに追記する宣言を掲載する。既存の宣言や関数は残す。`src/main.rs` はCLIが必要になるまでそのままでよく、同じ本体を `main.rs` と `lib.rs` の両方から別々の `mod` 宣言で読み込まない。exampleはライブラリの公開入口を使い、内部の補助関数は各モジュールへ置く。
+<!-- todo:00-002 -->
 
-全体計画の概略ツリーにある `autograd.rs` は、詳細手順では `src/autodiff.rs` に相当する。同じ微分器を二つのファイルへ分けず、13章で作った `src/autodiff.rs` を24章でも拡張する。
+01章の小入力を再実行します。式の入力値と実際のstdoutを照合する例です。
 
-15章と16章ではruntimeを `metal`、`opencl` のCargo featureで有効にする。以降、GPUの予定コマンドには `--features metal` または `--features opencl` を追加する。Metalのruntimeと専用testはmacOSでもあることを条件にする。CPUだけの通常テストはこれらのfeatureを付けずに行い、rendererの文字列生成とGPU APIの接続を分けて確認する。
+```sh
+cargo run --example scalar_const -- 7
+cargo run --example scalar_arithmetic -- 2 3 4
+```
 
-GPU専用exampleは追加するコミットで `Cargo.toml` の `[[example]]` に `required-features` を設定する。通常の `cargo test` がそのexampleをビルドする場合にも、GPUの依存を要求しないためである。Metal専用exampleはmacOS用のmainと、それ以外で利用不可を表示するmainを条件で分ける。専用のuseと補助関数も同じOS条件で囲む。後のCPU/GPU共通exampleでは、GPU runtimeのimportと呼出しを同じfeature・OS条件の内側に置き、無効なbackendを選んだときは利用不可のエラーを返す。ホスト上の寸法計算などを試す `book_*.rs` は標準ライブラリだけで動くため、このGPU用featureを要求しない。
+### 00-003 不正な型、shape、添字のうち今回扱うケースを拒否できる。
 
-生成C、MSL、OpenCLのブロックは、コメントにあるrendererが作る出力である。生成された文字列を一時ファイルやbackendのsource compileへ渡す。RustのソースファイルへCやshader本体をそのまま貼らない。外部APIの疑似コードは指定runtimeなどへ実装する呼出し順を示しており、選んだbindingの型とエラー処理へ書き直す。
+<!-- todo:00-003 -->
 
-IR、期待値、実行出力の `text` ブロックは確認用であり、配置先のRustファイルへ貼るコードではない。シェルブロックは冒頭のコメントにあるプロジェクトルートで実行する。本文の `rustc` 単独例だけを試す場合は、保存したexampleのパスへコマンドを合わせる。`Cargo.toml` の既存package設定は維持し、ライブラリの公開入口をexampleからimportするときは実際のcrate名を使う。
+全テストには型、shape、添字、署名、容量、ファイル形式の拒否条件を含みます。正常系だけで確認を終えません。
 
+```sh
+cargo test --all-targets
+```
 
-## 実装する順序
+### 00-004 dump で、どの変換が何を取り除いたか確認する。
 
-元計画の11章は維持し、次の25ステップに分割する。追加した後半は元計画の12〜15章に対応する。番号順に読むと、各ステップの前提を先に実装できる。
+<!-- todo:00-004 -->
 
-| TODO | 動くようにするもの | 元計画の章 |
-|---|---|---|
-| [ ] [01. scalar の C 生成](01-scalar-c.md) | `7`、次に `(2+3)*4 = 20` をコンパイルして実行する | 1 |
-| [ ] [02. 実行時の入力](02-runtime-inputs.md) | 同じ生成コードへ異なる値を渡す | 1 |
-| [ ] [03. UOp と書き換え](03-uop-rewrites.md) | 型、共有、interpreter、整数式と定数の簡約を加える | 2 |
-| [ ] [04. 関数と STACK](04-functions-stack.md) | PARAM、CALL、STACK、INDEX と小さな UIR を扱う | 2 |
-| [ ] [05. メモリと runtime](05-memory-runtime.md) | LOAD、STORE、AFTER と共有ライブラリ実行を扱う | 3 |
-| [ ] [06. ループ](06-loops.md) | RANGE、END と入れ子のスコープを扱う | 4 |
-| [ ] [07. 累積と手書きカーネル](07-scalar-reductions.md) | 行和、GEMM、convolution を低水準 IR で書く | 4 |
-| [ ] [08. shape と rangeify](08-shapes-rangeify.md) | 一次元の式と REDUCE からループを生成する | 5 |
-| [ ] [09. fusion と fission](09-fusion-fission.md) | カーネル境界、中間保存、実行順を決める | 6 |
-| [ ] [10. movement](10-movement.md) | 多次元の座標を元の入力座標に変換する | 7 |
-| [ ] [11. Tensor と GEMM・conv](11-tensor-gemm-conv.md) | 高水準の式から行列積と畳み込みをコンパイルする | 7 |
-| [ ] [12. 数学関数](12-math-functions.md) | SQRT、SIN、LOG2、EXP2 の実装と分解を扱う | 7の補足 |
-| [ ] [13. 自動微分](13-autodiff.md) | 純粋なグラフから勾配グラフを作る | 8 |
-| [ ] [14. SGD と MNIST](14-sgd-mnist.md) | 再利用する実行計画で小さなモデルを学習する | 8・11 |
-| [ ] [15. Metal](15-metal.md) | 出力要素をスレッドへ割り当てて実機で実行する | 9 |
-| [ ] [16. OpenCL](16-opencl.md) | 同じ計算を OpenCL の通常 API で実行する | 9 |
-| [ ] [17. ループ最適化](17-loop-optimizations.md) | 分割、UPCAST、ベクトル化、CPU の THREAD を扱う | 10 |
-| [ ] [18. 並列 reduction](18-parallel-reduction.md) | local memory と barrier を使う | 10 |
-| [ ] [19. 高速 GEMM・conv](19-fast-gemm-conv.md) | tile、メモリ階層、再利用、測定を扱う | 10 |
-| [ ] [20. symbolic shape](20-symbolic-shapes.md) | 制約付きの実行時サイズと境界を扱う | 12 |
-| [ ] [21. モデル I/O](21-model-io.md) | 重み保存、URL、SHA-256、checkpoint を扱う | 13 |
-| [ ] [22. Transformer と Qwen](22-transformer-qwen.md) | 小モデルから実チェックポイントの推論へ広げる | 14 |
-| [ ] [23. flash attention](23-flash-attention.md) | attention 行列を全面保存しない実装へ変換する | 14 |
-| [ ] [24. LLM 学習](24-llm-training.md) | 小さな言語モデルの学習と再開を通す | 14 |
-| [ ] [25. ハードウェア拡張](25-hardware-extensions.md) | 行列アクセラレータと独自の拡張課題を扱う | 15 |
+変換前のgraphと生成Cを表示します。後の章ではPlanのkernel数、signature、workspace、実行時shapeも確認します。
 
-14で静的 CPU の小さな学習系、16でCPU・Metal・OpenCLの基本経路、19で基本最適化までが動く。20〜25は Gist の後半の内容を扱う追加段階であり、前半の開始条件にはしない。後半もこの計画の対象に含める。
+```sh
+cargo run --example scalar_arithmetic -- 2 3 4 --dump-graph --dump-source
+```
 
-## Gist の内容と対応を確認する
+### 00-005 interpreter、未最適化経路、tinygrad など、実装と異なる経路を比較先に使う。
 
-参照するのは [Compilers for Machine Learning](https://gist.github.com/geohot/4768597d9dc536446ee2d5de1f29e89d) の内容である。授業の日程、成績配分、SOTA 性能の達成はこの教材の受入条件にしない。扱う内容を以下の手順へ対応付ける。
+<!-- todo:00-005 -->
 
-| 扱う内容 | 詳細手順 |
-|---|---|
-| UOp、型、共有、定数畳み込み、記号的な簡約 | 01〜04、20 |
-| PARAM と CALL、STACK と INDEX、テスト用 ASSERT | 02〜04 |
-| メモリ、所有権、addrspace、accesses、storage_base | 05 |
-| LOAD と STORE の順序、AFTER、アクセス境界 | 05〜07 |
-| RANGE と END、入れ子、GEMM と conv | 06〜07、11 |
-| 一次元 broadcast、REDUCE、rangeify | 08 |
-| STAGE、materialization、fusion と fission | 09 |
-| 多次元 movement、合成演算 | 10〜11 |
-| 数学関数と近似・命令分解 | 12 |
-| GRADIENT に相当するグラフ変換と DETACH | 13 |
-| MNIST と演算量の見積り | 14、17、19 |
-| URL と SHA-256 を持つ入力・重みの取得 | 21 |
-| GPU、GLOBAL と LOCAL、共有メモリ | 15〜16、18〜19 |
-| UPCAST、CPU の並列化、メモリ階層 | 17〜19 |
-| 動的な記号的サイズ | 20 |
-| 実チェックポイントの Qwen 推論 | 21〜22 |
-| flash attention | 23 |
-| LLM の学習と再開 | 24 |
-| 行列アクセラレータ、別ハードウェアや論文の拡張 | 25 |
+Tensorのテストは独立interpreterと生成nativeコードを比較します。Qwenでは固定revisionの公式実装と全layer出力・logitsを比較します。
 
-同じ意味を API や test helper で実現する場合は、詳細手順に表現上の違いを書く。例えば現在の tinygrad に `ASSERT` や `GRADIENT` という演算がなくても、存在するかのように引用しない。テキスト UIR の完全な互換性も、内容の対応とは別の要件として扱う。
+```sh
+cargo test --all-targets
+```
 
-## tinygrad を読みながら実装する
+### 00-006 CPU と GPU の確認記録を分ける。CPU の成功で GPU を完了にしない。
 
-参照する checkout は `../../tinygrad`、解析対象の commit は `c22edff14c79310a9b2df62a78819cf77c8289fa` である。各詳細手順の対応表に、実際に読んだシンボルと行番号を記す。後で参照先が移動した場合は、この commit に戻って確認する。
+<!-- todo:00-006 -->
 
-| 読む場所 | 注目する責務 |
-|---|---|
-| [UOp](../../tinygrad/tinygrad/uop/ops.py#L181) | ノードの共有、導出情報、依存関係 |
-| [UOp の検証](../../tinygrad/tinygrad/uop/spec.py#L34) | 段階ごとに許される形を確認する |
-| [UIR の表示](../../tinygrad/tinygrad/uop/render.py#L59) | 人が読める graph dump を作る |
-| [rangeify](../../tinygrad/tinygrad/schedule/rangeify.py#L341) | 添字変換とカーネル境界 |
-| [添字変換](../../tinygrad/tinygrad/schedule/indexing.py#L146) | movement を座標の式に変換する |
-| [codegen](../../tinygrad/tinygrad/codegen/__init__.py#L269) | 最適化と lowering を分ける |
-| [実行](../../tinygrad/tinygrad/engine/realize.py#L284) | 計算とバッファの binding を結び付ける |
-| [数学 API](../../tinygrad/tinygrad/mixin/op.py#L390) | 少数の演算から高水準の演算を組み立てる |
+CPUのテストとGPUのテストを別に実行します。デバイスがなければ後の2行を未実行と記録します。
 
-各手順では「tinygrad にある責務」「chibigrad に採用する仕組み」「今は移植しない複雑さ」を分ける。現在の tinygrad にない小さな parser や CPU threading を追加する場合は、教育実装側の設計として明記する。
+```sh
+cargo test --all-targets
+cargo test --features metal --test book_15 -- --ignored
+cargo test --features opencl --test book_16 -- --ignored
+```
 
-全体計画の既存ソースリンクは、この docs ディレクトリから sibling の tinygrad を指す相対リンクへ修正する。シンボルの位置を読むためのリンクであり、chibigrad に同名ファイルが存在するという意味ではない。
+### 00-007 性能を扱う手順では、コンパイル、転送、起動、実行、同期を分けて記録する。
 
-## 毎回の完了条件
+<!-- todo:00-007 -->
 
-- [ ] 各小コミットで `cargo test` が通り、その時点の生成コードが実行できる。
-- [ ] 新しい機能の最小入力と期待値を確認する。
-- [ ] 不正な型、shape、添字のうち今回扱うケースを拒否できる。
-- [ ] dump で、どの変換が何を取り除いたか確認する。
-- [ ] interpreter、未最適化経路、tinygrad など、実装と異なる経路を比較先に使う。
-- [ ] CPU と GPU の確認記録を分ける。CPU の成功で GPU を完了にしない。
-- [ ] 性能を扱う手順では、コンパイル、転送、起動、実行、同期を分けて記録する。
-- [ ] ステップの実装が終わるまで、この計画のチェックボックスを完了にしない。
+15、16章の `gpu::Timings` はcompile、allocation、transfer、kernel、synchronization、totalを区別します。device eventが得られないkernel時間は `None` のままです。計測値の検査と実機実行を分けます。
 
-CPU だけの通常テストが GPU SDK を要求しない構成にする。Metal、OpenCL、行列アクセラレータの確認は対応する機器で実行し、その環境を記録する。機器がない場合は未確認と残す。
+```sh
+cargo test --test book_15
+cargo test --test book_16
+```
 
-## 元計画から変更した箇所
+### 00-008 ステップの実装が終わるまで、この計画のチェックボックスを完了にしない。
 
-- 第1章を、定数のコード生成と実行時入力の二段階へ細分化する。
-- 元の11章を詳細手順01〜19へ対応付け、章の説明は残す。
-- 数学関数と convolution の実装を明示し、Gist の内容との抜けを埋める。
-- 元の対象外項目のうち symbolic shape と行列アクセラレータは、後半の追加段階へ移す。
-- 第12〜15章として symbolic shape、I/O、実モデルと attention、ハードウェア拡張を追記する。
+<!-- todo:00-008 -->
 
-最初のステップで、汎用的な IR framework、全 backend、全 dtype、メモリアリーナを先に完成させない。必要な機能を実行例と一緒に追加する方針は変えない。
+完了は検証結果で記録します。教材checkoutのrootで構造検査を実行し、続いて全章を空ディレクトリへ再現します。条件付き確認の `NOT_RUN` を完了に読み替えません。
 
-## 参照する資料
+```sh
+uv run python tools/replay_docs.py --lint
+uv run python tools/replay_docs.py --output /tmp/chibigrad-final-check --check --report /tmp/chibigrad-final-check.json
+```
 
-- [全体計画](chibigrad-plan.md)。元の tinygrad 解析と設計方針を読む。
-- [Compilers for Machine Learning](https://gist.github.com/geohot/4768597d9dc536446ee2d5de1f29e89d)。扱う内容の範囲を確認する。
-- [chibicc の説明](https://github.com/rui314/chibicc/blob/main/README.md)。小さな入力から機能を追加する進め方を参照する。履歴の書換え方針はこの計画には採用しない。
-
-Foundational Thinking に沿って、各ステップで追加するデータと不変条件を先に記す。Sequence work into verifiable units に沿って、小さな実装と実行確認を一つの単位にする。
+詳細な責務と設計上の選択は [全体構成](chibigrad-plan.md) にまとめます。
