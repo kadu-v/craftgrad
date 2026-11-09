@@ -8,7 +8,7 @@ RANGE と END は `Stmt::Range { body }` の開始と閉じ括弧で表す。交
 <!-- todo:06-001 -->
 
 ```rust file=tests/loops.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
 };

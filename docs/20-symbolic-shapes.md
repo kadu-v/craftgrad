@@ -489,12 +489,12 @@ impl SymbolicPlan {
 `generic_reuses_binary_for_three_lengths_and_ignores_nan_tail` は生成 C を実行します。容量17を維持し、論理末尾以降を NaN にして長さ3、1、17を同じ Plan へ渡します。
 
 ```rust file="tests/symbolic.rs" mode="write"
-use chinigrad::symbolic::{Constraint, Dim, DimExpr, ShapeEnv, ShapeProgram};
-use chinigrad::{Binary, Buffer, Graph, Reduce};
+use chibigrad::symbolic::{Constraint, Dim, DimExpr, ShapeEnv, ShapeProgram};
+use chibigrad::{Binary, Buffer, Graph, Reduce};
 
 fn vector() -> (
-	chinigrad::symbolic::SymbolicPlan,
-	chinigrad::symbolic::VarId,
+	chibigrad::symbolic::SymbolicPlan,
+	chibigrad::symbolic::VarId,
 ) {
 	let mut env = ShapeEnv::default();
 	let n = env.variable("N", 1, 17).unwrap();
@@ -1451,7 +1451,7 @@ cargo check --all-features
 このテストファイルを追加します。CPU だけで生成 source の条件分岐を確認できます。GPU の4テストはデバイスが必要なので `--ignored` で明示的に実行します。未実行を成功として数えません。
 
 ```rust file="tests/symbolic_gpu.rs" mode="write"
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::{Dialect, Kernel},
 	gpu_graph::Backend,
@@ -1459,7 +1459,7 @@ use chinigrad::{
 	symbolic::{Dim, ShapeEnv, ShapeProgram},
 };
 
-fn program() -> (ShapeProgram, chinigrad::symbolic::VarId) {
+fn program() -> (ShapeProgram, chibigrad::symbolic::VarId) {
 	let mut env = ShapeEnv::default();
 	let n = env.variable("N", 1, 17).unwrap();
 	let mut graph = Graph::default();
@@ -1536,7 +1536,7 @@ fn reduction_buffers(kernel: &Kernel, input: Vec<f32>) -> Vec<Vec<f32>> {
 #[test]
 #[ignore = "requires a Metal device"]
 fn metal_local_sum_ignores_nan_tail() {
-	use chinigrad::backends::metal::MetalProgram;
+	use chibigrad::backends::metal::MetalProgram;
 	let reference = dynamic_sum(Dialect::Metal, 17, 17, 8).unwrap();
 	let first = MetalProgram::compile(&reference.first).unwrap();
 	let second = MetalProgram::compile(&reference.second).unwrap();
@@ -1563,7 +1563,7 @@ fn metal_local_sum_ignores_nan_tail() {
 #[test]
 #[ignore = "requires an OpenCL device"]
 fn opencl_local_sum_ignores_nan_tail() {
-	use chinigrad::backends::opencl::OpenClProgram;
+	use chibigrad::backends::opencl::OpenClProgram;
 	let reference = dynamic_sum(Dialect::OpenCl, 17, 17, 8).unwrap();
 	let first = OpenClProgram::compile(&reference.first, 0, 0).unwrap();
 	let second = OpenClProgram::compile(&reference.second, 0, 0).unwrap();
@@ -1907,7 +1907,7 @@ fn scalar_slots_and_metadata_use_the_same_validated_value() {
 	let (plan, n) = vector();
 	assert_eq!(
 		plan.program().scalar_slots()[&n],
-		vec![chinigrad::symbolic::ScalarSlot(0)]
+		vec![chibigrad::symbolic::ScalarSlot(0)]
 	);
 	let input = Buffer::new(vec![17], vec![1.; 17]).unwrap();
 	let (_, record) = plan.run(&[input], &[(n, 3)]).unwrap();
@@ -2223,7 +2223,7 @@ cargo test --test symbolic specialization_is_distinct_and_selected_only_at_sixte
 特化 key に値16と tile=8を加えます。直前のテストは16、17、3の順に実行して、特化版、generic、genericを選び、各末尾も比較します。次の example で選択を表示します。
 
 ```rust file="examples/symbolic_dispatch.rs" mode="write"
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph,
 	symbolic::{Dim, ShapeEnv, ShapeProgram},
 };
@@ -2647,7 +2647,7 @@ fn generic_specialized_and_static_f32_match_with_declared_tolerance() {
 			.prepare(&[input.clone()], &[(n, length)])
 			.unwrap();
 		let static_plan =
-			chinigrad::Plan::compile_specialized(&snapshot.graph, &plan.program().outputs).unwrap();
+			chibigrad::Plan::compile_specialized(&snapshot.graph, &plan.program().outputs).unwrap();
 		let expected = static_plan
 			.run_with_shapes(&[input.clone()], &snapshot.node_shapes)
 			.unwrap();
@@ -2672,7 +2672,7 @@ cargo test --test symbolic generic_specialized_and_static_f32_match_with_declare
 この example は Plan をループの外で作り、容量、論理 shape、値、総和を表示します。バックエンドは明示的に指定し、利用できなければエラーを返します。
 
 ```rust file="examples/symbolic_vector.rs" mode="write"
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu_graph::Backend,
 	symbolic::{Dim, ShapeEnv, ShapeProgram},
@@ -2761,7 +2761,7 @@ matmul は MUL と REDUCE の合成なので、K の等値制約を明示して�
 ```rust file="tests/symbolic.rs" mode="append"
 #[test]
 fn symbolic_gemm_k_is_an_explicit_prelaunch_equality() {
-	use chinigrad::Op;
+	use chibigrad::Op;
 	let mut env = ShapeEnv::default();
 	let ka = env.variable("K", 1, 3).unwrap();
 	let kb = env.variable("K", 1, 3).unwrap();

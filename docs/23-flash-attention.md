@@ -1,6 +1,6 @@
 # 23. 通常 attention と online attention を同じモデルで比べる
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -709,7 +709,7 @@ impl GpuPlan {
 ```
 
 ```rust file=tests/flash.rs mode=write
-use chinigrad::flash::*;
+use chibigrad::flash::*;
 fn compare(a: &[f32], b: &[f64]) {
 	assert_eq!(a.len(), b.len());
 	for (a, b) in a.iter().zip(b) {
@@ -804,15 +804,15 @@ fn native_c_and_composite_graph() {
 			.run(&q, &k, &v, &valid)
 			.unwrap();
 		compare(&native, &r.output);
-		let mut g = chinigrad::Graph::default();
+		let mut g = chibigrad::Graph::default();
 		let qi = g.input(0, vec![s.queries, s.heads, s.dim]).unwrap();
 		let ki = g.input(1, vec![s.keys, s.kv_heads, s.dim]).unwrap();
 		let vi = g.input(2, vec![s.keys, s.kv_heads, s.dim]).unwrap();
 		let out = graph_reference(&mut g, qi, ki, vi, s, &valid).unwrap();
 		let inputs = [
-			chinigrad::Buffer::new(g.shape(qi).to_vec(), q).unwrap(),
-			chinigrad::Buffer::new(g.shape(ki).to_vec(), k).unwrap(),
-			chinigrad::Buffer::new(g.shape(vi).to_vec(), v).unwrap(),
+			chibigrad::Buffer::new(g.shape(qi).to_vec(), q).unwrap(),
+			chibigrad::Buffer::new(g.shape(ki).to_vec(), k).unwrap(),
+			chibigrad::Buffer::new(g.shape(vi).to_vec(), v).unwrap(),
 		];
 		compare(
 			&g.compile(&[out]).unwrap().run(&inputs).unwrap()[0].data,
@@ -831,7 +831,7 @@ fn model_boundary_compiler_replaces_actual_graph() {
 		query_start: 5,
 		causal: true,
 	};
-	let mut g = chinigrad::Graph::default();
+	let mut g = chibigrad::Graph::default();
 	let q = g.input(0, vec![2, 2, 2]).unwrap();
 	let k = g.input(1, vec![3, 1, 2]).unwrap();
 	let v = g.input(2, vec![3, 1, 2]).unwrap();
@@ -848,9 +848,9 @@ fn model_boundary_compiler_replaces_actual_graph() {
 	let (p, path) = compile_boundaries(&g, &[out], &[boundary], false).unwrap();
 	assert!(path.contains("boundaries=1"));
 	let inputs = [
-		chinigrad::Buffer::new(vec![2, 2, 2], vec![1.; 8]).unwrap(),
-		chinigrad::Buffer::new(vec![3, 1, 2], vec![1.; 6]).unwrap(),
-		chinigrad::Buffer::new(vec![3, 1, 2], (0..6).map(|i| i as f32).collect()).unwrap(),
+		chibigrad::Buffer::new(vec![2, 2, 2], vec![1.; 8]).unwrap(),
+		chibigrad::Buffer::new(vec![3, 1, 2], vec![1.; 6]).unwrap(),
+		chibigrad::Buffer::new(vec![3, 1, 2], (0..6).map(|i| i as f32).collect()).unwrap(),
 	];
 	let expected = g.compile(&[out]).unwrap().run(&inputs).unwrap();
 	let actual = p.run(&inputs).unwrap();
@@ -864,7 +864,7 @@ fn model_boundary_compiler_replaces_actual_graph() {
 }
 #[test]
 fn gpu_source_has_uniform_barriers() {
-	use chinigrad::gpu::Dialect;
+	use chibigrad::gpu::Dialect;
 	for keys in [0, 1, 7, 8, 9] {
 		let s = AttentionShape {
 			queries: 3,
@@ -901,7 +901,7 @@ fn gpu_source_has_uniform_barriers() {
 ```
 
 ```rust file=tests/flash_hardware.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	flash::{self, AttentionShape},
 	gpu::{Dialect, Kernel},
@@ -941,7 +941,7 @@ fn cases(
 			)
 			.unwrap();
 			assert!(
-				chinigrad::flash::select(s, false, 32768, tile) == flash::AttentionPath::Online
+				chibigrad::flash::select(s, false, 32768, tile) == flash::AttentionPath::Online
 			);
 			for (&a, &b) in output.iter().zip(&reference.output) {
 				assert!(a.is_finite() && (a as f64 - b).abs() <= 1e-4 + 1e-4 * b.abs());
@@ -971,7 +971,7 @@ fn cases(
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn metal() {
 	cases(Dialect::Metal, Backend::Metal, |k, b| {
-		Ok(unsafe { chinigrad::backends::metal::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::metal::run(k, b) }?.output)
 	});
 }
 #[test]
@@ -979,7 +979,7 @@ fn metal() {
 #[cfg(feature = "opencl")]
 fn opencl() {
 	cases(Dialect::OpenCl, Backend::OpenCl, |k, b| {
-		Ok(unsafe { chinigrad::backends::opencl::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::opencl::run(k, b) }?.output)
 	});
 }
 ```
@@ -993,7 +993,7 @@ cargo test --test flash_hardware --features opencl opencl -- --ignored --exact
 ```
 
 ```rust file=tests/qwen_flash.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Graph,
 	flash::{compile_boundaries, register},
 	nn::qwen::{
@@ -1042,7 +1042,7 @@ fn same_model_logits_and_cache() {
 }
 #[test]
 fn training_uses_composite_backward_and_update() {
-	use chinigrad::{Buffer, Reduce, autodiff::gradient, flash};
+	use chibigrad::{Buffer, Reduce, autodiff::gradient, flash};
 	let mut g = Graph::default();
 	let q = g.input(0, vec![2, 2, 2]).unwrap();
 	let k = g.input(1, vec![3, 1, 2]).unwrap();
@@ -1072,7 +1072,7 @@ fn training_uses_composite_backward_and_update() {
 }
 #[test]
 fn online_cache_valid_prefix_matches_ordinary() {
-	use chinigrad::{Buffer, nn::qwen::KvState};
+	use chibigrad::{Buffer, nn::qwen::KvState};
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 11).unwrap();
 	let mut cache = KvState::new(&c).unwrap();
@@ -1133,7 +1133,7 @@ cargo test --test qwen_flash
 
 ```rust file=tests/book_23.rs mode=write
 mod suite0 {
-	use chinigrad::flash::*;
+	use chibigrad::flash::*;
 	pub(super) fn compare(a: &[f32], b: &[f64]) {
 		assert_eq!(a.len(), b.len());
 		for (a, b) in a.iter().zip(b) {
@@ -1228,15 +1228,15 @@ mod suite0 {
 				.run(&q, &k, &v, &valid)
 				.unwrap();
 			compare(&native, &r.output);
-			let mut g = chinigrad::Graph::default();
+			let mut g = chibigrad::Graph::default();
 			let qi = g.input(0, vec![s.queries, s.heads, s.dim]).unwrap();
 			let ki = g.input(1, vec![s.keys, s.kv_heads, s.dim]).unwrap();
 			let vi = g.input(2, vec![s.keys, s.kv_heads, s.dim]).unwrap();
 			let out = graph_reference(&mut g, qi, ki, vi, s, &valid).unwrap();
 			let inputs = [
-				chinigrad::Buffer::new(g.shape(qi).to_vec(), q).unwrap(),
-				chinigrad::Buffer::new(g.shape(ki).to_vec(), k).unwrap(),
-				chinigrad::Buffer::new(g.shape(vi).to_vec(), v).unwrap(),
+				chibigrad::Buffer::new(g.shape(qi).to_vec(), q).unwrap(),
+				chibigrad::Buffer::new(g.shape(ki).to_vec(), k).unwrap(),
+				chibigrad::Buffer::new(g.shape(vi).to_vec(), v).unwrap(),
 			];
 			compare(
 				&g.compile(&[out]).unwrap().run(&inputs).unwrap()[0].data,
@@ -1255,7 +1255,7 @@ mod suite0 {
 			query_start: 5,
 			causal: true,
 		};
-		let mut g = chinigrad::Graph::default();
+		let mut g = chibigrad::Graph::default();
 		let q = g.input(0, vec![2, 2, 2]).unwrap();
 		let k = g.input(1, vec![3, 1, 2]).unwrap();
 		let v = g.input(2, vec![3, 1, 2]).unwrap();
@@ -1272,9 +1272,9 @@ mod suite0 {
 		let (p, path) = compile_boundaries(&g, &[out], &[boundary], false).unwrap();
 		assert!(path.contains("boundaries=1"));
 		let inputs = [
-			chinigrad::Buffer::new(vec![2, 2, 2], vec![1.; 8]).unwrap(),
-			chinigrad::Buffer::new(vec![3, 1, 2], vec![1.; 6]).unwrap(),
-			chinigrad::Buffer::new(vec![3, 1, 2], (0..6).map(|i| i as f32).collect()).unwrap(),
+			chibigrad::Buffer::new(vec![2, 2, 2], vec![1.; 8]).unwrap(),
+			chibigrad::Buffer::new(vec![3, 1, 2], vec![1.; 6]).unwrap(),
+			chibigrad::Buffer::new(vec![3, 1, 2], (0..6).map(|i| i as f32).collect()).unwrap(),
 		];
 		let expected = g.compile(&[out]).unwrap().run(&inputs).unwrap();
 		let actual = p.run(&inputs).unwrap();
@@ -1288,7 +1288,7 @@ mod suite0 {
 	}
 	#[test]
 	pub(super) fn gpu_source_has_uniform_barriers() {
-		use chinigrad::gpu::Dialect;
+		use chibigrad::gpu::Dialect;
 		for keys in [0, 1, 7, 8, 9] {
 			let s = AttentionShape {
 				queries: 3,

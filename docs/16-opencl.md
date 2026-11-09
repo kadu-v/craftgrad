@@ -1,6 +1,6 @@
 # 16. OpenCL の公開 API で同じ Graph を実行する
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -8,7 +8,7 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 ```toml file=Cargo.toml mode=write
 [package]
-name = "chinigrad"
+name = "chibigrad"
 version = "0.1.0"
 edition = "2024"
 [features]
@@ -375,7 +375,7 @@ pub fn lower_math(
 ```
 
 ```rust file=tests/book_16.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce, Unary,
 	gpu::{Dialect, groups},
 	gpu_graph::{Backend, GpuPlan, MathMode, lower, lower_math},
@@ -408,11 +408,11 @@ fn source_contract() {
 }
 #[cfg(feature = "opencl")]
 fn hardware_contract() {
-	use chinigrad::backends::opencl::{OpenClProgram, devices};
+	use chibigrad::backends::opencl::{OpenClProgram, devices};
 	let inventory = devices().unwrap();
 	assert!(!inventory.is_empty());
 	let first = &inventory[0];
-	let mut bad = chinigrad::gpu::add(Dialect::OpenCl, 4, 4).unwrap();
+	let mut bad = chibigrad::gpu::add(Dialect::OpenCl, 4, 4).unwrap();
 	bad.source = "invalid OpenCL".into();
 	assert!(
 		OpenClProgram::compile(&bad, first.platform, first.device)
@@ -444,7 +444,7 @@ fn hardware_contract() {
 	let padded = g.pad(a, vec![(1, 0), (1, 2)]).unwrap();
 	let movement = g.permute(padded, vec![1, 0]).unwrap();
 	let loss = g.reduce(z, Reduce::Sum, vec![0, 1], false).unwrap();
-	let gradient = chinigrad::autodiff::gradient(&mut g, loss, &[b], None).unwrap()[0];
+	let gradient = chibigrad::autodiff::gradient(&mut g, loss, &[b], None).unwrap()[0];
 	let outputs = [z, movement, gradient];
 	let inputs = [
 		Buffer::new(vec![2, 3], vec![1., 2., 3., 4., 5., 6.]).unwrap(),

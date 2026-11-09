@@ -81,7 +81,7 @@ impl Graph {
 ```
 
 ```rust file=tests/movement.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
 }

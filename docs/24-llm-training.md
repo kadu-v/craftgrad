@@ -653,7 +653,7 @@ pub fn estimate_training_storage(
 ```
 
 ```rust file=examples/train_tiny_llm.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	checkpoint::{
 		DataCursor, TrainingState, adopt_checkpoint, restore_training_checkpoint,
@@ -729,7 +729,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=examples/train_qwen.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	checkpoint::{
 		DataCursor, TrainingState, adopt_checkpoint, restore_training_checkpoint,
@@ -764,7 +764,7 @@ fn main() -> Result<()> {
 		.unwrap_or("1".into())
 		.parse::<usize>()
 		.map_err(|e| e.to_string())?;
-	let manifest_value: chinigrad::fetch::Manifest =
+	let manifest_value: chibigrad::fetch::Manifest =
 		serde_json::from_slice(&std::fs::read(&manifest).map_err(|e| e.to_string())?)
 			.map_err(|e| e.to_string())?;
 	manifest_value.validate()?;
@@ -774,7 +774,7 @@ fn main() -> Result<()> {
 		.find(|a| a.name == "config.json")
 		.ok_or("config missing from manifest")?;
 	let config_bytes =
-		chinigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
+		chibigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
 	let config: QwenConfig = serde_json::from_slice(&config_bytes).map_err(|e| e.to_string())?;
 	config.require_public_05b()?;
 	let estimate =
@@ -837,7 +837,7 @@ fn main() -> Result<()> {
 		optimizer_config,
 		scheduler_step: 0,
 		data: DataCursor::new(corpus.len() - sequence, 1)?,
-		dataset_sha: chinigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
+		dataset_sha: chibigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
 		config_sha: identity("config.json")?,
 		tokenizer_sha: identity("tokenizer.json")?,
 		accumulated_microbatches: 0,
@@ -871,7 +871,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=tests/llm_gradients.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	autodiff::gradient,
 	nn::{cross_entropy, qwen::QwenConfig},
@@ -881,7 +881,7 @@ use chinigrad::{
 ```
 
 ```rust file=tests/llm_resume.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	checkpoint::{
 		DataCursor, TrainingState, adopt_checkpoint, restore_training_checkpoint,
 		save_training_checkpoint,
@@ -2346,7 +2346,7 @@ fn main() -> Result<()> {
 		.unwrap_or("1".into())
 		.parse::<usize>()
 		.map_err(|e| e.to_string())?;
-	let manifest_value: chinigrad::fetch::Manifest =
+	let manifest_value: chibigrad::fetch::Manifest =
 		serde_json::from_slice(&std::fs::read(&manifest).map_err(|e| e.to_string())?)
 			.map_err(|e| e.to_string())?;
 	manifest_value.validate()?;
@@ -2356,7 +2356,7 @@ fn main() -> Result<()> {
 		.find(|a| a.name == "config.json")
 		.ok_or("config missing from manifest")?;
 	let config_bytes =
-		chinigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
+		chibigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
 	let config: QwenConfig = serde_json::from_slice(&config_bytes).map_err(|e| e.to_string())?;
 	config.require_public_05b()?;
 	let estimate =
@@ -2419,7 +2419,7 @@ fn main() -> Result<()> {
 		optimizer_config,
 		scheduler_step: 0,
 		data: DataCursor::new(corpus.len() - sequence, 1)?,
-		dataset_sha: chinigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
+		dataset_sha: chibigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
 		config_sha: identity("config.json")?,
 		tokenizer_sha: identity("tokenizer.json")?,
 		accumulated_microbatches: 0,
@@ -2468,7 +2468,7 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 fn storage_counts_all_layers_and_tied_once() {
 	let c: QwenConfig =
 		serde_json::from_str(include_str!("../fixtures/qwen25/config.json")).unwrap();
-	let registry = chinigrad::nn::qwen::parameter_registry(&c).unwrap();
+	let registry = chibigrad::nn::qwen::parameter_registry(&c).unwrap();
 	let s = estimate_training_storage(&registry, 1, 8, &c).unwrap();
 	assert_eq!(s.persistent, s.parameters * 16);
 	assert_eq!(s.update_outputs, s.parameters * 12);
@@ -2654,7 +2654,7 @@ fn main() -> Result<()> {
 		.unwrap_or("1".into())
 		.parse::<usize>()
 		.map_err(|e| e.to_string())?;
-	let manifest_value: chinigrad::fetch::Manifest =
+	let manifest_value: chibigrad::fetch::Manifest =
 		serde_json::from_slice(&std::fs::read(&manifest).map_err(|e| e.to_string())?)
 			.map_err(|e| e.to_string())?;
 	manifest_value.validate()?;
@@ -2664,7 +2664,7 @@ fn main() -> Result<()> {
 		.find(|a| a.name == "config.json")
 		.ok_or("config missing from manifest")?;
 	let config_bytes =
-		chinigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
+		chibigrad::fetch::verified_read(&Path::new(&directory).join("config.json"), config_asset)?;
 	let config: QwenConfig = serde_json::from_slice(&config_bytes).map_err(|e| e.to_string())?;
 	config.require_public_05b()?;
 	let estimate =
@@ -2727,7 +2727,7 @@ fn main() -> Result<()> {
 		optimizer_config,
 		scheduler_step: 0,
 		data: DataCursor::new(corpus.len() - sequence, 1)?,
-		dataset_sha: chinigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
+		dataset_sha: chibigrad::fetch::sha256(&serde_json::to_vec(&corpus).unwrap()),
 		config_sha: identity("config.json")?,
 		tokenizer_sha: identity("tokenizer.json")?,
 		accumulated_microbatches: 0,
@@ -2785,7 +2785,7 @@ cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.
 fn storage_counts_all_layers_and_tied_once() {
 	let c: QwenConfig =
 		serde_json::from_str(include_str!("../fixtures/qwen25/config.json")).unwrap();
-	let registry = chinigrad::nn::qwen::parameter_registry(&c).unwrap();
+	let registry = chibigrad::nn::qwen::parameter_registry(&c).unwrap();
 	let s = estimate_training_storage(&registry, 1, 8, &c).unwrap();
 	assert_eq!(s.persistent, s.parameters * 16);
 	assert_eq!(s.update_outputs, s.parameters * 12);

@@ -247,7 +247,7 @@ pub fn gradient(
 ```
 
 ```rust file=tests/autodiff.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Unary, autodiff::gradient};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Unary, autodiff::gradient};
 fn buffer(shape: &[usize], data: &[f32]) -> Buffer {
 	Buffer::new(shape.to_vec(), data.to_vec()).unwrap()
 }

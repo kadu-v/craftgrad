@@ -1368,7 +1368,7 @@ pub use runtime::{Abi, Binding, Buffer, Plan};
 ```
 
 ```rust file=tests/shapes_rangeify.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
 }
@@ -1395,7 +1395,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -1537,7 +1537,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -1723,7 +1723,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -1771,7 +1771,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -1918,7 +1918,7 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 07章までの `Kernel::lower` と今回の `graph::kernel_bodies` は、どちらも `native::KernelBody` を返します。`Stmt` と `Expr` はメモリ・ループfrontendの表現として残し、TensorのGraphをそのASTへ変換したとは扱いません。共通の低水準表現とentry生成を、型とnative実行で照合します。
 
 ```rust file=tests/shared_kernel_ir.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Graph, Result,
 	kernel::{Expr, Index, Kernel, store},
 	native::KernelBody,
@@ -1934,7 +1934,7 @@ fn frontends_lower_to_the_same_kernel_body() -> Result<()> {
 	assert!(body.dependencies.is_empty());
 	let mut high = Graph::default();
 	let root = high.constant(7., vec![])?;
-	let bodies: Vec<KernelBody> = chinigrad::graph::kernel_bodies(&high, &[root], false)?;
+	let bodies: Vec<KernelBody> = chibigrad::graph::kernel_bodies(&high, &[root], false)?;
 	assert_eq!(bodies.len(), 1);
 	assert_eq!(low.compile()?.run(&[])?, vec![vec![7.]]);
 	assert_eq!(high.compile(&[root])?.run(&[])?[0].data, vec![7.]);
@@ -2070,7 +2070,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2118,7 +2118,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2259,7 +2259,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2307,7 +2307,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2355,7 +2355,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2403,7 +2403,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2451,7 +2451,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2499,7 +2499,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2547,7 +2547,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2595,7 +2595,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2643,7 +2643,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
@@ -2691,7 +2691,7 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 	let one = g.constant(1., vec![])?;
 	let mul = g.binary(Binary::Mul, x, two)?;
 	let affine = g.binary(Binary::Add, mul, one)?;
-	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	let p = chibigrad::Plan::compile_unfused(&g, &[affine])?;
 	assert_eq!(p.kernel_count, 2);
 	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
 	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;

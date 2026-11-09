@@ -312,8 +312,8 @@ pub mod functions;
 ```
 
 ```rust file=tests/function_stack.rs mode=write
-use chinigrad::functions::Function;
-use chinigrad::{
+use chibigrad::functions::Function;
+use chibigrad::{
 	Result,
 	scalar::{Alu, Bounds, DType, ScalarGraph, Value},
 };
@@ -352,7 +352,7 @@ fn scoped_calls_and_assertion_failure() -> Result<()> {
 		let b = g.constant(Value::f32(b));
 		let y = f.call(&mut g, &[a, b])?[0];
 		assert_eq!(g.compile(y)?.run(&[])?, Value::f32(expected));
-		assert!(chinigrad::functions::assert_uop(&g, y, &[], Value::f32(expected + 1.)).is_err());
+		assert!(chibigrad::functions::assert_uop(&g, y, &[], Value::f32(expected + 1.)).is_err());
 	}
 	let other = Function::build("other", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![g.alu(Alu::Add, args.to_vec())?])

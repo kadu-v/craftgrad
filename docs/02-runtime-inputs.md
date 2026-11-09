@@ -127,7 +127,7 @@ pub mod native;
 <!-- todo:02-002 -->
 
 ```rust file=tests/runtime_inputs.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
 };
@@ -178,7 +178,7 @@ pub fn scalar_words(values: &[f32]) -> Vec<u64> {
 <!-- todo:02-004 -->
 
 ```rust file=examples/scalar_const.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
 };
@@ -258,7 +258,7 @@ impl NativeLibrary {
 	/// The caller must trust the compiler, C source, and library initializers.
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
-			"chinigrad-{}-{}",
+			"chibigrad-{}-{}",
 			std::process::id(),
 			NEXT.fetch_add(1, Ordering::Relaxed)
 		));
@@ -354,7 +354,7 @@ cargo test --quiet --test runtime_inputs
 ```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
-			"chinigrad-{}-{}",
+			"chibigrad-{}-{}",
 			std::process::id(),
 			NEXT.fetch_add(1, Ordering::Relaxed)
 		));
@@ -477,7 +477,7 @@ cargo test --quiet --test runtime_inputs constant_and_add
 <!-- todo:02-010 -->
 
 ```rust file=examples/scalar_inputs.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
 };
@@ -704,7 +704,7 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-016 -->
 
 ```rust file=tests/runtime_inputs.rs mode=append
-use chinigrad::native::NativeLibrary;
+use chibigrad::native::NativeLibrary;
 #[test]
 fn native_errors() -> Result<()> {
 	let source = "int chibi_entry(void*const* b,const unsigned long long* s){return 0;}";
@@ -741,7 +741,7 @@ fn native_errors() -> Result<()> {
 ```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
-			"chinigrad-{}-{}",
+			"chibigrad-{}-{}",
 			std::process::id(),
 			NEXT.fetch_add(1, Ordering::Relaxed)
 		));

@@ -1,6 +1,6 @@
 # 18. LOCAL と一様な barrier で並列縮約する
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -286,7 +286,7 @@ impl GpuPlan {
 ```
 
 ```rust file=tests/collective.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	collective::{Collective, LocalOp},
 	gpu::Dialect,
 	gpu_kernels::*,
@@ -345,7 +345,7 @@ fn barriers_and_shader_compile() {
 ```
 
 ```rust file=tests/reduction_hardware.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	gpu::{Dialect, Kernel},
 	gpu_kernels::{dynamic_sum, row_sum},
 };
@@ -380,7 +380,7 @@ fn cases(d: Dialect, run: impl Fn(&Kernel, &[Vec<f32>]) -> Result<Vec<f32>, Stri
 #[ignore = "requires Metal"]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn metal() {
-	let seed = chinigrad::backends::metal::MetalProgram::compile(
+	let seed = chibigrad::backends::metal::MetalProgram::compile(
 		&row_sum(Dialect::Metal, 1, 1, 64, true).unwrap(),
 	)
 	.unwrap();
@@ -395,7 +395,7 @@ fn metal() {
 #[ignore = "requires OpenCL"]
 #[cfg(feature = "opencl")]
 fn opencl() {
-	let seed = chinigrad::backends::opencl::OpenClProgram::compile(
+	let seed = chibigrad::backends::opencl::OpenClProgram::compile(
 		&row_sum(Dialect::OpenCl, 1, 1, 64, true).unwrap(),
 		0,
 		0,
@@ -419,7 +419,7 @@ cargo test --test reduction_hardware --features opencl opencl -- --ignored --exa
 
 ```rust file=tests/book_18.rs mode=write
 mod suite0 {
-	use chinigrad::{
+	use chibigrad::{
 		collective::{Collective, LocalOp},
 		gpu::Dialect,
 		gpu_kernels::*,

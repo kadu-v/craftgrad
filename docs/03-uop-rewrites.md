@@ -690,7 +690,7 @@ pub mod scalar;
 ```
 
 ```rust file=tests/scalar_rewrite.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	scalar::{Alu, Bounds, DType, ScalarGraph, Value},
 };
@@ -810,7 +810,7 @@ fn forged_scalar_bounds_are_rejected() -> Result<()> {
 ```
 
 ```rust file=examples/scalar_const.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	scalar::{ScalarGraph, Value},
 };
@@ -839,7 +839,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=examples/scalar_arithmetic.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	scalar::{Alu, ScalarGraph, Value},
 };

@@ -824,7 +824,7 @@ pub fn encode(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>>
 ```
 
 ```rust file=examples/qwen_infer.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Graph, Result, model_assets,
 	nn::qwen::{KvState, greedy, logits_all, parameter_registry, register_graph, token_buffer},
 };
@@ -926,7 +926,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=examples/qwen_tokenize.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	fetch::{Manifest, verified_read},
 	model_assets::encode,
@@ -956,7 +956,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=examples/fetch_qwen.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	fetch::{Manifest, fetch},
 };
@@ -1279,7 +1279,7 @@ tokenizers==0.20.3
 ```
 
 ```rust file=tests/transformer_reference.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	nn::qwen::initialize,
 	nn::{
@@ -1521,14 +1521,14 @@ fn reference(c: &QwenConfig, weights: &[BufferData], tokens: &[usize]) -> Vec<Ve
 ```
 
 ```rust file=tests/qwen_tokenizer.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	fetch::{Manifest, verified_read},
 	model_assets::encode,
 };
 ```
 
 ```rust file=tests/qwen_public.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Graph, model_assets,
 	nn::qwen::{logits_all, parameter_registry, register_graph, token_buffer},
 };

@@ -569,7 +569,7 @@ pub mod kernel;
 ```
 
 ```rust file=tests/memory_runtime.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
 };

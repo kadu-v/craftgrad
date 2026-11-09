@@ -207,7 +207,7 @@ pub mod tensor;
 ```
 
 ```rust file=tests/tensor_operations.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
 }
@@ -225,7 +225,7 @@ fn compare(g: &Graph, outs: &[usize], inputs: &[Buffer]) -> Result<Vec<Buffer>> 
 	}
 	Ok(actual)
 }
-use chinigrad::tensor::TensorContext;
+use chibigrad::tensor::TensorContext;
 
 #[test]
 fn matmul_conv() -> Result<()> {

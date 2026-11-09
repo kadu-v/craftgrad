@@ -1,6 +1,6 @@
 # 19. GEMM と conv のタイル、確保の再利用、compile cache を動かす
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -672,7 +672,7 @@ impl GpuPlan {
 ```
 
 ```rust file=tests/gemm_opt.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	gemm_opt::{compile, flops, recognize},
 };
@@ -714,7 +714,7 @@ fn tiled_graph_and_rebind() {
 fn work_estimate() {
 	assert_eq!(
 		flops(1, 2, 5, (1, 2, 3)).unwrap(),
-		chinigrad::gemm_opt::Flops {
+		chibigrad::gemm_opt::Flops {
 			useful: 20,
 			padded: 24
 		}
@@ -723,7 +723,7 @@ fn work_estimate() {
 ```
 
 ```rust file=tests/conv_opt.rs mode=write
-use chinigrad::{Buffer, Graph, conv_opt::conv2d, gemm_opt};
+use chibigrad::{Buffer, Graph, conv_opt::conv2d, gemm_opt};
 #[test]
 fn conv_stride_padding_uses_real_gemm() {
 	let mut g = Graph::default();
@@ -742,7 +742,7 @@ fn conv_stride_padding_uses_real_gemm() {
 ```
 
 ```rust file=tests/storage.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph,
 	storage::{CompileCache, MemoryPlan},
 };
@@ -776,7 +776,7 @@ fn actual_reuse_and_binary_cache() {
 ```
 
 ```rust file=tests/gemm_source.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	gpu::Dialect,
 	gpu_kernels::{GemmTile, gemm},
 };
@@ -803,7 +803,7 @@ fn vector_loads_are_guarded() {
 ```
 
 ```rust file=tests/gemm_hardware.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	gpu::{Dialect, Kernel},
 	gpu_graph::{Backend, GpuPlan},
@@ -855,7 +855,7 @@ fn cases(
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn metal() {
 	cases(Dialect::Metal, Backend::Metal, |k, b| {
-		Ok(unsafe { chinigrad::backends::metal::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::metal::run(k, b) }?.output)
 	});
 }
 #[test]
@@ -863,7 +863,7 @@ fn metal() {
 #[cfg(feature = "opencl")]
 fn opencl() {
 	cases(Dialect::OpenCl, Backend::OpenCl, |k, b| {
-		Ok(unsafe { chinigrad::backends::opencl::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::opencl::run(k, b) }?.output)
 	});
 }
 ```
@@ -878,7 +878,7 @@ cargo test --test gemm_hardware --features opencl opencl -- --ignored --exact
 
 ```rust file=tests/book_19.rs mode=write
 mod suite0 {
-	use chinigrad::{
+	use chibigrad::{
 		Buffer, Graph,
 		gemm_opt::{compile, flops, recognize},
 	};
@@ -920,7 +920,7 @@ mod suite0 {
 	pub(super) fn work_estimate() {
 		assert_eq!(
 			flops(1, 2, 5, (1, 2, 3)).unwrap(),
-			chinigrad::gemm_opt::Flops {
+			chibigrad::gemm_opt::Flops {
 				useful: 20,
 				padded: 24
 			}
@@ -929,7 +929,7 @@ mod suite0 {
 }
 
 mod suite1 {
-	use chinigrad::{Buffer, Graph, conv_opt::conv2d, gemm_opt};
+	use chibigrad::{Buffer, Graph, conv_opt::conv2d, gemm_opt};
 	#[test]
 	pub(super) fn conv_stride_padding_uses_real_gemm() {
 		let mut g = Graph::default();
@@ -948,7 +948,7 @@ mod suite1 {
 }
 
 mod suite2 {
-	use chinigrad::{
+	use chibigrad::{
 		Binary, Buffer, Graph,
 		storage::{CompileCache, MemoryPlan},
 	};
@@ -982,7 +982,7 @@ mod suite2 {
 }
 
 mod suite3 {
-	use chinigrad::{
+	use chibigrad::{
 		gpu::Dialect,
 		gpu_kernels::{GemmTile, gemm},
 	};

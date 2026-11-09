@@ -389,7 +389,7 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 
 
 ```rust file=tests/fusion_plan.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
 }
@@ -471,7 +471,7 @@ fn dynamic_metadata() -> Result<()> {
 		[6., 8.]
 	);
 	assert!(
-		chinigrad::Plan::compile_specialized(&g, &[y])?
+		chibigrad::Plan::compile_specialized(&g, &[y])?
 			.run_with_shapes(&[buffer(&[4], &[3., 4., 9., 9.])], &shapes)
 			.is_err()
 	);
@@ -1638,12 +1638,12 @@ cargo test --quiet --test fusion_plan
 次のテストは署名・CALL・stateの不一致を個別に作り、生成コードの実行も確認します。
 
 ```rust file=tests/closed_kernels.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Result,
 	closure::{calls, signatures, verify_body, verify_calls},
 };
 
-fn fixture() -> Result<(Graph, Vec<chinigrad::native::KernelBody>)> {
+fn fixture() -> Result<(Graph, Vec<chibigrad::native::KernelBody>)> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
 	let _outside = g.input(1, vec![3])?;
@@ -1651,7 +1651,7 @@ fn fixture() -> Result<(Graph, Vec<chinigrad::native::KernelBody>)> {
 	let a = g.binary(Binary::Add, x, one)?;
 	let stage = g.stage(a)?;
 	let out = g.binary(Binary::Mul, stage, one)?;
-	let bodies = chinigrad::graph::kernel_bodies(&g, &[out], true)?;
+	let bodies = chibigrad::graph::kernel_bodies(&g, &[out], true)?;
 	Ok((g, bodies))
 }
 

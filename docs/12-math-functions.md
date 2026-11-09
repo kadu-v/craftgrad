@@ -142,7 +142,7 @@ pub mod math;
 ```
 
 ```rust file=tests/math_functions.rs mode=write
-use chinigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
+use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
 }
@@ -160,7 +160,7 @@ fn compare(g: &Graph, outs: &[usize], inputs: &[Buffer]) -> Result<Vec<Buffer>> 
 	}
 	Ok(actual)
 }
-use chinigrad::math;
+use chibigrad::math;
 
 #[test]
 fn empty_and_math() -> Result<()> {
@@ -310,7 +310,7 @@ cargo test --quiet --test math_functions empty_and_math
 ```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
-			"chinigrad-{}-{}",
+			"chibigrad-{}-{}",
 			std::process::id(),
 			NEXT.fetch_add(1, Ordering::Relaxed)
 		));

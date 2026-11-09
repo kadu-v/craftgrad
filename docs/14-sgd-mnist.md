@@ -181,7 +181,7 @@ pub fn cross_entropy_runtime(
 ```
 
 ```rust file=examples/mnist.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph, Result,
 	autodiff::gradient,
 	data::{Mnist, parse_idx},
@@ -341,7 +341,7 @@ fn main() -> Result<()> {
 ```
 
 ```rust file=tests/mnist.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph,
 	autodiff::gradient,
 	data::{idx_fixture, parse_idx},

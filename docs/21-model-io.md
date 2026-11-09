@@ -593,7 +593,7 @@ pub fn load_shards(
 ```
 
 ```rust file=tests/model_io.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph,
 	fetch::{Asset, Manifest, fetch, load_shards, sha256, verified_read},
 	safetensor,

@@ -1,6 +1,6 @@
 # 17. loop split、unroll、vector、CPU worker を実行する
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -193,7 +193,7 @@ pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Resu
 ```
 
 ```rust file=tests/loop_opt.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	loop_opt::{Options, compile, interchange_axes},
 };
@@ -286,7 +286,7 @@ fn more_workers_than_outputs() {
 
 ```rust file=tests/book_17.rs mode=write
 mod suite0 {
-	use chinigrad::{
+	use chibigrad::{
 		Binary, Buffer, Graph, Reduce,
 		loop_opt::{Options, compile, interchange_axes},
 	};

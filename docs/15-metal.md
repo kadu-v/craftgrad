@@ -1,6 +1,6 @@
 # 15. Metal の公開 API で実際の Graph を実行する
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -10,7 +10,7 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 ```toml file=Cargo.toml mode=write
 [package]
-name = "chinigrad"
+name = "chibigrad"
 version = "0.1.0"
 edition = "2024"
 [features]
@@ -757,7 +757,7 @@ impl GpuPlan {
 ```
 
 ```rust file=tests/gpu_graph.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::Dialect,
 	gpu_graph::{Backend, GpuPlan, lower},
@@ -810,7 +810,7 @@ fn unsupported_index_math_rejected_before_compilation() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![4]).unwrap();
 	let i = g.input(1, vec![1]).unwrap();
-	let i = g.unary(chinigrad::Unary::Sin, i).unwrap();
+	let i = g.unary(chibigrad::Unary::Sin, i).unwrap();
 	let y = g.gather(x, i, 0).unwrap();
 	for d in [Dialect::Metal, Dialect::OpenCl] {
 		assert!(
@@ -823,7 +823,7 @@ fn unsupported_index_math_rejected_before_compilation() {
 ```
 
 ```rust file=tests/book_15.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::{Dialect, groups},
 	gpu_graph::{Backend, GpuPlan, lower},
@@ -859,8 +859,8 @@ fn source_contract() {
 }
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn hardware_contract() {
-	use chinigrad::backends::metal::MetalProgram;
-	let mut bad = chinigrad::gpu::add(Dialect::Metal, 4, 4).unwrap();
+	use chibigrad::backends::metal::MetalProgram;
+	let mut bad = chibigrad::gpu::add(Dialect::Metal, 4, 4).unwrap();
 	bad.source = "this is invalid MSL".into();
 	let error = MetalProgram::compile(&bad)
 		.err()
@@ -894,7 +894,7 @@ fn hardware_contract() {
 	let pad = g.pad(a, vec![(1, 0), (1, 2)]).unwrap();
 	let movement = g.permute(pad, vec![1, 0]).unwrap();
 	let loss = g.reduce(z, Reduce::Sum, vec![0, 1], false).unwrap();
-	let gradient = chinigrad::autodiff::gradient(&mut g, loss, &[b], None).unwrap()[0];
+	let gradient = chibigrad::autodiff::gradient(&mut g, loss, &[b], None).unwrap()[0];
 	let outputs = [z, movement, gradient];
 	let p = GpuPlan::compile(&g, &outputs, Backend::Metal, 64).unwrap();
 	let inputs = [

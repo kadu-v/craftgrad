@@ -9,7 +9,7 @@
 
 ```toml file=Cargo.toml mode=write
 [package]
-name = "chinigrad"
+name = "chibigrad"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,7 +22,7 @@ pub mod bootstrap;
 ```
 
 ```rust file=examples/scalar_const.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op},
 };
@@ -147,7 +147,7 @@ impl Drop for Temporary {
 }
 pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 	let dir = Temporary(std::env::temp_dir().join(format!(
-		"chinigrad-exe-{}-{}",
+		"chibigrad-exe-{}-{}",
 		std::process::id(),
 		NEXT.fetch_add(1, Ordering::Relaxed)
 	)));
@@ -201,7 +201,7 @@ pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 <!-- todo:01-005 -->
 
 ```rust file=tests/scalar_c.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op, run_source},
 };
@@ -235,7 +235,7 @@ fn rejects_invalid_graph_and_compiler() {
 	assert!(
 		run_source(
 			"int main(void){return 0;}",
-			Some("/missing/chinigrad-clang")
+			Some("/missing/chibigrad-clang")
 		)
 		.unwrap_err()
 		.contains("cannot launch clang")
@@ -272,7 +272,7 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-007 -->
 
 ```rust file=examples/scalar_arithmetic.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op},
 };
@@ -522,7 +522,7 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```rust file="src/bootstrap.rs" mode="replace" item="pub fn run_source("
 pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 	let dir = Temporary(std::env::temp_dir().join(format!(
-		"chinigrad-exe-{}-{}",
+		"chibigrad-exe-{}-{}",
 		std::process::id(),
 		NEXT.fetch_add(1, Ordering::Relaxed)
 	)));
@@ -742,7 +742,7 @@ fn rejects_invalid_graph_and_compiler() {
 	assert!(
 		run_source(
 			"int main(void){return 0;}",
-			Some("/missing/chinigrad-clang")
+			Some("/missing/chibigrad-clang")
 		)
 		.unwrap_err()
 		.contains("cannot launch clang")

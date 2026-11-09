@@ -119,8 +119,8 @@ pub mod reductions;
 ```
 
 ```rust file=tests/scalar_reductions.rs mode=write
-use chinigrad::reductions;
-use chinigrad::{
+use chibigrad::reductions;
+use chibigrad::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
 };

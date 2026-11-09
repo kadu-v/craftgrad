@@ -1,6 +1,6 @@
 # 25. 実行して確認した行列 capability と RMSNorm 拡張を使う
 
-この章は前章までの `chinigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
 
 CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
 
@@ -400,7 +400,7 @@ impl GpuPlan {
 ```
 
 ```rust file=tests/matrix.rs mode=write
-use chinigrad::matrix::*;
+use chibigrad::matrix::*;
 #[test]
 fn half_roundtrip() {
 	for h in 0..=u16::MAX {
@@ -427,7 +427,7 @@ fn guarded_matrix_source() {
 ```
 
 ```rust file=tests/norm_opt.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	norm_opt::{build, compile},
 };
@@ -462,7 +462,7 @@ fn norm_same_graph_fused_and_composite() {
 ```
 
 ```rust file=tests/gpu_hardware.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph, Reduce,
 	gpu::{Dialect, Kernel},
 	gpu_graph::{Backend, GpuPlan},
@@ -514,7 +514,7 @@ fn fixture(d: Dialect, run: impl Fn(&Kernel, &[Vec<f32>]) -> Result<Vec<f32>, St
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn metal_collectives() {
 	fixture(Dialect::Metal, |k, b| {
-		Ok(unsafe { chinigrad::backends::metal::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::metal::run(k, b) }?.output)
 	});
 }
 #[test]
@@ -522,7 +522,7 @@ fn metal_collectives() {
 #[cfg(feature = "opencl")]
 fn opencl_collectives() {
 	fixture(Dialect::OpenCl, |k, b| {
-		Ok(unsafe { chinigrad::backends::opencl::run(k, b) }?.output)
+		Ok(unsafe { chibigrad::backends::opencl::run(k, b) }?.output)
 	});
 }
 fn graph_fixture(backend: Backend) {
@@ -550,7 +550,7 @@ fn opencl_graph_collective() {
 #[ignore = "requires Metal"]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn matrix_actual() {
-	let cap = chinigrad::matrix::probe(false);
+	let cap = chibigrad::matrix::probe(false);
 	eprintln!("{cap:?}");
 	for (m, n, k) in [(8, 8, 8), (8, 8, 16), (8, 8, 24), (9, 7, 17)] {
 		let mut g = Graph::default();
@@ -577,7 +577,7 @@ fn matrix_actual() {
 #[ignore = "requires Metal"]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn mixed_matrix_actual() {
-	let cap = chinigrad::matrix::probe(false);
+	let cap = chibigrad::matrix::probe(false);
 	for (m, n, k) in [(8, 8, 16), (9, 7, 17), (8, 8, 24)] {
 		let values = [-1., 0., 0.5, 1., 0.03125];
 		let a = (0..m * k)
@@ -586,8 +586,8 @@ fn mixed_matrix_actual() {
 		let b = (0..k * n)
 			.map(|i| values[(i * 3) % values.len()])
 			.collect::<Vec<_>>();
-		let (auto, path) = chinigrad::matrix::run_mixed(&a, &b, m, n, k, &cap, false).unwrap();
-		let (ordinary, _) = chinigrad::matrix::run_mixed(&a, &b, m, n, k, &cap, true).unwrap();
+		let (auto, path) = chibigrad::matrix::run_mixed(&a, &b, m, n, k, &cap, false).unwrap();
+		let (ordinary, _) = chibigrad::matrix::run_mixed(&a, &b, m, n, k, &cap, true).unwrap();
 		eprintln!("{path} {:?}", auto.timings);
 		for (&a, &b) in auto.output.iter().zip(&ordinary.output) {
 			assert!((a - b).abs() <= 1e-3 + 1e-3 * b.abs());
@@ -605,7 +605,7 @@ cargo test --test gpu_hardware --features metal mixed_matrix_actual -- --ignored
 ```
 
 ```rust file=tests/student_norm.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph, Reduce,
 	autodiff::gradient,
 	norm_opt::{build, compile},
@@ -669,11 +669,11 @@ fn independent_rmsnorm_extension_and_gradients() {
 ```
 
 ```rust file=examples/student_norm.rs mode=write
-use chinigrad::{
+use chibigrad::{
 	Buffer, Graph,
 	norm_opt::{build, compile},
 };
-fn main() -> chinigrad::Result<()> {
+fn main() -> chibigrad::Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2])?;
 	let w = g.input(1, vec![2])?;
@@ -731,7 +731,7 @@ cargo run --example student_norm
 
 ```rust file=tests/book_25.rs mode=write
 mod suite0 {
-	use chinigrad::matrix::*;
+	use chibigrad::matrix::*;
 	#[test]
 	pub(super) fn half_roundtrip() {
 		for h in 0..=u16::MAX {
@@ -758,7 +758,7 @@ mod suite0 {
 }
 
 mod suite1 {
-	use chinigrad::{
+	use chibigrad::{
 		Buffer, Graph,
 		norm_opt::{build, compile},
 	};
@@ -2806,7 +2806,7 @@ pub fn compile(
 `examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
 
 ```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
-fn main() -> chinigrad::Result<()> {
+fn main() -> chibigrad::Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2])?;
 	let w = g.input(1, vec![2])?;
@@ -2895,7 +2895,7 @@ fn todo_25_025() {
 `examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
 
 ```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
-fn main() -> chinigrad::Result<()> {
+fn main() -> chibigrad::Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2])?;
 	let w = g.input(1, vec![2])?;
