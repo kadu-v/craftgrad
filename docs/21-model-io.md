@@ -711,6 +711,36 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 実装箇所は `state::save_state` と `state::load_state` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
 
+`src/state.rs` の `pub fn save_state(`の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn save_state("
+pub fn save_state(directory: &Path, state: &BTreeMap<String, TensorRecord>) -> Result<()> {
+	fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+	let mut payload = Vec::new();
+	let mut tensors = BTreeMap::new();
+	for (name, t) in state {
+		t.validate()?;
+		tensors.insert(
+			name.clone(),
+			Entry {
+				dtype: t.dtype,
+				shape: t.shape.clone(),
+				offset: payload.len(),
+				length: t.payload.len(),
+			},
+		);
+		payload.extend(&t.payload);
+	}
+	fs::write(directory.join("tensors.bin"), payload).map_err(|e| e.to_string())?;
+	let metadata = serde_json::to_vec_pretty(&Metadata {
+		version: 1,
+		tensors,
+	})
+	.map_err(|e| e.to_string())?;
+	fs::write(directory.join("state.json"), metadata).map_err(|e| e.to_string())
+}
+```
+
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
@@ -721,6 +751,32 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 
 実装箇所は `state::TensorRecord::{validate,to_buffer}` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
+
+`src/state.rs` の `pub fn to_buffer(`（`impl TensorRecord` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
+	pub fn to_buffer(&self) -> Result<Buffer> {
+		self.validate()?;
+		let data = match self.dtype {
+			DType::F32 => self
+				.payload
+				.chunks_exact(4)
+				.map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+				.collect(),
+			DType::BF16 => self
+				.payload
+				.chunks_exact(2)
+				.map(|b| f32::from_bits((u16::from_le_bytes(b.try_into().unwrap()) as u32) << 16))
+				.collect(),
+			DType::F16 => self
+				.payload
+				.chunks_exact(2)
+				.map(|b| f16_to_f32(u16::from_le_bytes(b.try_into().unwrap())))
+				.collect(),
+		};
+		Buffer::new(self.shape.clone(), data)
+	}
+```
 
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
@@ -733,6 +789,23 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 実装箇所は `state::Registry::adopt` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
 
+`src/state.rs` の `pub fn adopt(`（`impl Registry` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn adopt(" within="impl Registry"
+	pub fn adopt(
+		&self,
+		live: &mut TensorSet,
+		loaded: &BTreeMap<String, TensorRecord>,
+		partial: bool,
+	) -> Result<()> {
+		let candidate = self.validate(loaded, partial)?;
+		let mut merged = live.clone();
+		merged.extend(candidate);
+		*live = merged;
+		Ok(())
+	}
+```
+
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
@@ -743,6 +816,82 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
+
+`tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+fn roundtrip_and_plan_binding() {
+	let dir = temp("state");
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"weight",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"running",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![],
+				trainable: false,
+			},
+		)
+		.unwrap();
+	let tensors = BTreeMap::from([
+		("weight".into(), tensor()),
+		(
+			"running".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![], vec![7.]).unwrap()),
+		),
+	]);
+	save_state(&dir, &tensors).unwrap();
+	let loaded = load_state(&dir).unwrap();
+	assert_eq!(tensors, loaded);
+	let mut state = registry.validate(&loaded, false).unwrap();
+	assert_eq!(registry.parameters().into_iter().collect::<Vec<_>>(), [0]);
+	let mut graph = Graph::default();
+	let w = graph.input(0, vec![2]).unwrap();
+	let _running = graph.input(1, vec![]).unwrap();
+	let row = graph.constant(0., vec![2]).unwrap();
+	let ids = graph.binary(Binary::Add, w, row).unwrap();
+	let a = graph.shrink(ids, vec![(0, 1)]).unwrap();
+	let b = graph.shrink(ids, vec![(1, 2)]).unwrap();
+	let a = graph.reshape(a, vec![]).unwrap();
+	let b = graph.reshape(b, vec![]).unwrap();
+	let product = graph.binary(Binary::Mul, a, b).unwrap();
+	let four = graph.constant(4., vec![]).unwrap();
+	let result = graph.binary(Binary::Mul, product, four).unwrap();
+	let plan = graph.compile(&[result]).unwrap();
+	let original = registry.validate(&tensors, false).unwrap();
+	assert_eq!(
+		plan.run(&registry.bind(&original).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	state.insert(
+		0,
+		TensorRecord::from_buffer(&Buffer::new(vec![2], vec![1., 1.25]).unwrap()),
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[5.]
+	);
+	assert!(plan.source.contains("buffers[0]"));
+}
+```
 
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
@@ -786,6 +935,64 @@ fn safetensors_layout_and_corruption() {
 
 実装箇所は `safetensor::read` と `safetensor::unique_json` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
 
+`src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
+
+```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
+	let len = u64::from_le_bytes(
+		bytes
+			.get(..8)
+			.ok_or("short safetensors prefix")?
+			.try_into()
+			.unwrap(),
+	);
+	let len = usize::try_from(len).map_err(|_| "header length overflow")?;
+	if len > 100_000_000 {
+		return Err("safetensors header too large".into());
+	}
+	let start = 8usize.checked_add(len).ok_or("header overflow")?;
+	let header = unique_json(bytes.get(8..start).ok_or("short safetensors header")?)?;
+	let object = header.as_object().ok_or("header must be an object")?;
+	let payload = bytes.get(start..).ok_or("payload start")?;
+	let mut spans = Vec::new();
+	let mut result = BTreeMap::new();
+	for (name, value) in object {
+		if name == "__metadata__" {
+			let metadata = value.as_object().ok_or("metadata object")?;
+			if metadata.values().any(|v| !v.is_string()) {
+				return Err("metadata values must be strings".into());
+			}
+			continue;
+		}
+		let h: Header = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+		let [a, b] = h.data_offsets;
+		if b < a {
+			return Err("reversed offsets".into());
+		}
+		let t = TensorRecord {
+			dtype: h.dtype,
+			shape: h.shape,
+			payload: payload.get(a..b).ok_or("tensor outside payload")?.to_vec(),
+		};
+		t.validate()?;
+		spans.push((a, b));
+		result.insert(name.clone(), t);
+	}
+	spans.sort();
+	let mut end = 0;
+	for (a, b) in spans {
+		if a != end {
+			return Err("overlap or hole in safetensors payload".into());
+		}
+		end = b;
+	}
+	if end != payload.len() {
+		return Err("unclaimed payload".into());
+	}
+	Ok(result)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
@@ -796,6 +1003,64 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 
 実装箇所は `safetensor::read` と `safetensor::unique_json` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
+
+`src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
+
+```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
+	let len = u64::from_le_bytes(
+		bytes
+			.get(..8)
+			.ok_or("short safetensors prefix")?
+			.try_into()
+			.unwrap(),
+	);
+	let len = usize::try_from(len).map_err(|_| "header length overflow")?;
+	if len > 100_000_000 {
+		return Err("safetensors header too large".into());
+	}
+	let start = 8usize.checked_add(len).ok_or("header overflow")?;
+	let header = unique_json(bytes.get(8..start).ok_or("short safetensors header")?)?;
+	let object = header.as_object().ok_or("header must be an object")?;
+	let payload = bytes.get(start..).ok_or("payload start")?;
+	let mut spans = Vec::new();
+	let mut result = BTreeMap::new();
+	for (name, value) in object {
+		if name == "__metadata__" {
+			let metadata = value.as_object().ok_or("metadata object")?;
+			if metadata.values().any(|v| !v.is_string()) {
+				return Err("metadata values must be strings".into());
+			}
+			continue;
+		}
+		let h: Header = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+		let [a, b] = h.data_offsets;
+		if b < a {
+			return Err("reversed offsets".into());
+		}
+		let t = TensorRecord {
+			dtype: h.dtype,
+			shape: h.shape,
+			payload: payload.get(a..b).ok_or("tensor outside payload")?.to_vec(),
+		};
+		t.validate()?;
+		spans.push((a, b));
+		result.insert(name.clone(), t);
+	}
+	spans.sort();
+	let mut end = 0;
+	for (a, b) in spans {
+		if a != end {
+			return Err("overlap or hole in safetensors payload".into());
+		}
+		end = b;
+	}
+	if end != payload.len() {
+		return Err("unclaimed payload".into());
+	}
+	Ok(result)
+}
+```
 
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
@@ -808,6 +1073,64 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 実装箇所は `safetensor::read` と `safetensor::unique_json` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
 
+`src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
+
+```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
+	let len = u64::from_le_bytes(
+		bytes
+			.get(..8)
+			.ok_or("short safetensors prefix")?
+			.try_into()
+			.unwrap(),
+	);
+	let len = usize::try_from(len).map_err(|_| "header length overflow")?;
+	if len > 100_000_000 {
+		return Err("safetensors header too large".into());
+	}
+	let start = 8usize.checked_add(len).ok_or("header overflow")?;
+	let header = unique_json(bytes.get(8..start).ok_or("short safetensors header")?)?;
+	let object = header.as_object().ok_or("header must be an object")?;
+	let payload = bytes.get(start..).ok_or("payload start")?;
+	let mut spans = Vec::new();
+	let mut result = BTreeMap::new();
+	for (name, value) in object {
+		if name == "__metadata__" {
+			let metadata = value.as_object().ok_or("metadata object")?;
+			if metadata.values().any(|v| !v.is_string()) {
+				return Err("metadata values must be strings".into());
+			}
+			continue;
+		}
+		let h: Header = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+		let [a, b] = h.data_offsets;
+		if b < a {
+			return Err("reversed offsets".into());
+		}
+		let t = TensorRecord {
+			dtype: h.dtype,
+			shape: h.shape,
+			payload: payload.get(a..b).ok_or("tensor outside payload")?.to_vec(),
+		};
+		t.validate()?;
+		spans.push((a, b));
+		result.insert(name.clone(), t);
+	}
+	spans.sort();
+	let mut end = 0;
+	for (a, b) in spans {
+		if a != end {
+			return Err("overlap or hole in safetensors payload".into());
+		}
+		end = b;
+	}
+	if end != payload.len() {
+		return Err("unclaimed payload".into());
+	}
+	Ok(result)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
@@ -819,6 +1142,64 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 実装箇所は `safetensor::read` と `safetensor::unique_json` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
 
+`src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
+
+```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
+	let len = u64::from_le_bytes(
+		bytes
+			.get(..8)
+			.ok_or("short safetensors prefix")?
+			.try_into()
+			.unwrap(),
+	);
+	let len = usize::try_from(len).map_err(|_| "header length overflow")?;
+	if len > 100_000_000 {
+		return Err("safetensors header too large".into());
+	}
+	let start = 8usize.checked_add(len).ok_or("header overflow")?;
+	let header = unique_json(bytes.get(8..start).ok_or("short safetensors header")?)?;
+	let object = header.as_object().ok_or("header must be an object")?;
+	let payload = bytes.get(start..).ok_or("payload start")?;
+	let mut spans = Vec::new();
+	let mut result = BTreeMap::new();
+	for (name, value) in object {
+		if name == "__metadata__" {
+			let metadata = value.as_object().ok_or("metadata object")?;
+			if metadata.values().any(|v| !v.is_string()) {
+				return Err("metadata values must be strings".into());
+			}
+			continue;
+		}
+		let h: Header = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+		let [a, b] = h.data_offsets;
+		if b < a {
+			return Err("reversed offsets".into());
+		}
+		let t = TensorRecord {
+			dtype: h.dtype,
+			shape: h.shape,
+			payload: payload.get(a..b).ok_or("tensor outside payload")?.to_vec(),
+		};
+		t.validate()?;
+		spans.push((a, b));
+		result.insert(name.clone(), t);
+	}
+	spans.sort();
+	let mut end = 0;
+	for (a, b) in spans {
+		if a != end {
+			return Err("overlap or hole in safetensors payload".into());
+		}
+		end = b;
+	}
+	if end != payload.len() {
+		return Err("unclaimed payload".into());
+	}
+	Ok(result)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
@@ -829,6 +1210,36 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 
 実装箇所は `safetensor::read` と `safetensor::unique_json` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
+
+`tests/model_io.rs` の `fn safetensors_layout_and_corruption(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
+fn safetensors_layout_and_corruption() {
+	let payload = tensor().payload;
+	let good = encoded(
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		&payload,
+	);
+	assert_eq!(safetensor::read(&good).unwrap()["w"], tensor());
+	for header in [
+		r#"{"w":{"dtype":"U8","shape":[2],"data_offsets":[0,2]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[3],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,999]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]},"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]},"b":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[18446744073709551615,8],"data_offsets":[0,8]}}"#,
+	] {
+		assert!(
+			safetensor::read(&encoded(header, &payload)).is_err(),
+			"{header}"
+		);
+	}
+	for len in [0, 3, 7, 8, 12] {
+		assert!(safetensor::read(&good[..len]).is_err());
+	}
+	assert!(safetensor::unique_json(br#"{"x":{"a":1,"a":2}}"#).is_err());
+}
+```
 
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
@@ -901,6 +1312,51 @@ fn strict_atomic_load() {
 
 実装箇所は `state::Registry::validate` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
 
+`src/state.rs` の `pub fn validate(`（`impl Registry` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
+	pub fn validate(
+		&self,
+		loaded: &BTreeMap<String, TensorRecord>,
+		partial: bool,
+	) -> Result<TensorSet> {
+		let mut errors = Vec::new();
+		let mut result = TensorSet::new();
+		for name in loaded.keys() {
+			if !self.names.contains_key(name) {
+				errors.push(format!("unexpected {name}"));
+			}
+		}
+		for (name, spec) in &self.names {
+			match loaded.get(name) {
+				None if !partial => errors.push(format!("missing {name}")),
+				None => {}
+				Some(t) => {
+					if let Err(e) = t.validate() {
+						errors.push(format!("{name}: {e}"));
+					}
+					if t.shape != spec.shape {
+						errors.push(format!("shape {name}"));
+					}
+					if t.dtype != spec.dtype {
+						errors.push(format!("dtype {name}"));
+					}
+					if let Some(old) = result.insert(spec.id, t.clone()) {
+						if old != *t {
+							errors.push(format!("tied payload mismatch {name}"));
+						}
+					}
+				}
+			}
+		}
+		if errors.is_empty() {
+			Ok(result)
+		} else {
+			Err(errors.join("\n"))
+		}
+	}
+```
+
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
@@ -911,6 +1367,51 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 
 実装箇所は `state::Registry::validate` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
+
+`src/state.rs` の `pub fn validate(`（`impl Registry` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
+	pub fn validate(
+		&self,
+		loaded: &BTreeMap<String, TensorRecord>,
+		partial: bool,
+	) -> Result<TensorSet> {
+		let mut errors = Vec::new();
+		let mut result = TensorSet::new();
+		for name in loaded.keys() {
+			if !self.names.contains_key(name) {
+				errors.push(format!("unexpected {name}"));
+			}
+		}
+		for (name, spec) in &self.names {
+			match loaded.get(name) {
+				None if !partial => errors.push(format!("missing {name}")),
+				None => {}
+				Some(t) => {
+					if let Err(e) = t.validate() {
+						errors.push(format!("{name}: {e}"));
+					}
+					if t.shape != spec.shape {
+						errors.push(format!("shape {name}"));
+					}
+					if t.dtype != spec.dtype {
+						errors.push(format!("dtype {name}"));
+					}
+					if let Some(old) = result.insert(spec.id, t.clone()) {
+						if old != *t {
+							errors.push(format!("tied payload mismatch {name}"));
+						}
+					}
+				}
+			}
+		}
+		if errors.is_empty() {
+			Ok(result)
+		} else {
+			Err(errors.join("\n"))
+		}
+	}
+```
 
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
@@ -923,6 +1424,25 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 実装箇所は `state::Registry::{bind,parameters}` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
 
+`src/state.rs` の `pub fn bind(`（`impl Registry` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn bind(" within="impl Registry"
+	pub fn bind(&self, state: &TensorSet) -> Result<Vec<Buffer>> {
+		let max = self.names.values().map(|s| s.slot).max().unwrap_or(0);
+		let mut buffers = vec![Buffer::new(vec![], vec![0.])?; max + 1];
+		for spec in self.names.values() {
+			let t = state
+				.get(&spec.id)
+				.ok_or_else(|| format!("missing ParamId {}", spec.id))?;
+			if t.shape != spec.shape {
+				return Err("binding shape mismatch".into());
+			}
+			buffers[spec.slot] = t.to_buffer()?;
+		}
+		Ok(buffers)
+	}
+```
+
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
@@ -933,6 +1453,18 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 
 実装箇所は `state::Registry::{bind,parameters}` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
+
+`src/state.rs` の `pub fn parameters(`（`impl Registry` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn parameters(" within="impl Registry"
+	pub fn parameters(&self) -> BTreeSet<u32> {
+		self.names
+			.values()
+			.filter(|s| s.trainable)
+			.map(|s| s.id)
+			.collect()
+	}
+```
 
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
@@ -945,6 +1477,65 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
 
+`tests/model_io.rs` の `fn strict_atomic_load(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn strict_atomic_load("
+fn strict_atomic_load() {
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"w",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"b",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![1],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	let valid = BTreeMap::from([
+		("w".into(), tensor()),
+		(
+			"b".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![1], vec![1.]).unwrap()),
+		),
+	]);
+	let mut live = registry.validate(&valid, false).unwrap();
+	let before = live.clone();
+	let corrupt = BTreeMap::from([
+		(
+			"w".into(),
+			TensorRecord {
+				dtype: DType::BF16,
+				shape: vec![1],
+				payload: vec![0, 0],
+			},
+		),
+		("unexpected".into(), tensor()),
+	]);
+	let error = registry.adopt(&mut live, &corrupt, false).unwrap_err();
+	for text in ["missing b", "unexpected unexpected", "shape w", "dtype w"] {
+		assert!(error.contains(text));
+	}
+	assert_eq!(live, before);
+	let partial = BTreeMap::from([("w".into(), tensor())]);
+	registry.adopt(&mut live, &partial, true).unwrap();
+}
+```
+
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
@@ -955,6 +1546,36 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 
 実装箇所は `fetch::Manifest::validate`、`fetch::verified_read`、`fetch::fetch` である。この要件に対する実行可能な確認は `model_io::strict_atomic_load` に置く。
+
+`src/fetch.rs` の `pub fn validate(`（`impl Manifest` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn validate(" within="impl Manifest"
+	pub fn validate(&self) -> Result<()> {
+		if self.revision.len() != 40 || !self.revision.bytes().all(|c| c.is_ascii_hexdigit()) {
+			return Err("revision must be a pinned 40-digit commit".into());
+		}
+		let mut names = BTreeSet::new();
+		for a in &self.files {
+			if Path::new(&a.name).components().count() != 1
+				|| !matches!(
+					Path::new(&a.name).components().next(),
+					Some(Component::Normal(_))
+				) || !names.insert(&a.name)
+			{
+				return Err("unsafe or duplicate asset name".into());
+			}
+			if a.sha256.len() != 64 || !a.sha256.bytes().all(|c| c.is_ascii_hexdigit()) {
+				return Err("invalid SHA256".into());
+			}
+			if !a.url.starts_with("http://127.0.0.1:")
+				&& !a.url.contains(&format!("/resolve/{}/", self.revision))
+			{
+				return Err("URL is not pinned to manifest revision".into());
+			}
+		}
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --offline --test model_io strict_atomic_load -- --exact
@@ -1061,6 +1682,71 @@ fn digest_before_parser() {
 
 実装箇所は `fetch::Manifest::validate`、`fetch::verified_read`、`fetch::fetch` である。この要件に対する実行可能な確認は `model_io::digest_before_parser` に置く。
 
+`src/fetch.rs` の `pub fn fetch(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn fetch("
+pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
+	if Path::new(&asset.name).components().count() != 1
+		|| !matches!(
+			Path::new(&asset.name).components().next(),
+			Some(Component::Normal(_))
+		) {
+		return Err("unsafe asset name".into());
+	}
+	fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+	let target = cache.join(&asset.name);
+	if target.exists() {
+		return verified_read(&target, asset);
+	}
+	let nonce = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_err(|e| e.to_string())?
+		.as_nanos();
+	let temporary = cache.join(format!(
+		".{}.{}.{}.part",
+		asset.name,
+		std::process::id(),
+		nonce
+	));
+	let result = (|| {
+		let mut created = File::options()
+			.write(true)
+			.create_new(true)
+			.open(&temporary)
+			.map_err(|e| e.to_string())?;
+		created.write_all(&[]).map_err(|e| e.to_string())?;
+		drop(created);
+		let status = Command::new("curl")
+			.args([
+				"--fail",
+				"--location",
+				"--silent",
+				"--show-error",
+				"--max-time",
+				"120",
+				"--output",
+			])
+			.arg(&temporary)
+			.arg(&asset.url)
+			.status()
+			.map_err(|e| e.to_string())?;
+		if !status.success() {
+			return Err(format!("download failed {}", asset.name));
+		}
+		let data = verified_read(&temporary, asset)?;
+		File::open(&temporary)
+			.and_then(|f| f.sync_all())
+			.map_err(|e| e.to_string())?;
+		fs::rename(&temporary, &target).map_err(|e| e.to_string())?;
+		Ok(data)
+	})();
+	if result.is_err() {
+		let _ = fs::remove_file(temporary);
+	}
+	result
+}
+```
+
 ```sh check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
@@ -1072,6 +1758,24 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 実装箇所は `fetch::Manifest::validate`、`fetch::verified_read`、`fetch::fetch` である。この要件に対する実行可能な確認は `model_io::digest_before_parser` に置く。
 
+`src/fetch.rs` の `pub fn verified_read(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn verified_read("
+pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
+	let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+	if metadata.len() != asset.bytes {
+		return Err(format!("length mismatch {}", asset.name));
+	}
+	let mut file = File::open(path).map_err(|e| e.to_string())?;
+	let mut data = Vec::new();
+	file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+	if sha256(&data) != asset.sha256.to_ascii_lowercase() {
+		return Err(format!("digest mismatch {}", asset.name));
+	}
+	Ok(data)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
@@ -1082,6 +1786,71 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 
 実装箇所は `fetch::Manifest::validate`、`fetch::verified_read`、`fetch::fetch` である。この要件に対する実行可能な確認は `model_io::digest_before_parser` に置く。
+
+`src/fetch.rs` の `pub fn fetch(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn fetch("
+pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
+	if Path::new(&asset.name).components().count() != 1
+		|| !matches!(
+			Path::new(&asset.name).components().next(),
+			Some(Component::Normal(_))
+		) {
+		return Err("unsafe asset name".into());
+	}
+	fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+	let target = cache.join(&asset.name);
+	if target.exists() {
+		return verified_read(&target, asset);
+	}
+	let nonce = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_err(|e| e.to_string())?
+		.as_nanos();
+	let temporary = cache.join(format!(
+		".{}.{}.{}.part",
+		asset.name,
+		std::process::id(),
+		nonce
+	));
+	let result = (|| {
+		let mut created = File::options()
+			.write(true)
+			.create_new(true)
+			.open(&temporary)
+			.map_err(|e| e.to_string())?;
+		created.write_all(&[]).map_err(|e| e.to_string())?;
+		drop(created);
+		let status = Command::new("curl")
+			.args([
+				"--fail",
+				"--location",
+				"--silent",
+				"--show-error",
+				"--max-time",
+				"120",
+				"--output",
+			])
+			.arg(&temporary)
+			.arg(&asset.url)
+			.status()
+			.map_err(|e| e.to_string())?;
+		if !status.success() {
+			return Err(format!("download failed {}", asset.name));
+		}
+		let data = verified_read(&temporary, asset)?;
+		File::open(&temporary)
+			.and_then(|f| f.sync_all())
+			.map_err(|e| e.to_string())?;
+		fs::rename(&temporary, &target).map_err(|e| e.to_string())?;
+		Ok(data)
+	})();
+	if result.is_err() {
+		let _ = fs::remove_file(temporary);
+	}
+	result
+}
+```
 
 ```sh check
 cargo test --offline --test model_io digest_before_parser -- --exact
@@ -1123,6 +1892,32 @@ fn half_precision_reference() {
 
 実装箇所は `state::TensorRecord::to_buffer` と `state::f16_to_f32` である。この要件に対する実行可能な確認は `model_io::half_precision_reference` に置く。
 
+`src/state.rs` の `pub fn to_buffer(`（`impl TensorRecord` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
+	pub fn to_buffer(&self) -> Result<Buffer> {
+		self.validate()?;
+		let data = match self.dtype {
+			DType::F32 => self
+				.payload
+				.chunks_exact(4)
+				.map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+				.collect(),
+			DType::BF16 => self
+				.payload
+				.chunks_exact(2)
+				.map(|b| f32::from_bits((u16::from_le_bytes(b.try_into().unwrap()) as u32) << 16))
+				.collect(),
+			DType::F16 => self
+				.payload
+				.chunks_exact(2)
+				.map(|b| f16_to_f32(u16::from_le_bytes(b.try_into().unwrap())))
+				.collect(),
+		};
+		Buffer::new(self.shape.clone(), data)
+	}
+```
+
 ```sh check
 cargo test --offline --test model_io half_precision_reference -- --exact
 ```
@@ -1133,6 +1928,34 @@ cargo test --offline --test model_io half_precision_reference -- --exact
 
 
 実装箇所は `state::TensorRecord::to_buffer` と `state::f16_to_f32` である。この要件に対する実行可能な確認は `model_io::half_precision_reference` に置く。
+
+`tests/model_io.rs` の `fn half_precision_reference(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn half_precision_reference("
+fn half_precision_reference() {
+	for (bits, value) in [
+		(0, 0.),
+		(0x8000, -0.),
+		(0x3c00, 1.),
+		(1, 2f32.powi(-24)),
+		(0x7bff, 65504.),
+		(0x7c00, f32::INFINITY),
+		(0xfc00, f32::NEG_INFINITY),
+	] {
+		assert_eq!(f16_to_f32(bits).to_bits(), value.to_bits());
+	}
+	assert!(f16_to_f32(0x7e00).is_nan());
+	for bits in [0u16, 0x8000, 0x3f80, 1, 0x7f80, 0xff80, 0x7fc1] {
+		let record = TensorRecord {
+			dtype: DType::BF16,
+			shape: vec![1],
+			payload: bits.to_le_bytes().to_vec(),
+		};
+		let value = record.to_buffer().unwrap().data[0];
+		assert_eq!(value.to_bits(), (bits as u32) << 16);
+	}
+}
+```
 
 ```sh check
 cargo test --offline --test model_io half_precision_reference -- --exact
@@ -1165,6 +1988,43 @@ fn shard_index_keys() {
 
 実装箇所は `fetch::load_shards` である。この要件に対する実行可能な確認は `model_io::shard_index_keys` に置く。
 
+`src/fetch.rs` の `pub fn load_shards(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn load_shards("
+pub fn load_shards(
+	index_bytes: &[u8],
+	verified: &BTreeMap<String, Vec<u8>>,
+) -> Result<BTreeMap<String, TensorRecord>> {
+	let json = crate::safetensor::unique_json(index_bytes)?;
+	let mapping = json
+		.get("weight_map")
+		.and_then(|v| v.as_object())
+		.ok_or("shard weight_map missing")?;
+	let files = mapping
+		.values()
+		.map(|v| v.as_str().ok_or("shard name must be string"))
+		.collect::<std::result::Result<BTreeSet<_>, _>>()?;
+	let mut loaded = BTreeMap::new();
+	for file in files {
+		let data = verified
+			.get(file)
+			.ok_or_else(|| format!("missing verified shard {file}"))?;
+		for (name, tensor) in crate::safetensor::read(data)? {
+			if mapping.get(&name).and_then(|v| v.as_str()) != Some(file) {
+				return Err(format!("shard index mismatch {name}"));
+			}
+			if loaded.insert(name.clone(), tensor).is_some() {
+				return Err(format!("duplicate sharded key {name}"));
+			}
+		}
+	}
+	if loaded.len() != mapping.len() {
+		return Err("index keys missing from shards".into());
+	}
+	Ok(loaded)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io shard_index_keys -- --exact
 ```
@@ -1175,6 +2035,43 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 
 実装箇所は `fetch::load_shards` である。この要件に対する実行可能な確認は `model_io::shard_index_keys` に置く。
+
+`src/fetch.rs` の `pub fn load_shards(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn load_shards("
+pub fn load_shards(
+	index_bytes: &[u8],
+	verified: &BTreeMap<String, Vec<u8>>,
+) -> Result<BTreeMap<String, TensorRecord>> {
+	let json = crate::safetensor::unique_json(index_bytes)?;
+	let mapping = json
+		.get("weight_map")
+		.and_then(|v| v.as_object())
+		.ok_or("shard weight_map missing")?;
+	let files = mapping
+		.values()
+		.map(|v| v.as_str().ok_or("shard name must be string"))
+		.collect::<std::result::Result<BTreeSet<_>, _>>()?;
+	let mut loaded = BTreeMap::new();
+	for file in files {
+		let data = verified
+			.get(file)
+			.ok_or_else(|| format!("missing verified shard {file}"))?;
+		for (name, tensor) in crate::safetensor::read(data)? {
+			if mapping.get(&name).and_then(|v| v.as_str()) != Some(file) {
+				return Err(format!("shard index mismatch {name}"));
+			}
+			if loaded.insert(name.clone(), tensor).is_some() {
+				return Err(format!("duplicate sharded key {name}"));
+			}
+		}
+	}
+	if loaded.len() != mapping.len() {
+		return Err("index keys missing from shards".into());
+	}
+	Ok(loaded)
+}
+```
 
 ```sh check
 cargo test --offline --test model_io shard_index_keys -- --exact
@@ -1187,6 +2084,24 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 実装箇所は `fetch::Manifest::validate` と22章の `model_assets::verified_files` である。この要件に対する実行可能な確認は `model_io::shard_index_keys` に置く。
 
+`src/fetch.rs` の `pub fn verified_read(`の定義を次の全体で置き換えます。
+
+```rust file="src/fetch.rs" mode="replace" item="pub fn verified_read("
+pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
+	let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+	if metadata.len() != asset.bytes {
+		return Err(format!("length mismatch {}", asset.name));
+	}
+	let mut file = File::open(path).map_err(|e| e.to_string())?;
+	let mut data = Vec::new();
+	file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+	if sha256(&data) != asset.sha256.to_ascii_lowercase() {
+		return Err(format!("digest mismatch {}", asset.name));
+	}
+	Ok(data)
+}
+```
+
 ```sh check
 cargo test --offline --test model_io shard_index_keys -- --exact
 ```
@@ -1197,6 +2112,82 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
+
+`tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+fn roundtrip_and_plan_binding() {
+	let dir = temp("state");
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"weight",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"running",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![],
+				trainable: false,
+			},
+		)
+		.unwrap();
+	let tensors = BTreeMap::from([
+		("weight".into(), tensor()),
+		(
+			"running".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![], vec![7.]).unwrap()),
+		),
+	]);
+	save_state(&dir, &tensors).unwrap();
+	let loaded = load_state(&dir).unwrap();
+	assert_eq!(tensors, loaded);
+	let mut state = registry.validate(&loaded, false).unwrap();
+	assert_eq!(registry.parameters().into_iter().collect::<Vec<_>>(), [0]);
+	let mut graph = Graph::default();
+	let w = graph.input(0, vec![2]).unwrap();
+	let _running = graph.input(1, vec![]).unwrap();
+	let row = graph.constant(0., vec![2]).unwrap();
+	let ids = graph.binary(Binary::Add, w, row).unwrap();
+	let a = graph.shrink(ids, vec![(0, 1)]).unwrap();
+	let b = graph.shrink(ids, vec![(1, 2)]).unwrap();
+	let a = graph.reshape(a, vec![]).unwrap();
+	let b = graph.reshape(b, vec![]).unwrap();
+	let product = graph.binary(Binary::Mul, a, b).unwrap();
+	let four = graph.constant(4., vec![]).unwrap();
+	let result = graph.binary(Binary::Mul, product, four).unwrap();
+	let plan = graph.compile(&[result]).unwrap();
+	let original = registry.validate(&tensors, false).unwrap();
+	assert_eq!(
+		plan.run(&registry.bind(&original).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	state.insert(
+		0,
+		TensorRecord::from_buffer(&Buffer::new(vec![2], vec![1., 1.25]).unwrap()),
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[5.]
+	);
+	assert!(plan.source.contains("buffers[0]"));
+}
+```
 
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
@@ -1209,6 +2200,28 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::digest_before_parser` に置く。
 
+`tests/model_io.rs` の `fn digest_before_parser(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn digest_before_parser("
+fn digest_before_parser() {
+	let dir = temp("digest");
+	let path = dir.join("bad");
+	fs::write(&path, b"not a model").unwrap();
+	let asset = Asset {
+		name: "bad".into(),
+		url: "http://127.0.0.1:1/bad".into(),
+		bytes: 11,
+		sha256: "0".repeat(64),
+	};
+	assert!(verified_read(&path, &asset).unwrap_err().contains("digest"));
+	let mut asset = asset;
+	asset.sha256 = sha256(b"not a model");
+	assert_eq!(verified_read(&path, &asset).unwrap(), b"not a model");
+	asset.bytes += 1;
+	assert!(verified_read(&path, &asset).is_err());
+}
+```
+
 ```sh check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
@@ -1219,6 +2232,36 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::safetensors_layout_and_corruption` に置く。
+
+`tests/model_io.rs` の `fn safetensors_layout_and_corruption(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
+fn safetensors_layout_and_corruption() {
+	let payload = tensor().payload;
+	let good = encoded(
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		&payload,
+	);
+	assert_eq!(safetensor::read(&good).unwrap()["w"], tensor());
+	for header in [
+		r#"{"w":{"dtype":"U8","shape":[2],"data_offsets":[0,2]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[3],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,999]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]},"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]},"b":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}"#,
+		r#"{"w":{"dtype":"F32","shape":[18446744073709551615,8],"data_offsets":[0,8]}}"#,
+	] {
+		assert!(
+			safetensor::read(&encoded(header, &payload)).is_err(),
+			"{header}"
+		);
+	}
+	for len in [0, 3, 7, 8, 12] {
+		assert!(safetensor::read(&good[..len]).is_err());
+	}
+	assert!(safetensor::unique_json(br#"{"x":{"a":1,"a":2}}"#).is_err());
+}
+```
 
 ```sh check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
@@ -1231,6 +2274,82 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
 
+`tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+fn roundtrip_and_plan_binding() {
+	let dir = temp("state");
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"weight",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"running",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![],
+				trainable: false,
+			},
+		)
+		.unwrap();
+	let tensors = BTreeMap::from([
+		("weight".into(), tensor()),
+		(
+			"running".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![], vec![7.]).unwrap()),
+		),
+	]);
+	save_state(&dir, &tensors).unwrap();
+	let loaded = load_state(&dir).unwrap();
+	assert_eq!(tensors, loaded);
+	let mut state = registry.validate(&loaded, false).unwrap();
+	assert_eq!(registry.parameters().into_iter().collect::<Vec<_>>(), [0]);
+	let mut graph = Graph::default();
+	let w = graph.input(0, vec![2]).unwrap();
+	let _running = graph.input(1, vec![]).unwrap();
+	let row = graph.constant(0., vec![2]).unwrap();
+	let ids = graph.binary(Binary::Add, w, row).unwrap();
+	let a = graph.shrink(ids, vec![(0, 1)]).unwrap();
+	let b = graph.shrink(ids, vec![(1, 2)]).unwrap();
+	let a = graph.reshape(a, vec![]).unwrap();
+	let b = graph.reshape(b, vec![]).unwrap();
+	let product = graph.binary(Binary::Mul, a, b).unwrap();
+	let four = graph.constant(4., vec![]).unwrap();
+	let result = graph.binary(Binary::Mul, product, four).unwrap();
+	let plan = graph.compile(&[result]).unwrap();
+	let original = registry.validate(&tensors, false).unwrap();
+	assert_eq!(
+		plan.run(&registry.bind(&original).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	state.insert(
+		0,
+		TensorRecord::from_buffer(&Buffer::new(vec![2], vec![1., 1.25]).unwrap()),
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[5.]
+	);
+	assert!(plan.source.contains("buffers[0]"));
+}
+```
+
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
@@ -1242,6 +2361,82 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
 
+`tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+fn roundtrip_and_plan_binding() {
+	let dir = temp("state");
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"weight",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"running",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![],
+				trainable: false,
+			},
+		)
+		.unwrap();
+	let tensors = BTreeMap::from([
+		("weight".into(), tensor()),
+		(
+			"running".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![], vec![7.]).unwrap()),
+		),
+	]);
+	save_state(&dir, &tensors).unwrap();
+	let loaded = load_state(&dir).unwrap();
+	assert_eq!(tensors, loaded);
+	let mut state = registry.validate(&loaded, false).unwrap();
+	assert_eq!(registry.parameters().into_iter().collect::<Vec<_>>(), [0]);
+	let mut graph = Graph::default();
+	let w = graph.input(0, vec![2]).unwrap();
+	let _running = graph.input(1, vec![]).unwrap();
+	let row = graph.constant(0., vec![2]).unwrap();
+	let ids = graph.binary(Binary::Add, w, row).unwrap();
+	let a = graph.shrink(ids, vec![(0, 1)]).unwrap();
+	let b = graph.shrink(ids, vec![(1, 2)]).unwrap();
+	let a = graph.reshape(a, vec![]).unwrap();
+	let b = graph.reshape(b, vec![]).unwrap();
+	let product = graph.binary(Binary::Mul, a, b).unwrap();
+	let four = graph.constant(4., vec![]).unwrap();
+	let result = graph.binary(Binary::Mul, product, four).unwrap();
+	let plan = graph.compile(&[result]).unwrap();
+	let original = registry.validate(&tensors, false).unwrap();
+	assert_eq!(
+		plan.run(&registry.bind(&original).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	state.insert(
+		0,
+		TensorRecord::from_buffer(&Buffer::new(vec![2], vec![1., 1.25]).unwrap()),
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[5.]
+	);
+	assert!(plan.source.contains("buffers[0]"));
+}
+```
+
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
@@ -1252,6 +2447,82 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 
 実装箇所は `state::Registry::bind`、`safetensor::read`、`fetch::verified_read` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
+
+`tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
+
+```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+fn roundtrip_and_plan_binding() {
+	let dir = temp("state");
+	let mut registry = Registry::default();
+	registry
+		.register(
+			"weight",
+			Spec {
+				id: 0,
+				slot: 0,
+				dtype: DType::F32,
+				shape: vec![2],
+				trainable: true,
+			},
+		)
+		.unwrap();
+	registry
+		.register(
+			"running",
+			Spec {
+				id: 1,
+				slot: 1,
+				dtype: DType::F32,
+				shape: vec![],
+				trainable: false,
+			},
+		)
+		.unwrap();
+	let tensors = BTreeMap::from([
+		("weight".into(), tensor()),
+		(
+			"running".into(),
+			TensorRecord::from_buffer(&Buffer::new(vec![], vec![7.]).unwrap()),
+		),
+	]);
+	save_state(&dir, &tensors).unwrap();
+	let loaded = load_state(&dir).unwrap();
+	assert_eq!(tensors, loaded);
+	let mut state = registry.validate(&loaded, false).unwrap();
+	assert_eq!(registry.parameters().into_iter().collect::<Vec<_>>(), [0]);
+	let mut graph = Graph::default();
+	let w = graph.input(0, vec![2]).unwrap();
+	let _running = graph.input(1, vec![]).unwrap();
+	let row = graph.constant(0., vec![2]).unwrap();
+	let ids = graph.binary(Binary::Add, w, row).unwrap();
+	let a = graph.shrink(ids, vec![(0, 1)]).unwrap();
+	let b = graph.shrink(ids, vec![(1, 2)]).unwrap();
+	let a = graph.reshape(a, vec![]).unwrap();
+	let b = graph.reshape(b, vec![]).unwrap();
+	let product = graph.binary(Binary::Mul, a, b).unwrap();
+	let four = graph.constant(4., vec![]).unwrap();
+	let result = graph.binary(Binary::Mul, product, four).unwrap();
+	let plan = graph.compile(&[result]).unwrap();
+	let original = registry.validate(&tensors, false).unwrap();
+	assert_eq!(
+		plan.run(&registry.bind(&original).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[24.]
+	);
+	state.insert(
+		0,
+		TensorRecord::from_buffer(&Buffer::new(vec![2], vec![1., 1.25]).unwrap()),
+	);
+	assert_eq!(
+		plan.run(&registry.bind(&state).unwrap()).unwrap()[0].data,
+		[5.]
+	);
+	assert!(plan.source.contains("buffers[0]"));
+}
+```
 
 ```sh check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact

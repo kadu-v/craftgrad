@@ -889,6 +889,20 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
+`src/scalar.rs` の `fn push(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="fn push("
+	fn push(&mut self, node: SNode) -> usize {
+		if let Some(&id) = self.intern.get(&node) {
+			return id;
+		}
+		let id = self.nodes.len();
+		self.nodes.push(node.clone());
+		self.intern.insert(node, id);
+		id
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite
 ```
@@ -897,6 +911,20 @@ cargo test --quiet --test scalar_rewrite
 <!-- todo:03-003 -->
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+`src/scalar.rs` の `fn push(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="fn push("
+	fn push(&mut self, node: SNode) -> usize {
+		if let Some(&id) = self.intern.get(&node) {
+			return id;
+		}
+		let id = self.nodes.len();
+		self.nodes.push(node.clone());
+		self.intern.insert(node, id);
+		id
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite
@@ -907,6 +935,31 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+fn arithmetic_and_shared_library() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let b = g.param(1, DType::F32, None)?;
+	let c = g.param(2, DType::F32, None)?;
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	assert_eq!(sum, g.alu(Alu::Add, vec![a, b])?);
+	let root = g.alu(Alu::Mul, vec![sum, c])?;
+	let p = g.compile(root)?;
+	assert_eq!(
+		p.run(&[Value::f32(2.), Value::f32(3.), Value::f32(4.)])?,
+		Value::f32(20.)
+	);
+	assert_eq!(
+		p.run(&[Value::f32(1.), Value::f32(2.), Value::f32(4.)])?,
+		Value::f32(12.)
+	);
+	assert!(p.run(&[]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite
 ```
@@ -915,6 +968,116 @@ cargo test --quiet --test scalar_rewrite
 <!-- todo:03-005 -->
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+`src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="fn infer("
+	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
+		let arity = match op {
+			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
+			Alu::Where => 3,
+			_ => 2,
+		};
+		if inputs.len() != arity {
+			return Err("ALU arity mismatch".into());
+		}
+		let ns = inputs
+			.iter()
+			.map(|&id| self.nodes.get(id).ok_or("unknown scalar input".into()))
+			.collect::<Result<Vec<_>>>()?;
+		let t = ns[0].dtype;
+		let numeric = |t| t == DType::I32 || t == DType::F32;
+		let dtype = match op {
+			Alu::Where => {
+				if t != DType::Bool || ns[1].dtype != ns[2].dtype || ns[1].dtype == DType::Void {
+					return Err("WHERE type mismatch".into());
+				}
+				ns[1].dtype
+			}
+			Alu::Cast(target) => {
+				if target == DType::Void || t == DType::Void {
+					return Err("void CAST".into());
+				}
+				if t == DType::F32 && target == DType::I32 {
+					let b = ns[0].bounds.ok_or("unproven float-to-int CAST")?;
+					if b.lo < i32::MIN as i64 || b.hi > 2147483520 {
+						return Err("unsafe float-to-int CAST".into());
+					}
+				}
+				target
+			}
+			Alu::Recip => {
+				if t != DType::F32 {
+					return Err("RECIP requires f32".into());
+				}
+				t
+			}
+			Alu::Xor | Alu::And | Alu::Or => {
+				if !matches!(t, DType::I32 | DType::Bool) || ns[1].dtype != t {
+					return Err("bitwise type mismatch".into());
+				}
+				t
+			}
+			Alu::Shl | Alu::Shr => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("shift requires i32".into());
+				}
+				let b = ns[1].bounds.ok_or("unproven shift count")?;
+				if b.lo < 0 || b.hi >= 32 {
+					return Err("unsafe shift count".into());
+				}
+				t
+			}
+			Alu::Div | Alu::Mod => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("integer DIV/MOD require i32".into());
+				}
+				let a = ns[0].bounds.unwrap_or(Bounds::I32);
+				let b = ns[1].bounds.unwrap_or(Bounds::I32);
+				if b.lo <= 0 && b.hi >= 0 || a.lo == i32::MIN as i64 && b.lo <= -1 && b.hi >= -1 {
+					return Err("unsafe integer division".into());
+				}
+				t
+			}
+			Alu::Lt | Alu::Eq | Alu::Ne => {
+				if !numeric(t) || ns[1].dtype != t {
+					return Err("comparison type mismatch".into());
+				}
+				DType::Bool
+			}
+			_ => {
+				if !numeric(t) || ns.iter().any(|n| n.dtype != t) {
+					return Err("numeric type mismatch".into());
+				}
+				t
+			}
+		};
+		let bounds = if dtype == DType::Bool {
+			Some(Bounds { lo: 0, hi: 1 })
+		} else if dtype == DType::I32 {
+			let a = ns[0].bounds.unwrap_or(Bounds::I32);
+			let b = ns.get(1).and_then(|n| n.bounds).unwrap_or(Bounds::I32);
+			let raw = match op {
+				Alu::Add => Some((a.lo + b.lo, a.hi + b.hi)),
+				Alu::Sub => Some((a.lo - b.hi, a.hi - b.lo)),
+				Alu::Mul => {
+					let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+					Some((*p.iter().min().unwrap(), *p.iter().max().unwrap()))
+				}
+				_ => None,
+			};
+			Some(match raw {
+				Some((lo, hi)) if lo >= i32::MIN as i64 && hi <= i32::MAX as i64 => {
+					Bounds { lo, hi }
+				}
+				_ => Bounds::I32,
+			})
+		} else {
+			None
+		};
+		Ok((dtype, bounds))
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
@@ -925,6 +1088,115 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
+`src/scalar.rs` の `pub fn pack(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn pack("
+	pub fn pack(self) -> u64 {
+		match self {
+			Self::Bool(x) => x as u64,
+			Self::I32(x) => x as u32 as u64,
+			Self::F32Bits(x) => x as u64,
+		}
+	}
+```
+
+`src/scalar.rs` の `pub fn unpack(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn unpack("
+	pub fn unpack(dtype: DType, bits: u64) -> Result<Self> {
+		match dtype {
+			DType::Bool => Ok(Self::Bool(bits != 0)),
+			DType::I32 => Ok(Self::I32(bits as u32 as i32)),
+			DType::F32 => Ok(Self::F32Bits(bits as u32)),
+			DType::Void => Err("void has no value".into()),
+		}
+	}
+```
+
+`src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+	pub fn render(&self, root: usize) -> Result<String> {
+		self.verify(root, 0)?;
+		let mut source = SCALAR_HELPERS.to_string();
+		source.push_str("int chibi_entry(void*const* buffers,const uint64_t* scalars){\n");
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let expr = match n.op {
+				SOp::Const(Value::Bool(x)) => format!("{}u", x as u8),
+				SOp::Const(Value::I32(x)) => format!("chibi_i32({}u)", x as u32),
+				SOp::Const(Value::F32Bits(x)) => format!("chibi_bits({x}u)"),
+				SOp::Param { slot, dtype, .. } => match dtype {
+					DType::I32 => format!("chibi_i32((uint32_t)scalars[{slot}])"),
+					DType::F32 => format!("chibi_bits((uint32_t)scalars[{slot}])"),
+					_ => format!("(scalars[{slot}]!=0)"),
+				},
+				SOp::Alu(op) => {
+					let a = format!("v{}", n.inputs[0]);
+					let b = n.inputs.get(1).map(|x| format!("v{x}")).unwrap_or_default();
+					match op {
+						Alu::Add | Alu::Sub | Alu::Mul if n.dtype == DType::I32 => format!(
+							"chibi_i32((uint32_t){a} {} (uint32_t){b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								_ => "*",
+							}
+						),
+						Alu::Neg if n.dtype == DType::I32 => format!("chibi_i32(0u-(uint32_t){a})"),
+						Alu::Shl => format!("chibi_i32((uint32_t){a} << {b})"),
+						Alu::Shr => format!("chibi_shr({a},{b})"),
+						Alu::Div => format!("chibi_div({a},{b})"),
+						Alu::Mod => format!("chibi_mod({a},{b})"),
+						Alu::Max => {
+							if n.dtype == DType::F32 {
+								format!("chibi_max({a},{b})")
+							} else {
+								format!("({a}>{b}?{a}:{b})")
+							}
+						}
+						Alu::Recip => format!("(1.0f/{a})"),
+						Alu::Neg => format!("(-{a})"),
+						Alu::Where => format!("({a}?{b}:v{})", n.inputs[2]),
+						Alu::Cast(t) => {
+							if t == DType::Bool {
+								format!("({a}!=0)")
+							} else {
+								format!("(({}){a})", ctype(t))
+							}
+						}
+						_ => format!(
+							"({a} {} {b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								Alu::Mul => "*",
+								Alu::Xor => "^",
+								Alu::And => "&",
+								Alu::Or => "|",
+								Alu::Lt => "<",
+								Alu::Eq => "==",
+								Alu::Ne => "!=",
+								_ => unreachable!(),
+							}
+						),
+					}
+				}
+			};
+			source.push_str(&format!("{} v{id}={expr};\n", ctype(n.dtype)));
+		}
+		if self.nodes[root].dtype == DType::F32 {
+			source.push_str(&format!(
+				"uint32_t bits;memcpy(&bits,&v{root},4);*(uint64_t*)buffers[0]=bits;\n"
+			))
+		} else {
+			source.push_str(&format!("*(uint64_t*)buffers[0]=(uint32_t)v{root};\n"))
+		}
+		source.push_str("return 0;\n}\n");
+		Ok(source)
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite
 ```
@@ -933,6 +1205,193 @@ cargo test --quiet --test scalar_rewrite
 <!-- todo:03-007 -->
 
 `tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+`src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
+	let a = v[0];
+	if let Alu::Cast(t) = op {
+		return Ok(match t {
+			DType::Bool => Value::Bool(a.number() != 0.),
+			DType::I32 => Value::I32(a.number() as i32),
+			DType::F32 => Value::f32(a.number() as f32),
+			DType::Void => return Err("void cast".into()),
+		});
+	}
+	if op == Alu::Where {
+		return Ok(if a == Value::Bool(true) { v[1] } else { v[2] });
+	}
+	if matches!(op, Alu::Lt | Alu::Eq | Alu::Ne) {
+		let b = v[1].number();
+		let a = a.number();
+		return Ok(Value::Bool(match op {
+			Alu::Lt => a < b,
+			Alu::Eq => a == b,
+			_ => a != b,
+		}));
+	}
+	Ok(match a {
+		Value::Bool(a) => {
+			let Value::Bool(b) = v[1] else {
+				return Err("bool operand mismatch".into());
+			};
+			Value::Bool(match op {
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				_ => return Err("invalid bool operation".into()),
+			})
+		}
+		Value::I32(a) => {
+			let b = if v.len() > 1 {
+				if let Value::I32(b) = v[1] {
+					b
+				} else {
+					return Err("i32 operand mismatch".into());
+				}
+			} else {
+				0
+			};
+			Value::I32(match op {
+				Alu::Add => a.wrapping_add(b),
+				Alu::Sub => a.wrapping_sub(b),
+				Alu::Mul => a.wrapping_mul(b),
+				Alu::Neg => a.wrapping_neg(),
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				Alu::Shl => a.wrapping_shl(b as u32),
+				Alu::Shr => a >> b,
+				Alu::Div | Alu::Mod => {
+					if b == 0 || (a == i32::MIN && b == -1) {
+						return Err("invalid division".into());
+					}
+					let q = a / b;
+					let r = a % b;
+					let q = q - if r != 0 && (r < 0) != (b < 0) { 1 } else { 0 };
+					if op == Alu::Div {
+						q
+					} else {
+						(a as i64 - q as i64 * b as i64) as i32
+					}
+				}
+				Alu::Max => a.max(b),
+				_ => return Err("invalid i32 operation".into()),
+			})
+		}
+		Value::F32Bits(a) => {
+			let a = f32::from_bits(a);
+			let b = if v.len() > 1 {
+				v[1].number() as f32
+			} else {
+				0.
+			};
+			Value::f32(match op {
+				Alu::Add => a + b,
+				Alu::Sub => a - b,
+				Alu::Mul => a * b,
+				Alu::Neg => -a,
+				Alu::Recip => a.recip(),
+				Alu::Max => {
+					if a.is_nan() || b.is_nan() {
+						f32::NAN
+					} else if a == 0. && b == 0. {
+						0.
+					} else {
+						a.max(b)
+					}
+				}
+				_ => return Err("invalid f32 operation".into()),
+			})
+		}
+	})
+}
+```
+
+`src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+	pub fn render(&self, root: usize) -> Result<String> {
+		self.verify(root, 0)?;
+		let mut source = SCALAR_HELPERS.to_string();
+		source.push_str("int chibi_entry(void*const* buffers,const uint64_t* scalars){\n");
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let expr = match n.op {
+				SOp::Const(Value::Bool(x)) => format!("{}u", x as u8),
+				SOp::Const(Value::I32(x)) => format!("chibi_i32({}u)", x as u32),
+				SOp::Const(Value::F32Bits(x)) => format!("chibi_bits({x}u)"),
+				SOp::Param { slot, dtype, .. } => match dtype {
+					DType::I32 => format!("chibi_i32((uint32_t)scalars[{slot}])"),
+					DType::F32 => format!("chibi_bits((uint32_t)scalars[{slot}])"),
+					_ => format!("(scalars[{slot}]!=0)"),
+				},
+				SOp::Alu(op) => {
+					let a = format!("v{}", n.inputs[0]);
+					let b = n.inputs.get(1).map(|x| format!("v{x}")).unwrap_or_default();
+					match op {
+						Alu::Add | Alu::Sub | Alu::Mul if n.dtype == DType::I32 => format!(
+							"chibi_i32((uint32_t){a} {} (uint32_t){b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								_ => "*",
+							}
+						),
+						Alu::Neg if n.dtype == DType::I32 => format!("chibi_i32(0u-(uint32_t){a})"),
+						Alu::Shl => format!("chibi_i32((uint32_t){a} << {b})"),
+						Alu::Shr => format!("chibi_shr({a},{b})"),
+						Alu::Div => format!("chibi_div({a},{b})"),
+						Alu::Mod => format!("chibi_mod({a},{b})"),
+						Alu::Max => {
+							if n.dtype == DType::F32 {
+								format!("chibi_max({a},{b})")
+							} else {
+								format!("({a}>{b}?{a}:{b})")
+							}
+						}
+						Alu::Recip => format!("(1.0f/{a})"),
+						Alu::Neg => format!("(-{a})"),
+						Alu::Where => format!("({a}?{b}:v{})", n.inputs[2]),
+						Alu::Cast(t) => {
+							if t == DType::Bool {
+								format!("({a}!=0)")
+							} else {
+								format!("(({}){a})", ctype(t))
+							}
+						}
+						_ => format!(
+							"({a} {} {b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								Alu::Mul => "*",
+								Alu::Xor => "^",
+								Alu::And => "&",
+								Alu::Or => "|",
+								Alu::Lt => "<",
+								Alu::Eq => "==",
+								Alu::Ne => "!=",
+								_ => unreachable!(),
+							}
+						),
+					}
+				}
+			};
+			source.push_str(&format!("{} v{id}={expr};\n", ctype(n.dtype)));
+		}
+		if self.nodes[root].dtype == DType::F32 {
+			source.push_str(&format!(
+				"uint32_t bits;memcpy(&bits,&v{root},4);*(uint64_t*)buffers[0]=bits;\n"
+			))
+		} else {
+			source.push_str(&format!("*(uint64_t*)buffers[0]=(uint32_t)v{root};\n"))
+		}
+		source.push_str("return 0;\n}\n");
+		Ok(source)
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
@@ -943,6 +1402,116 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
 
+`src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="fn infer("
+	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
+		let arity = match op {
+			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
+			Alu::Where => 3,
+			_ => 2,
+		};
+		if inputs.len() != arity {
+			return Err("ALU arity mismatch".into());
+		}
+		let ns = inputs
+			.iter()
+			.map(|&id| self.nodes.get(id).ok_or("unknown scalar input".into()))
+			.collect::<Result<Vec<_>>>()?;
+		let t = ns[0].dtype;
+		let numeric = |t| t == DType::I32 || t == DType::F32;
+		let dtype = match op {
+			Alu::Where => {
+				if t != DType::Bool || ns[1].dtype != ns[2].dtype || ns[1].dtype == DType::Void {
+					return Err("WHERE type mismatch".into());
+				}
+				ns[1].dtype
+			}
+			Alu::Cast(target) => {
+				if target == DType::Void || t == DType::Void {
+					return Err("void CAST".into());
+				}
+				if t == DType::F32 && target == DType::I32 {
+					let b = ns[0].bounds.ok_or("unproven float-to-int CAST")?;
+					if b.lo < i32::MIN as i64 || b.hi > 2147483520 {
+						return Err("unsafe float-to-int CAST".into());
+					}
+				}
+				target
+			}
+			Alu::Recip => {
+				if t != DType::F32 {
+					return Err("RECIP requires f32".into());
+				}
+				t
+			}
+			Alu::Xor | Alu::And | Alu::Or => {
+				if !matches!(t, DType::I32 | DType::Bool) || ns[1].dtype != t {
+					return Err("bitwise type mismatch".into());
+				}
+				t
+			}
+			Alu::Shl | Alu::Shr => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("shift requires i32".into());
+				}
+				let b = ns[1].bounds.ok_or("unproven shift count")?;
+				if b.lo < 0 || b.hi >= 32 {
+					return Err("unsafe shift count".into());
+				}
+				t
+			}
+			Alu::Div | Alu::Mod => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("integer DIV/MOD require i32".into());
+				}
+				let a = ns[0].bounds.unwrap_or(Bounds::I32);
+				let b = ns[1].bounds.unwrap_or(Bounds::I32);
+				if b.lo <= 0 && b.hi >= 0 || a.lo == i32::MIN as i64 && b.lo <= -1 && b.hi >= -1 {
+					return Err("unsafe integer division".into());
+				}
+				t
+			}
+			Alu::Lt | Alu::Eq | Alu::Ne => {
+				if !numeric(t) || ns[1].dtype != t {
+					return Err("comparison type mismatch".into());
+				}
+				DType::Bool
+			}
+			_ => {
+				if !numeric(t) || ns.iter().any(|n| n.dtype != t) {
+					return Err("numeric type mismatch".into());
+				}
+				t
+			}
+		};
+		let bounds = if dtype == DType::Bool {
+			Some(Bounds { lo: 0, hi: 1 })
+		} else if dtype == DType::I32 {
+			let a = ns[0].bounds.unwrap_or(Bounds::I32);
+			let b = ns.get(1).and_then(|n| n.bounds).unwrap_or(Bounds::I32);
+			let raw = match op {
+				Alu::Add => Some((a.lo + b.lo, a.hi + b.hi)),
+				Alu::Sub => Some((a.lo - b.hi, a.hi - b.lo)),
+				Alu::Mul => {
+					let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+					Some((*p.iter().min().unwrap(), *p.iter().max().unwrap()))
+				}
+				_ => None,
+			};
+			Some(match raw {
+				Some((lo, hi)) if lo >= i32::MIN as i64 && hi <= i32::MAX as i64 => {
+					Bounds { lo, hi }
+				}
+				_ => Bounds::I32,
+			})
+		} else {
+			None
+		};
+		Ok((dtype, bounds))
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
@@ -951,6 +1520,33 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 <!-- todo:03-009 -->
 
 `tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_rewrite.rs` の `fn where_and_float_classification(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn where_and_float_classification("
+fn where_and_float_classification() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let three = g.constant(Value::f32(3.));
+	let two = g.constant(Value::f32(2.));
+	let one = g.constant(Value::f32(1.));
+	let cond = g.alu(Alu::Lt, vec![a, three])?;
+	let yes = g.alu(Alu::Mul, vec![a, two])?;
+	let no = g.alu(Alu::Add, vec![a, one])?;
+	let y = g.alu(Alu::Where, vec![cond, yes, no])?;
+	let plan = g.compile(y)?;
+	assert_eq!(plan.run(&[Value::f32(2.)])?, Value::f32(4.));
+	assert_eq!(plan.run(&[Value::f32(5.)])?, Value::f32(6.));
+	let (rewritten, root) = g.rewrite(y)?;
+	for value in [-7., 0., 5., f32::INFINITY, f32::NAN] {
+		let input = [Value::f32(value)];
+		let actual = plan.run(&input)?.number();
+		let reference = rewritten.evaluate(root, &input)?.number();
+		assert!(actual == reference || actual.is_nan() && reference.is_nan());
+	}
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
@@ -961,6 +1557,193 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
 
+`src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
+	let a = v[0];
+	if let Alu::Cast(t) = op {
+		return Ok(match t {
+			DType::Bool => Value::Bool(a.number() != 0.),
+			DType::I32 => Value::I32(a.number() as i32),
+			DType::F32 => Value::f32(a.number() as f32),
+			DType::Void => return Err("void cast".into()),
+		});
+	}
+	if op == Alu::Where {
+		return Ok(if a == Value::Bool(true) { v[1] } else { v[2] });
+	}
+	if matches!(op, Alu::Lt | Alu::Eq | Alu::Ne) {
+		let b = v[1].number();
+		let a = a.number();
+		return Ok(Value::Bool(match op {
+			Alu::Lt => a < b,
+			Alu::Eq => a == b,
+			_ => a != b,
+		}));
+	}
+	Ok(match a {
+		Value::Bool(a) => {
+			let Value::Bool(b) = v[1] else {
+				return Err("bool operand mismatch".into());
+			};
+			Value::Bool(match op {
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				_ => return Err("invalid bool operation".into()),
+			})
+		}
+		Value::I32(a) => {
+			let b = if v.len() > 1 {
+				if let Value::I32(b) = v[1] {
+					b
+				} else {
+					return Err("i32 operand mismatch".into());
+				}
+			} else {
+				0
+			};
+			Value::I32(match op {
+				Alu::Add => a.wrapping_add(b),
+				Alu::Sub => a.wrapping_sub(b),
+				Alu::Mul => a.wrapping_mul(b),
+				Alu::Neg => a.wrapping_neg(),
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				Alu::Shl => a.wrapping_shl(b as u32),
+				Alu::Shr => a >> b,
+				Alu::Div | Alu::Mod => {
+					if b == 0 || (a == i32::MIN && b == -1) {
+						return Err("invalid division".into());
+					}
+					let q = a / b;
+					let r = a % b;
+					let q = q - if r != 0 && (r < 0) != (b < 0) { 1 } else { 0 };
+					if op == Alu::Div {
+						q
+					} else {
+						(a as i64 - q as i64 * b as i64) as i32
+					}
+				}
+				Alu::Max => a.max(b),
+				_ => return Err("invalid i32 operation".into()),
+			})
+		}
+		Value::F32Bits(a) => {
+			let a = f32::from_bits(a);
+			let b = if v.len() > 1 {
+				v[1].number() as f32
+			} else {
+				0.
+			};
+			Value::f32(match op {
+				Alu::Add => a + b,
+				Alu::Sub => a - b,
+				Alu::Mul => a * b,
+				Alu::Neg => -a,
+				Alu::Recip => a.recip(),
+				Alu::Max => {
+					if a.is_nan() || b.is_nan() {
+						f32::NAN
+					} else if a == 0. && b == 0. {
+						0.
+					} else {
+						a.max(b)
+					}
+				}
+				_ => return Err("invalid f32 operation".into()),
+			})
+		}
+	})
+}
+```
+
+`src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+	pub fn render(&self, root: usize) -> Result<String> {
+		self.verify(root, 0)?;
+		let mut source = SCALAR_HELPERS.to_string();
+		source.push_str("int chibi_entry(void*const* buffers,const uint64_t* scalars){\n");
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let expr = match n.op {
+				SOp::Const(Value::Bool(x)) => format!("{}u", x as u8),
+				SOp::Const(Value::I32(x)) => format!("chibi_i32({}u)", x as u32),
+				SOp::Const(Value::F32Bits(x)) => format!("chibi_bits({x}u)"),
+				SOp::Param { slot, dtype, .. } => match dtype {
+					DType::I32 => format!("chibi_i32((uint32_t)scalars[{slot}])"),
+					DType::F32 => format!("chibi_bits((uint32_t)scalars[{slot}])"),
+					_ => format!("(scalars[{slot}]!=0)"),
+				},
+				SOp::Alu(op) => {
+					let a = format!("v{}", n.inputs[0]);
+					let b = n.inputs.get(1).map(|x| format!("v{x}")).unwrap_or_default();
+					match op {
+						Alu::Add | Alu::Sub | Alu::Mul if n.dtype == DType::I32 => format!(
+							"chibi_i32((uint32_t){a} {} (uint32_t){b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								_ => "*",
+							}
+						),
+						Alu::Neg if n.dtype == DType::I32 => format!("chibi_i32(0u-(uint32_t){a})"),
+						Alu::Shl => format!("chibi_i32((uint32_t){a} << {b})"),
+						Alu::Shr => format!("chibi_shr({a},{b})"),
+						Alu::Div => format!("chibi_div({a},{b})"),
+						Alu::Mod => format!("chibi_mod({a},{b})"),
+						Alu::Max => {
+							if n.dtype == DType::F32 {
+								format!("chibi_max({a},{b})")
+							} else {
+								format!("({a}>{b}?{a}:{b})")
+							}
+						}
+						Alu::Recip => format!("(1.0f/{a})"),
+						Alu::Neg => format!("(-{a})"),
+						Alu::Where => format!("({a}?{b}:v{})", n.inputs[2]),
+						Alu::Cast(t) => {
+							if t == DType::Bool {
+								format!("({a}!=0)")
+							} else {
+								format!("(({}){a})", ctype(t))
+							}
+						}
+						_ => format!(
+							"({a} {} {b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								Alu::Mul => "*",
+								Alu::Xor => "^",
+								Alu::And => "&",
+								Alu::Or => "|",
+								Alu::Lt => "<",
+								Alu::Eq => "==",
+								Alu::Ne => "!=",
+								_ => unreachable!(),
+							}
+						),
+					}
+				}
+			};
+			source.push_str(&format!("{} v{id}={expr};\n", ctype(n.dtype)));
+		}
+		if self.nodes[root].dtype == DType::F32 {
+			source.push_str(&format!(
+				"uint32_t bits;memcpy(&bits,&v{root},4);*(uint64_t*)buffers[0]=bits;\n"
+			))
+		} else {
+			source.push_str(&format!("*(uint64_t*)buffers[0]=(uint32_t)v{root};\n"))
+		}
+		source.push_str("return 0;\n}\n");
+		Ok(source)
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
@@ -969,6 +1752,193 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 <!-- todo:03-011 -->
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+`src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
+	let a = v[0];
+	if let Alu::Cast(t) = op {
+		return Ok(match t {
+			DType::Bool => Value::Bool(a.number() != 0.),
+			DType::I32 => Value::I32(a.number() as i32),
+			DType::F32 => Value::f32(a.number() as f32),
+			DType::Void => return Err("void cast".into()),
+		});
+	}
+	if op == Alu::Where {
+		return Ok(if a == Value::Bool(true) { v[1] } else { v[2] });
+	}
+	if matches!(op, Alu::Lt | Alu::Eq | Alu::Ne) {
+		let b = v[1].number();
+		let a = a.number();
+		return Ok(Value::Bool(match op {
+			Alu::Lt => a < b,
+			Alu::Eq => a == b,
+			_ => a != b,
+		}));
+	}
+	Ok(match a {
+		Value::Bool(a) => {
+			let Value::Bool(b) = v[1] else {
+				return Err("bool operand mismatch".into());
+			};
+			Value::Bool(match op {
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				_ => return Err("invalid bool operation".into()),
+			})
+		}
+		Value::I32(a) => {
+			let b = if v.len() > 1 {
+				if let Value::I32(b) = v[1] {
+					b
+				} else {
+					return Err("i32 operand mismatch".into());
+				}
+			} else {
+				0
+			};
+			Value::I32(match op {
+				Alu::Add => a.wrapping_add(b),
+				Alu::Sub => a.wrapping_sub(b),
+				Alu::Mul => a.wrapping_mul(b),
+				Alu::Neg => a.wrapping_neg(),
+				Alu::Xor => a ^ b,
+				Alu::And => a & b,
+				Alu::Or => a | b,
+				Alu::Shl => a.wrapping_shl(b as u32),
+				Alu::Shr => a >> b,
+				Alu::Div | Alu::Mod => {
+					if b == 0 || (a == i32::MIN && b == -1) {
+						return Err("invalid division".into());
+					}
+					let q = a / b;
+					let r = a % b;
+					let q = q - if r != 0 && (r < 0) != (b < 0) { 1 } else { 0 };
+					if op == Alu::Div {
+						q
+					} else {
+						(a as i64 - q as i64 * b as i64) as i32
+					}
+				}
+				Alu::Max => a.max(b),
+				_ => return Err("invalid i32 operation".into()),
+			})
+		}
+		Value::F32Bits(a) => {
+			let a = f32::from_bits(a);
+			let b = if v.len() > 1 {
+				v[1].number() as f32
+			} else {
+				0.
+			};
+			Value::f32(match op {
+				Alu::Add => a + b,
+				Alu::Sub => a - b,
+				Alu::Mul => a * b,
+				Alu::Neg => -a,
+				Alu::Recip => a.recip(),
+				Alu::Max => {
+					if a.is_nan() || b.is_nan() {
+						f32::NAN
+					} else if a == 0. && b == 0. {
+						0.
+					} else {
+						a.max(b)
+					}
+				}
+				_ => return Err("invalid f32 operation".into()),
+			})
+		}
+	})
+}
+```
+
+`src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+	pub fn render(&self, root: usize) -> Result<String> {
+		self.verify(root, 0)?;
+		let mut source = SCALAR_HELPERS.to_string();
+		source.push_str("int chibi_entry(void*const* buffers,const uint64_t* scalars){\n");
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let expr = match n.op {
+				SOp::Const(Value::Bool(x)) => format!("{}u", x as u8),
+				SOp::Const(Value::I32(x)) => format!("chibi_i32({}u)", x as u32),
+				SOp::Const(Value::F32Bits(x)) => format!("chibi_bits({x}u)"),
+				SOp::Param { slot, dtype, .. } => match dtype {
+					DType::I32 => format!("chibi_i32((uint32_t)scalars[{slot}])"),
+					DType::F32 => format!("chibi_bits((uint32_t)scalars[{slot}])"),
+					_ => format!("(scalars[{slot}]!=0)"),
+				},
+				SOp::Alu(op) => {
+					let a = format!("v{}", n.inputs[0]);
+					let b = n.inputs.get(1).map(|x| format!("v{x}")).unwrap_or_default();
+					match op {
+						Alu::Add | Alu::Sub | Alu::Mul if n.dtype == DType::I32 => format!(
+							"chibi_i32((uint32_t){a} {} (uint32_t){b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								_ => "*",
+							}
+						),
+						Alu::Neg if n.dtype == DType::I32 => format!("chibi_i32(0u-(uint32_t){a})"),
+						Alu::Shl => format!("chibi_i32((uint32_t){a} << {b})"),
+						Alu::Shr => format!("chibi_shr({a},{b})"),
+						Alu::Div => format!("chibi_div({a},{b})"),
+						Alu::Mod => format!("chibi_mod({a},{b})"),
+						Alu::Max => {
+							if n.dtype == DType::F32 {
+								format!("chibi_max({a},{b})")
+							} else {
+								format!("({a}>{b}?{a}:{b})")
+							}
+						}
+						Alu::Recip => format!("(1.0f/{a})"),
+						Alu::Neg => format!("(-{a})"),
+						Alu::Where => format!("({a}?{b}:v{})", n.inputs[2]),
+						Alu::Cast(t) => {
+							if t == DType::Bool {
+								format!("({a}!=0)")
+							} else {
+								format!("(({}){a})", ctype(t))
+							}
+						}
+						_ => format!(
+							"({a} {} {b})",
+							match op {
+								Alu::Add => "+",
+								Alu::Sub => "-",
+								Alu::Mul => "*",
+								Alu::Xor => "^",
+								Alu::And => "&",
+								Alu::Or => "|",
+								Alu::Lt => "<",
+								Alu::Eq => "==",
+								Alu::Ne => "!=",
+								_ => unreachable!(),
+							}
+						),
+					}
+				}
+			};
+			source.push_str(&format!("{} v{id}={expr};\n", ctype(n.dtype)));
+		}
+		if self.nodes[root].dtype == DType::F32 {
+			source.push_str(&format!(
+				"uint32_t bits;memcpy(&bits,&v{root},4);*(uint64_t*)buffers[0]=bits;\n"
+			))
+		} else {
+			source.push_str(&format!("*(uint64_t*)buffers[0]=(uint32_t)v{root};\n"))
+		}
+		source.push_str("return 0;\n}\n");
+		Ok(source)
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite
@@ -979,6 +1949,39 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
 
+`src/scalar.rs` の `pub fn validate_inputs(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn validate_inputs("
+	pub fn validate_inputs(&self, root: usize, inputs: &[Value]) -> Result<()> {
+		let mut slots = HashSet::new();
+		for id in self.order(root)? {
+			if let SOp::Param {
+				slot,
+				dtype,
+				bounds,
+				..
+			} = self.nodes[id].op
+			{
+				slots.insert(slot);
+				let v = *inputs.get(slot).ok_or("missing scalar input")?;
+				if v.dtype() != dtype {
+					return Err("scalar input dtype mismatch".into());
+				}
+				if let Some(b) = bounds {
+					let n = v.number();
+					if !n.is_finite() || n < b.lo as f64 || n > b.hi as f64 {
+						return Err("scalar input outside declared bounds".into());
+					}
+				}
+			}
+		}
+		if slots.len() != inputs.len() || (0..inputs.len()).any(|s| !slots.contains(&s)) {
+			return Err("extra or non-dense scalar slots".into());
+		}
+		Ok(())
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
@@ -987,6 +1990,116 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 <!-- todo:03-013 -->
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+`src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="fn infer("
+	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
+		let arity = match op {
+			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
+			Alu::Where => 3,
+			_ => 2,
+		};
+		if inputs.len() != arity {
+			return Err("ALU arity mismatch".into());
+		}
+		let ns = inputs
+			.iter()
+			.map(|&id| self.nodes.get(id).ok_or("unknown scalar input".into()))
+			.collect::<Result<Vec<_>>>()?;
+		let t = ns[0].dtype;
+		let numeric = |t| t == DType::I32 || t == DType::F32;
+		let dtype = match op {
+			Alu::Where => {
+				if t != DType::Bool || ns[1].dtype != ns[2].dtype || ns[1].dtype == DType::Void {
+					return Err("WHERE type mismatch".into());
+				}
+				ns[1].dtype
+			}
+			Alu::Cast(target) => {
+				if target == DType::Void || t == DType::Void {
+					return Err("void CAST".into());
+				}
+				if t == DType::F32 && target == DType::I32 {
+					let b = ns[0].bounds.ok_or("unproven float-to-int CAST")?;
+					if b.lo < i32::MIN as i64 || b.hi > 2147483520 {
+						return Err("unsafe float-to-int CAST".into());
+					}
+				}
+				target
+			}
+			Alu::Recip => {
+				if t != DType::F32 {
+					return Err("RECIP requires f32".into());
+				}
+				t
+			}
+			Alu::Xor | Alu::And | Alu::Or => {
+				if !matches!(t, DType::I32 | DType::Bool) || ns[1].dtype != t {
+					return Err("bitwise type mismatch".into());
+				}
+				t
+			}
+			Alu::Shl | Alu::Shr => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("shift requires i32".into());
+				}
+				let b = ns[1].bounds.ok_or("unproven shift count")?;
+				if b.lo < 0 || b.hi >= 32 {
+					return Err("unsafe shift count".into());
+				}
+				t
+			}
+			Alu::Div | Alu::Mod => {
+				if t != DType::I32 || ns[1].dtype != t {
+					return Err("integer DIV/MOD require i32".into());
+				}
+				let a = ns[0].bounds.unwrap_or(Bounds::I32);
+				let b = ns[1].bounds.unwrap_or(Bounds::I32);
+				if b.lo <= 0 && b.hi >= 0 || a.lo == i32::MIN as i64 && b.lo <= -1 && b.hi >= -1 {
+					return Err("unsafe integer division".into());
+				}
+				t
+			}
+			Alu::Lt | Alu::Eq | Alu::Ne => {
+				if !numeric(t) || ns[1].dtype != t {
+					return Err("comparison type mismatch".into());
+				}
+				DType::Bool
+			}
+			_ => {
+				if !numeric(t) || ns.iter().any(|n| n.dtype != t) {
+					return Err("numeric type mismatch".into());
+				}
+				t
+			}
+		};
+		let bounds = if dtype == DType::Bool {
+			Some(Bounds { lo: 0, hi: 1 })
+		} else if dtype == DType::I32 {
+			let a = ns[0].bounds.unwrap_or(Bounds::I32);
+			let b = ns.get(1).and_then(|n| n.bounds).unwrap_or(Bounds::I32);
+			let raw = match op {
+				Alu::Add => Some((a.lo + b.lo, a.hi + b.hi)),
+				Alu::Sub => Some((a.lo - b.hi, a.hi - b.lo)),
+				Alu::Mul => {
+					let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+					Some((*p.iter().min().unwrap(), *p.iter().max().unwrap()))
+				}
+				_ => None,
+			};
+			Some(match raw {
+				Some((lo, hi)) if lo >= i32::MIN as i64 && hi <= i32::MAX as i64 => {
+					Bounds { lo, hi }
+				}
+				_ => Bounds::I32,
+			})
+		} else {
+			None
+		};
+		Ok((dtype, bounds))
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
@@ -997,6 +2110,41 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_rewrite.rs` の `fn integer_contract_and_rewrite(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
+fn integer_contract_and_rewrite() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let x = g.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	let zero = g.constant(Value::I32(0));
+	let root = g.alu(Alu::Add, vec![x, zero])?;
+	let (r, y) = g.rewrite(root)?;
+	assert_eq!(r.cost(y)?, 0);
+	for x in [-7, 0, 5] {
+		assert_eq!(
+			g.evaluate(root, &[Value::I32(x)])?,
+			r.compile(y)?.run(&[Value::I32(x)])?
+		)
+	}
+	for (op, a, b, expected) in [
+		(Alu::Div, -7, 3, -3),
+		(Alu::Mod, -7, 3, 2),
+		(Alu::Add, i32::MAX, 1, i32::MIN),
+		(Alu::Shr, -8, 1, -4),
+		(Alu::Shl, 6, 1, 12),
+	] {
+		let a = g.constant(Value::I32(a));
+		let b = g.constant(Value::I32(b));
+		let y = g.alu(op, vec![a, b])?;
+		assert_eq!(g.compile(y)?.run(&[])?, Value::I32(expected));
+	}
+	let a = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Div, vec![a, zero]).is_err());
+	assert!(g.alu(Alu::Shl, vec![a, x]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
@@ -1005,6 +2153,56 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 <!-- todo:03-015 -->
 
 `tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
+
+`src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
+		self.verify(root, 0)?;
+		let mut out = Self::default();
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let new = match n.op {
+				SOp::Const(v) => out.constant(v),
+				SOp::Param {
+					slot,
+					scope,
+					dtype,
+					bounds,
+				} => out.scoped_param(scope, slot, dtype, bounds)?,
+				SOp::Alu(op) => {
+					let children = n.inputs.iter().map(|x| map[x]).collect::<Vec<_>>();
+					let constants = children
+						.iter()
+						.map(|&x| match out.nodes[x].op {
+							SOp::Const(v) => Some(v),
+							_ => None,
+						})
+						.collect::<Option<Vec<_>>>();
+					if let Some(values) = constants {
+						out.constant(eval_alu(op, &values)?)
+					} else if matches!(op, Alu::Add | Alu::Xor)
+						&& n.dtype == DType::I32
+						&& matches!(out.nodes[children[1]].op, SOp::Const(Value::I32(0)))
+					{
+						children[0]
+					} else if op == Alu::Where {
+						if let SOp::Const(Value::Bool(b)) = out.nodes[children[0]].op {
+							children[if b { 1 } else { 2 }]
+						} else {
+							out.alu(op, children)?
+						}
+					} else {
+						out.alu(op, children)?
+					}
+				}
+			};
+			map.insert(id, new);
+		}
+		Ok((out, map[&root]))
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
@@ -1015,6 +2213,56 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
+`src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
+		self.verify(root, 0)?;
+		let mut out = Self::default();
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let new = match n.op {
+				SOp::Const(v) => out.constant(v),
+				SOp::Param {
+					slot,
+					scope,
+					dtype,
+					bounds,
+				} => out.scoped_param(scope, slot, dtype, bounds)?,
+				SOp::Alu(op) => {
+					let children = n.inputs.iter().map(|x| map[x]).collect::<Vec<_>>();
+					let constants = children
+						.iter()
+						.map(|&x| match out.nodes[x].op {
+							SOp::Const(v) => Some(v),
+							_ => None,
+						})
+						.collect::<Option<Vec<_>>>();
+					if let Some(values) = constants {
+						out.constant(eval_alu(op, &values)?)
+					} else if matches!(op, Alu::Add | Alu::Xor)
+						&& n.dtype == DType::I32
+						&& matches!(out.nodes[children[1]].op, SOp::Const(Value::I32(0)))
+					{
+						children[0]
+					} else if op == Alu::Where {
+						if let SOp::Const(Value::Bool(b)) = out.nodes[children[0]].op {
+							children[if b { 1 } else { 2 }]
+						} else {
+							out.alu(op, children)?
+						}
+					} else {
+						out.alu(op, children)?
+					}
+				}
+			};
+			map.insert(id, new);
+		}
+		Ok((out, map[&root]))
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite
 ```
@@ -1023,6 +2271,56 @@ cargo test --quiet --test scalar_rewrite
 <!-- todo:03-017 -->
 
 `tests/scalar_rewrite.rs` の `where_and_float_classification` で、この経路の値または拒否条件を確認する。
+
+`src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
+		self.verify(root, 0)?;
+		let mut out = Self::default();
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for id in self.order(root)? {
+			let n = &self.nodes[id];
+			let new = match n.op {
+				SOp::Const(v) => out.constant(v),
+				SOp::Param {
+					slot,
+					scope,
+					dtype,
+					bounds,
+				} => out.scoped_param(scope, slot, dtype, bounds)?,
+				SOp::Alu(op) => {
+					let children = n.inputs.iter().map(|x| map[x]).collect::<Vec<_>>();
+					let constants = children
+						.iter()
+						.map(|&x| match out.nodes[x].op {
+							SOp::Const(v) => Some(v),
+							_ => None,
+						})
+						.collect::<Option<Vec<_>>>();
+					if let Some(values) = constants {
+						out.constant(eval_alu(op, &values)?)
+					} else if matches!(op, Alu::Add | Alu::Xor)
+						&& n.dtype == DType::I32
+						&& matches!(out.nodes[children[1]].op, SOp::Const(Value::I32(0)))
+					{
+						children[0]
+					} else if op == Alu::Where {
+						if let SOp::Const(Value::Bool(b)) = out.nodes[children[0]].op {
+							children[if b { 1 } else { 2 }]
+						} else {
+							out.alu(op, children)?
+						}
+					} else {
+						out.alu(op, children)?
+					}
+				}
+			};
+			map.insert(id, new);
+		}
+		Ok((out, map[&root]))
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
@@ -1033,6 +2331,36 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+fn typed_failures_and_special_values() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let f = g.param(0, DType::F32, None)?;
+	let i = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Add, vec![f, i]).is_err());
+	assert!(g.alu(Alu::Cast(DType::I32), vec![f]).is_err());
+	assert!(g.param(1, DType::Void, None).is_err());
+	assert!(g.alu(Alu::Add, vec![i]).is_err());
+	assert!(g.compile(999).is_err());
+	let foreign = g.scoped_param(42, 0, DType::F32, None)?;
+	assert!(g.compile(foreign).is_err());
+	let minus = g.constant(Value::f32(-0.));
+	let plus = g.constant(Value::f32(0.));
+	assert_ne!(minus, plus);
+	let max = g.alu(Alu::Max, vec![minus, minus])?;
+	assert_eq!(g.compile(max)?.run(&[])?, Value::f32(0.));
+	let nan = g.constant(Value::F32Bits(0x7fc00042));
+	assert_eq!(nan, g.constant(Value::F32Bits(0x7fc00042)));
+	let max = g.alu(Alu::Max, vec![nan, plus])?;
+	assert!(g.compile(max)?.run(&[])?.number().is_nan());
+	let mut bounded = ScalarGraph::default();
+	let x = bounded.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	assert!(bounded.compile(x)?.run(&[Value::I32(6)]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
@@ -1041,6 +2369,31 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 <!-- todo:03-019 -->
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+fn arithmetic_and_shared_library() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let b = g.param(1, DType::F32, None)?;
+	let c = g.param(2, DType::F32, None)?;
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	assert_eq!(sum, g.alu(Alu::Add, vec![a, b])?);
+	let root = g.alu(Alu::Mul, vec![sum, c])?;
+	let p = g.compile(root)?;
+	assert_eq!(
+		p.run(&[Value::f32(2.), Value::f32(3.), Value::f32(4.)])?,
+		Value::f32(20.)
+	);
+	assert_eq!(
+		p.run(&[Value::f32(1.), Value::f32(2.), Value::f32(4.)])?,
+		Value::f32(12.)
+	);
+	assert!(p.run(&[]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite
@@ -1051,6 +2404,36 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+fn typed_failures_and_special_values() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let f = g.param(0, DType::F32, None)?;
+	let i = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Add, vec![f, i]).is_err());
+	assert!(g.alu(Alu::Cast(DType::I32), vec![f]).is_err());
+	assert!(g.param(1, DType::Void, None).is_err());
+	assert!(g.alu(Alu::Add, vec![i]).is_err());
+	assert!(g.compile(999).is_err());
+	let foreign = g.scoped_param(42, 0, DType::F32, None)?;
+	assert!(g.compile(foreign).is_err());
+	let minus = g.constant(Value::f32(-0.));
+	let plus = g.constant(Value::f32(0.));
+	assert_ne!(minus, plus);
+	let max = g.alu(Alu::Max, vec![minus, minus])?;
+	assert_eq!(g.compile(max)?.run(&[])?, Value::f32(0.));
+	let nan = g.constant(Value::F32Bits(0x7fc00042));
+	assert_eq!(nan, g.constant(Value::F32Bits(0x7fc00042)));
+	let max = g.alu(Alu::Max, vec![nan, plus])?;
+	assert!(g.compile(max)?.run(&[])?.number().is_nan());
+	let mut bounded = ScalarGraph::default();
+	let x = bounded.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	assert!(bounded.compile(x)?.run(&[Value::I32(6)]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
@@ -1059,6 +2442,36 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 <!-- todo:03-021 -->
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+fn typed_failures_and_special_values() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let f = g.param(0, DType::F32, None)?;
+	let i = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Add, vec![f, i]).is_err());
+	assert!(g.alu(Alu::Cast(DType::I32), vec![f]).is_err());
+	assert!(g.param(1, DType::Void, None).is_err());
+	assert!(g.alu(Alu::Add, vec![i]).is_err());
+	assert!(g.compile(999).is_err());
+	let foreign = g.scoped_param(42, 0, DType::F32, None)?;
+	assert!(g.compile(foreign).is_err());
+	let minus = g.constant(Value::f32(-0.));
+	let plus = g.constant(Value::f32(0.));
+	assert_ne!(minus, plus);
+	let max = g.alu(Alu::Max, vec![minus, minus])?;
+	assert_eq!(g.compile(max)?.run(&[])?, Value::f32(0.));
+	let nan = g.constant(Value::F32Bits(0x7fc00042));
+	assert_eq!(nan, g.constant(Value::F32Bits(0x7fc00042)));
+	let max = g.alu(Alu::Max, vec![nan, plus])?;
+	assert!(g.compile(max)?.run(&[])?.number().is_nan());
+	let mut bounded = ScalarGraph::default();
+	let x = bounded.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	assert!(bounded.compile(x)?.run(&[Value::I32(6)]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
@@ -1069,6 +2482,31 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+fn arithmetic_and_shared_library() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let b = g.param(1, DType::F32, None)?;
+	let c = g.param(2, DType::F32, None)?;
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	assert_eq!(sum, g.alu(Alu::Add, vec![a, b])?);
+	let root = g.alu(Alu::Mul, vec![sum, c])?;
+	let p = g.compile(root)?;
+	assert_eq!(
+		p.run(&[Value::f32(2.), Value::f32(3.), Value::f32(4.)])?,
+		Value::f32(20.)
+	);
+	assert_eq!(
+		p.run(&[Value::f32(1.), Value::f32(2.), Value::f32(4.)])?,
+		Value::f32(12.)
+	);
+	assert!(p.run(&[]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite
 ```
@@ -1077,6 +2515,36 @@ cargo test --quiet --test scalar_rewrite
 <!-- todo:03-023 -->
 
 `tests/scalar_rewrite.rs` の `typed_failures_and_special_values` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+fn typed_failures_and_special_values() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let f = g.param(0, DType::F32, None)?;
+	let i = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Add, vec![f, i]).is_err());
+	assert!(g.alu(Alu::Cast(DType::I32), vec![f]).is_err());
+	assert!(g.param(1, DType::Void, None).is_err());
+	assert!(g.alu(Alu::Add, vec![i]).is_err());
+	assert!(g.compile(999).is_err());
+	let foreign = g.scoped_param(42, 0, DType::F32, None)?;
+	assert!(g.compile(foreign).is_err());
+	let minus = g.constant(Value::f32(-0.));
+	let plus = g.constant(Value::f32(0.));
+	assert_ne!(minus, plus);
+	let max = g.alu(Alu::Max, vec![minus, minus])?;
+	assert_eq!(g.compile(max)?.run(&[])?, Value::f32(0.));
+	let nan = g.constant(Value::F32Bits(0x7fc00042));
+	assert_eq!(nan, g.constant(Value::F32Bits(0x7fc00042)));
+	let max = g.alu(Alu::Max, vec![nan, plus])?;
+	assert!(g.compile(max)?.run(&[])?.number().is_nan());
+	let mut bounded = ScalarGraph::default();
+	let x = bounded.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	assert!(bounded.compile(x)?.run(&[Value::I32(6)]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
@@ -1087,6 +2555,41 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `integer_contract_and_rewrite` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_rewrite.rs` の `fn integer_contract_and_rewrite(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
+fn integer_contract_and_rewrite() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let x = g.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
+	let zero = g.constant(Value::I32(0));
+	let root = g.alu(Alu::Add, vec![x, zero])?;
+	let (r, y) = g.rewrite(root)?;
+	assert_eq!(r.cost(y)?, 0);
+	for x in [-7, 0, 5] {
+		assert_eq!(
+			g.evaluate(root, &[Value::I32(x)])?,
+			r.compile(y)?.run(&[Value::I32(x)])?
+		)
+	}
+	for (op, a, b, expected) in [
+		(Alu::Div, -7, 3, -3),
+		(Alu::Mod, -7, 3, 2),
+		(Alu::Add, i32::MAX, 1, i32::MIN),
+		(Alu::Shr, -8, 1, -4),
+		(Alu::Shl, 6, 1, 12),
+	] {
+		let a = g.constant(Value::I32(a));
+		let b = g.constant(Value::I32(b));
+		let y = g.alu(op, vec![a, b])?;
+		assert_eq!(g.compile(y)?.run(&[])?, Value::I32(expected));
+	}
+	let a = g.constant(Value::I32(1));
+	assert!(g.alu(Alu::Div, vec![a, zero]).is_err());
+	assert!(g.alu(Alu::Shl, vec![a, x]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
@@ -1095,6 +2598,31 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 <!-- todo:03-025 -->
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+fn arithmetic_and_shared_library() -> Result<()> {
+	let mut g = ScalarGraph::default();
+	let a = g.param(0, DType::F32, None)?;
+	let b = g.param(1, DType::F32, None)?;
+	let c = g.param(2, DType::F32, None)?;
+	let sum = g.alu(Alu::Add, vec![a, b])?;
+	assert_eq!(sum, g.alu(Alu::Add, vec![a, b])?);
+	let root = g.alu(Alu::Mul, vec![sum, c])?;
+	let p = g.compile(root)?;
+	assert_eq!(
+		p.run(&[Value::f32(2.), Value::f32(3.), Value::f32(4.)])?,
+		Value::f32(20.)
+	);
+	assert_eq!(
+		p.run(&[Value::f32(1.), Value::f32(2.), Value::f32(4.)])?,
+		Value::f32(12.)
+	);
+	assert!(p.run(&[]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_rewrite

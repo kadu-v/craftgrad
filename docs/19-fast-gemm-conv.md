@@ -1022,6 +1022,86 @@ fn todo_19_001() {
 }
 ```
 
+`src/runtime.rs` の `pub fn compile_unfused(`の定義を次の全体で置き換えます。
+
+```rust file="src/runtime.rs" mode="replace" item="pub fn compile_unfused("
+	pub fn compile_unfused(graph: &crate::Graph, outputs: &[usize]) -> Result<Self> {
+		let (source, abi, kernel_count) = crate::graph::render(graph, outputs, false)?;
+		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			sealed: (graph.nodes.clone(), outputs.to_vec(), abi.clone()),
+			source,
+			abi,
+			graph: graph.clone(),
+			outputs: outputs.to_vec(),
+			kernel_count,
+			library,
+			specialized: false,
+			allocations: crate::graph::kernel_bodies(graph, outputs, false)?
+				.iter()
+				.map(|k| k.output)
+				.collect(),
+		})
+	}
+```
+
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_001 -- --exact
 ```
@@ -1038,6 +1118,63 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_002() {
 	suite0::tiled_graph_and_rebind();
+}
+```
+
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
 }
 ```
 
@@ -1060,6 +1197,63 @@ fn todo_19_003() {
 }
 ```
 
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_003 -- --exact
 ```
@@ -1076,6 +1270,63 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_004() {
 	suite0::tiled_graph_and_rebind();
+}
+```
+
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
 }
 ```
 
@@ -1098,6 +1349,144 @@ fn todo_19_005() {
 }
 ```
 
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
+}
+```
+
+`src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
+
+```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+pub fn compile_bodies(
+	g: &Graph,
+	outputs: &[usize],
+	o: Options,
+	kernels: Vec<crate::graph::KernelBody>,
+) -> Result<(Plan, String)> {
+	o.validate()?;
+	let mut source = C_HELPERS.to_string();
+	source.push_str("#include <pthread.h>\ntypedef float chibi_v4 __attribute__((ext_vector_type(4)));\ntypedef struct {void*const* buffers;const uint64_t*s;size_t begin,end;int status;} Worker;\n");
+	let mut calls = String::new();
+	let mut report = String::new();
+	for (serial, k) in kernels.iter().enumerate() {
+		let (count, body) = outer(&k.body)?;
+		let mut pointers = String::new();
+		for id in g.topology(&[k.output])? {
+			pointers += &format!("float*b{id}=(float*)w->buffers[{id}];\n");
+		}
+		let mut work = String::new();
+		if o.vector
+			&& !o.interchange
+			&& let Some((a, b)) = vector_add(g, k.output)
+		{
+			work += &format!(
+				"size_t i=w->begin;for(;w->end-i>=4;i+=4){{chibi_v4 x,y,z;memcpy(&x,b{a}+i,16);memcpy(&y,b{b}+i,16);z=x+y;memcpy(b{}+i,&z,16);}}for(;i<w->end;i++){{{body}}}",
+				k.output
+			);
+			report += "vector=4 (unaligned memcpy); ";
+		}
+		if work.is_empty() {
+			if o.vector {
+				report += "vector=scalar fallback (noncontiguous or unsupported operation); ";
+			}
+			let index = if o.interchange {
+				let shape = g.shape(k.output);
+				if shape.len() != 2 {
+					return Err("interchange needs two independent output axes".into());
+				}
+				format!(
+					"size_t i=(flat%{})*{}+flat/{};",
+					shape[0], shape[1], shape[0]
+				)
+			} else {
+				"size_t i=flat;".into()
+			};
+			work += &format!(
+				"for(size_t outer=w->begin;outer<w->end;){{size_t limit=w->end-outer<{tile}?w->end-outer:{tile};for(size_t inner=0;inner<limit;inner+={unroll}){{",
+				tile = o.tile,
+				unroll = o.unroll
+			);
+			for lane in 0..o.unroll {
+				work += &format!(
+					"{{size_t off=inner+{lane};if(off<limit){{size_t flat=outer+off;{index}{body}}}}}"
+				);
+			}
+			work += "}outer+=limit;}";
+		}
+		work = work.replace("return 2;", "{w->status=2;return NULL;}");
+		source += &format!(
+			"static void* kernel{serial}(void*arg){{Worker*w=(Worker*)arg;const uint64_t*s=w->s;{pointers}{work}return NULL;}}\n"
+		);
+		let workers = o.workers;
+		calls += &format!(
+			"{{size_t count={count};pthread_t threads[{workers}];Worker args[{workers}];size_t created=0;int failure=0;for(size_t w=0;w<{workers};w++){{size_t q=count/{workers},r=count%{workers};args[w]=(Worker){{buffers,s,q*w+(w<r?w:r),q*(w+1)+((w+1)<r?w+1:r),0}};if(pthread_create(&threads[w],NULL,kernel{serial},&args[w])){{failure=3;break;}}created++;}}for(size_t w=0;w<created;w++){{if(pthread_join(threads[w],NULL))failure=4;if(args[w].status)failure=args[w].status;}}if(failure)return failure;}}\n"
+		);
+	}
+	source +=
+		&format!("int chibi_entry(void*const*buffers,const uint64_t*s){{{calls}return 0;}}\n");
+	report += &format!(
+		"tile={} unroll={} workers={} output_interchange={}",
+		o.tile, o.unroll, o.workers, o.interchange
+	);
+	Ok((
+		Plan::compile_source_specialized(g, outputs, source)?,
+		report,
+	))
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_005 -- --exact
 ```
@@ -1114,6 +1503,68 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_006() {
 	suite3::vector_loads_are_guarded();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
 }
 ```
 
@@ -1136,6 +1587,68 @@ fn todo_19_007() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_007 -- --exact
 ```
@@ -1152,6 +1665,68 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_008() {
 	suite3::vector_loads_are_guarded();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
 }
 ```
 
@@ -1174,6 +1749,68 @@ fn todo_19_009() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_009 -- --exact
 ```
@@ -1193,6 +1830,262 @@ fn todo_19_010() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
+}
+```
+
+`src/gpu.rs` の `pub fn header(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu.rs" mode="replace" item="pub fn header("
+pub fn header(d: Dialect, count: usize, body: &str) -> String {
+	let args = (0..count)
+		.map(|i| match d {
+			Dialect::Metal => format!("device float *b{i} [[buffer({i})]]"),
+			Dialect::OpenCl => format!("__global float *b{i}"),
+		})
+		.collect::<Vec<_>>()
+		.join(",");
+	match d {
+		Dialect::Metal => format!(
+			"#include <metal_stdlib>\nusing namespace metal;\nkernel void chibi({args}, constant ulong *s [[buffer({count})]], uint group_id [[threadgroup_position_in_grid]], uint local_id [[thread_position_in_threadgroup]]){{size_t g=group_id,l=local_id;{body}}}"
+		),
+		Dialect::OpenCl => format!(
+			"__kernel void chibi({args}, __constant ulong *s){{size_t g=get_group_id(0), l=get_local_id(0);{body}}}"
+		),
+	}
+}
+```
+
+`src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		spec.validate(inputs)?;
+		if self.contract
+			!= (
+				spec.source.clone(),
+				spec.entry.clone(),
+				spec.lengths.len(),
+				spec.scalars.len().max(1),
+				spec.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let _execution = self
+			.execution
+			.lock()
+			.map_err(|_| "OpenCL execution mutex poisoned")?;
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if spec.lengths[spec.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: api("clGetDeviceInfo(name)", self.device.name())?,
+				timings,
+			});
+		}
+		let max = api(
+			"clGetDeviceInfo(workgroup)",
+			self.device.max_work_group_size(),
+		)?
+		.min(api(
+			"clGetKernelWorkGroupInfo",
+			self.kernel.get_work_group_size(self.device.id()),
+		)?);
+		let axes = api(
+			"clGetDeviceInfo(workitems)",
+			self.device.max_work_item_sizes(),
+		)?;
+		if spec.local > max || spec.local > axes[0] {
+			return Err(format!("OpenCL local {} exceeds limit {max}", spec.local));
+		}
+		let local_mem = api("clGetDeviceInfo(local)", self.device.local_mem_size())?;
+		if spec.shared_bytes as u64 > local_mem
+			|| api(
+				"clGetKernelWorkGroupInfo(local)",
+				self.kernel.get_local_mem_size(self.device.id()),
+			)? > local_mem
+		{
+			return Err("OpenCL local memory limit".into());
+		}
+		if spec.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		let allocation = Instant::now();
+		let mut buffers: Vec<_> = inputs
+			.iter()
+			.map(|b| unsafe {
+				api(
+					"clCreateBuffer",
+					Buffer::<f32>::create(
+						&self.context,
+						CL_MEM_READ_WRITE,
+						b.len().max(1),
+						ptr::null_mut(),
+					),
+				)
+			})
+			.collect::<Result<_, _>>()?;
+		let scalar_words = if spec.scalars.is_empty() {
+			vec![0u64]
+		} else {
+			spec.scalars.clone()
+		};
+		let mut scalar_buffer = unsafe {
+			api(
+				"clCreateBuffer(scalars)",
+				Buffer::<u64>::create(
+					&self.context,
+					CL_MEM_READ_WRITE,
+					scalar_words.len(),
+					ptr::null_mut(),
+				),
+			)?
+		};
+		timings.allocation = allocation.elapsed();
+		let transfer = Instant::now();
+		for (input, buffer) in inputs.iter().zip(&mut buffers) {
+			if !input.is_empty() {
+				unsafe {
+					api(
+						"clEnqueueWriteBuffer",
+						self.queue
+							.enqueue_write_buffer(buffer, CL_BLOCKING, 0, input, &[]),
+					)?;
+				}
+			}
+		}
+		unsafe {
+			api(
+				"clEnqueueWriteBuffer(scalars)",
+				self.queue.enqueue_write_buffer(
+					&mut scalar_buffer,
+					CL_BLOCKING,
+					0,
+					&scalar_words,
+					&[],
+				),
+			)?;
+			api(
+				"clSetKernelArg(scalars)",
+				self.kernel.set_arg(buffers.len() as u32, &scalar_buffer),
+			)?;
+		}
+		timings.transfer = transfer.elapsed();
+		for (index, buffer) in buffers.iter().enumerate() {
+			unsafe {
+				api("clSetKernelArg", self.kernel.set_arg(index as u32, buffer))?;
+			}
+		}
+		let global = [spec
+			.groups
+			.checked_mul(spec.local)
+			.ok_or("launch overflow")?];
+		let local = [spec.local];
+		let event = unsafe {
+			api(
+				"clEnqueueNDRangeKernel",
+				self.queue.enqueue_nd_range_kernel(
+					self.kernel.get(),
+					1,
+					ptr::null(),
+					global.as_ptr(),
+					local.as_ptr(),
+					&[],
+				),
+			)?
+		};
+		let sync = Instant::now();
+		api("clWaitForEvents", event.wait())?;
+		timings.synchronization = sync.elapsed();
+		if let (Ok(start), Ok(end)) = (
+			event.profiling_command_start(),
+			event.profiling_command_end(),
+		) {
+			timings.kernel = Some(Duration::from_nanos(end - start));
+		}
+		let transfer = Instant::now();
+		let mut output = vec![0.; spec.lengths[spec.output]];
+		unsafe {
+			api(
+				"clEnqueueReadBuffer",
+				self.queue.enqueue_read_buffer(
+					&buffers[spec.output],
+					CL_BLOCKING,
+					0,
+					&mut output,
+					&[],
+				),
+			)?;
+		}
+		timings.transfer += transfer.elapsed();
+		timings.total = total.elapsed();
+		Ok(Run {
+			output,
+			device: api("clGetDeviceInfo(name)", self.device.name())?,
+			timings,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_010 -- --exact
 ```
@@ -1209,6 +2102,68 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_011() {
 	suite3::vector_loads_are_guarded();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
 }
 ```
 
@@ -1231,6 +2186,68 @@ fn todo_19_012() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+pub fn gemm_scalar(
+	d: Dialect,
+	m: usize,
+	n: usize,
+	k: usize,
+	t: GemmTile,
+) -> Result<Kernel, String> {
+	if t.m == 0 || t.n == 0 || t.k == 0 {
+		return Err("zero tile".into());
+	}
+	let local = t.m.checked_mul(t.n).ok_or("local overflow")?;
+	let ap = t.k.checked_add(t.pad).ok_or("pitch overflow")?;
+	let bp = if t.transpose_b { t.k } else { t.n }
+		.checked_add(t.pad)
+		.ok_or("pitch overflow")?;
+	let al = t.m.checked_mul(ap).ok_or("local overflow")?;
+	let bl = if t.transpose_b { t.n } else { t.k }
+		.checked_mul(bp)
+		.ok_or("local overflow")?;
+	let bytes = al
+		.checked_add(bl)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or("local bytes overflow")?;
+	let gn = groups(n, t.n)?;
+	let gm = groups(m, t.m)?;
+	let bload = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bidx = if t.transpose_b {
+		format!("bb[cn*{bp}+r]")
+	} else {
+		format!("bb[r*{bp}+cn]")
+	};
+	let body = format!(
+		"{} float aa[{al}],bb[{bl}];size_t br=g/{gn},bc=g%{gn},rm=l/{tn},cn=l%{tn};size_t row=br*{tm}+rm,col=bc*{tn}+cn;float acc=0.0f;for(size_t ko=0;ko<{k};ko+={tk}){{for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bload}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}{}for(size_t r=0;r<{tk};r++){{acc+=aa[rm*{ap}+r]*{bidx};}}{}}}if(row<{m}&&col<{n}){{b2[row*{n}+col]=acc;}}",
+		shared(d),
+		barrier(d),
+		barrier(d),
+		tn = t.n,
+		tm = t.m,
+		tk = t.k
+	);
+	spec(
+		d,
+		vec![
+			m.checked_mul(k).ok_or("shape overflow")?,
+			k.checked_mul(n).ok_or("shape overflow")?,
+			m.checked_mul(n).ok_or("shape overflow")?,
+		],
+		body,
+		gm.checked_mul(gn).ok_or("group overflow")?,
+		local,
+		bytes,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_012 -- --exact
 ```
@@ -1250,6 +2267,216 @@ fn todo_19_013() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn gemm(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm("
+pub fn gemm(d: Dialect, m: usize, n: usize, k: usize, t: GemmTile) -> Result<Kernel, String> {
+	let mut kernel = gemm_scalar(d, m, n, k, t)?;
+	if !k.is_multiple_of(4)
+		|| !n.is_multiple_of(4)
+		|| !t.k.is_multiple_of(4)
+		|| !t.n.is_multiple_of(4)
+	{
+		return Ok(kernel);
+	}
+	let local = t.m * t.n;
+	let ap = t.k + t.pad;
+	let bp = if t.transpose_b { t.k } else { t.n } + t.pad;
+	let aload = format!(
+		"for(size_t z=l;z<{tm}*{tk};z+={local}){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};aa[(z/{tk})*{ap}+z%{tk}]=(ar<{m}&&ak<{k})?b0[ar*{k}+ak]:0.0f;}}",
+		tm = t.m,
+		tk = t.k
+	);
+	let bindex = if t.transpose_b {
+		format!("bb[(z%{})*{bp}+z/{}]", t.n, t.n)
+	} else {
+		format!("bb[(z/{})*{bp}+z%{}]", t.n, t.n)
+	};
+	let bload = format!(
+		"for(size_t z=l;z<{tk}*{tn};z+={local}){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};{bindex}=(bk<{k}&&bn<{n})?b1[bk*{n}+bn]:0.0f;}}",
+		tk = t.k,
+		tn = t.n
+	);
+	let load = |pointer: &str| match d {
+		Dialect::Metal => format!("*((device const float4*)({pointer}))"),
+		Dialect::OpenCl => format!("vload4(0,{pointer})"),
+	};
+	let aa = format!(
+		"for(size_t z=l*4;z<{tm}*{tk};z+={local}*4){{size_t ar=br*{tm}+z/{tk},ak=ko+z%{tk};float4 values=(float4)(0.0f);if(ar<{m}&&ak+3<{k}){{values={load};}}for(size_t c=0;c<4;c++){{aa[((z+c)/{tk})*{ap}+(z+c)%{tk}]=values[c];}}}}",
+		tm = t.m,
+		tk = t.k,
+		load = load(&format!("b0+ar*{k}+ak"))
+	);
+	let store = if t.transpose_b {
+		format!("bb[((z+c)%{})*{bp}+(z+c)/{}]", t.n, t.n)
+	} else {
+		format!("bb[((z+c)/{})*{bp}+(z+c)%{}]", t.n, t.n)
+	};
+	let bb = format!(
+		"for(size_t z=l*4;z<{tk}*{tn};z+={local}*4){{size_t bk=ko+z/{tn},bn=bc*{tn}+z%{tn};float4 values=(float4)(0.0f);if(bk<{k}&&bn+3<{n}){{values={load};}}for(size_t c=0;c<4;c++){{{store}=values[c];}}}}",
+		tk = t.k,
+		tn = t.n,
+		load = load(&format!("b1+bk*{n}+bn"))
+	);
+	kernel.source = kernel.source.replace(&aload, &aa).replace(&bload, &bb);
+	Ok(kernel)
+}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_013 -- --exact
 ```
@@ -1266,6 +2493,137 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_014() {
 	suite1::conv_stride_padding_uses_real_gemm();
+}
+```
+
+`src/conv_opt.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
+
+```rust file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
+pub fn conv2d(
+	g: &mut Graph,
+	x: NodeId,
+	w: NodeId,
+	pad: (usize, usize),
+	stride: usize,
+) -> Result<NodeId> {
+	if stride == 0 {
+		return Err("conv stride=0".into());
+	}
+	let sx = g.shape(x).to_vec();
+	let sw = g.shape(w).to_vec();
+	if sx.len() != 4 || sw.len() != 4 || sx[1] != sw[1] || sw[2] == 0 || sw[3] == 0 {
+		return Err("conv NCHW/OIHW shape".into());
+	}
+	let xp = g.pad(x, vec![(0, 0), (0, 0), (pad.0, pad.0), (pad.1, pad.1)])?;
+	let sp = g.shape(xp).to_vec();
+	let oh = sp[2].checked_sub(sw[2]).ok_or("conv kernel height")? / stride + 1;
+	let ow = sp[3].checked_sub(sw[3]).ok_or("conv kernel width")? / stride + 1;
+	let mut windows = vec![];
+	for kh in 0..sw[2] {
+		for kw in 0..sw[3] {
+			let mut hs = vec![];
+			for h in 0..oh {
+				let index = h
+					.checked_mul(stride)
+					.and_then(|v| v.checked_add(kh))
+					.ok_or("conv index overflow")?;
+				if index > 1 << 24 {
+					return Err("f32 gather index precision".into());
+				}
+				hs.push(g.constant(index as f32, vec![])?);
+			}
+			let mut ws = vec![];
+			for col in 0..ow {
+				let index = col
+					.checked_mul(stride)
+					.and_then(|v| v.checked_add(kw))
+					.ok_or("conv index overflow")?;
+				if index > 1 << 24 {
+					return Err("f32 gather index precision".into());
+				}
+				ws.push(g.constant(index as f32, vec![])?);
+			}
+			let hi = g.stack(hs, 0)?;
+			let wi = g.stack(ws, 0)?;
+			let rows = g.gather(xp, hi, 2)?;
+			windows.push(g.gather(rows, wi, 3)?);
+		}
+	}
+	let patch = g.stack(windows, 4)?;
+	let patch = g.permute(patch, vec![0, 2, 3, 1, 4])?;
+	let reduction = sx[1]
+		.checked_mul(sw[2])
+		.and_then(|n| n.checked_mul(sw[3]))
+		.ok_or("conv reduction shape")?;
+	let positions = sx[0]
+		.checked_mul(oh)
+		.and_then(|n| n.checked_mul(ow))
+		.ok_or("conv output shape")?;
+	let matrix = g.reshape(patch, vec![positions, reduction])?;
+	let matrix = g.stage(matrix)?;
+	let weights = g.reshape(w, vec![sw[0], reduction])?;
+	let weights = g.permute(weights, vec![1, 0])?;
+	let weights = g.stage(weights)?;
+	let product = g.matmul(matrix, weights)?;
+	let output = g.reshape(product, vec![sx[0], oh, ow, sw[0]])?;
+	g.permute(output, vec![0, 3, 1, 2])
+}
+```
+
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
 }
 ```
 
@@ -1288,6 +2646,137 @@ fn todo_19_015() {
 }
 ```
 
+`src/conv_opt.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
+
+```rust file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
+pub fn conv2d(
+	g: &mut Graph,
+	x: NodeId,
+	w: NodeId,
+	pad: (usize, usize),
+	stride: usize,
+) -> Result<NodeId> {
+	if stride == 0 {
+		return Err("conv stride=0".into());
+	}
+	let sx = g.shape(x).to_vec();
+	let sw = g.shape(w).to_vec();
+	if sx.len() != 4 || sw.len() != 4 || sx[1] != sw[1] || sw[2] == 0 || sw[3] == 0 {
+		return Err("conv NCHW/OIHW shape".into());
+	}
+	let xp = g.pad(x, vec![(0, 0), (0, 0), (pad.0, pad.0), (pad.1, pad.1)])?;
+	let sp = g.shape(xp).to_vec();
+	let oh = sp[2].checked_sub(sw[2]).ok_or("conv kernel height")? / stride + 1;
+	let ow = sp[3].checked_sub(sw[3]).ok_or("conv kernel width")? / stride + 1;
+	let mut windows = vec![];
+	for kh in 0..sw[2] {
+		for kw in 0..sw[3] {
+			let mut hs = vec![];
+			for h in 0..oh {
+				let index = h
+					.checked_mul(stride)
+					.and_then(|v| v.checked_add(kh))
+					.ok_or("conv index overflow")?;
+				if index > 1 << 24 {
+					return Err("f32 gather index precision".into());
+				}
+				hs.push(g.constant(index as f32, vec![])?);
+			}
+			let mut ws = vec![];
+			for col in 0..ow {
+				let index = col
+					.checked_mul(stride)
+					.and_then(|v| v.checked_add(kw))
+					.ok_or("conv index overflow")?;
+				if index > 1 << 24 {
+					return Err("f32 gather index precision".into());
+				}
+				ws.push(g.constant(index as f32, vec![])?);
+			}
+			let hi = g.stack(hs, 0)?;
+			let wi = g.stack(ws, 0)?;
+			let rows = g.gather(xp, hi, 2)?;
+			windows.push(g.gather(rows, wi, 3)?);
+		}
+	}
+	let patch = g.stack(windows, 4)?;
+	let patch = g.permute(patch, vec![0, 2, 3, 1, 4])?;
+	let reduction = sx[1]
+		.checked_mul(sw[2])
+		.and_then(|n| n.checked_mul(sw[3]))
+		.ok_or("conv reduction shape")?;
+	let positions = sx[0]
+		.checked_mul(oh)
+		.and_then(|n| n.checked_mul(ow))
+		.ok_or("conv output shape")?;
+	let matrix = g.reshape(patch, vec![positions, reduction])?;
+	let matrix = g.stage(matrix)?;
+	let weights = g.reshape(w, vec![sw[0], reduction])?;
+	let weights = g.permute(weights, vec![1, 0])?;
+	let weights = g.stage(weights)?;
+	let product = g.matmul(matrix, weights)?;
+	let output = g.reshape(product, vec![sx[0], oh, ow, sw[0]])?;
+	g.permute(output, vec![0, 3, 1, 2])
+}
+```
+
+`src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	outputs: &[usize],
+	tile: (usize, usize, usize),
+	workers: usize,
+) -> Result<(Plan, String)> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("GEMM zero tile".into());
+	}
+	tm.checked_mul(tn)
+		.and_then(|n| n.checked_mul(4))
+		.filter(|&n| n <= 65536)
+		.ok_or("register tile too large")?;
+	let mut kernels = kernel_bodies(g, outputs, true)?;
+	let mut matches = 0;
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for n in &g.nodes {
+		offsets.push(offset);
+		offset += n.shape.len();
+	}
+	for kernel in &mut kernels {
+		if let Some(mat) = recognize(g, kernel.output) {
+			let a = mat.a;
+			let b = mat.b;
+			let out = mat.output;
+			let m = format!("s[{}]", offsets[a]);
+			let k = format!("s[{}]", offsets[a] + 1);
+			let n = format!("s[{}]", offsets[b] + 1);
+			let gm = format!("({m}/{tm}+({m}%{tm}!=0))");
+			let gn = format!("({n}/{tn}+({n}%{tn}!=0))");
+			kernel.body = format!(
+				"for (size_t i=0; i<{gm}*{gn}; ++i) {{size_t br=i/{gn},bc=i%{gn};float acc[{tm}][{tn}]={{0}};for(size_t ko=0;ko<{k};){{size_t klimit={k}-ko<{tk}?{k}-ko:{tk};for(size_t ki=0;ki<klimit;ki++){{size_t r=ko+ki;for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;if(row<{m}){{for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(col<{n}){{acc[mi][ni]+=b{a}[row*{k}+r]*b{b}[r*{n}+col];}}}}}}}}}}ko+=klimit;}}for(size_t mi=0;mi<{tm};mi++){{size_t row=br*{tm}+mi;for(size_t ni=0;ni<{tn};ni++){{size_t col=bc*{tn}+ni;if(row<{m}&&col<{n}){{b{out}[row*{n}+col]=acc[mi][ni];}}}}}}}}\n"
+			);
+			matches += 1;
+		}
+	}
+	let (plan, report) = compile_bodies(
+		g,
+		outputs,
+		Options {
+			workers,
+			..Options::default()
+		},
+		kernels,
+	)?;
+	Ok((
+		plan,
+		format!("GEMM matches={matches}, tile={tile:?}; {report}"),
+	))
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_015 -- --exact
 ```
@@ -1304,6 +2793,76 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_016() {
 	suite2::actual_reuse_and_binary_cache();
+}
+```
+
+`src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
+	let kernels = kernel_bodies(g, outputs, true)?;
+	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
+	for (time, kernel) in kernels.iter().enumerate() {
+		uses.entry(kernel.output)
+			.and_modify(|v| v.1 = time)
+			.or_insert((time, time));
+		for &id in &kernel.dependencies {
+			if kernel.body.contains(&format!("b{id}[")) {
+				uses.entry(id)
+					.and_modify(|v| v.1 = time)
+					.or_insert((0, time));
+			}
+		}
+	}
+	let mut protected: HashSet<usize> = outputs.iter().chain(external).copied().collect();
+	for id in g.topology(outputs)? {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			protected.insert(id);
+		}
+	}
+	let mut intervals = uses.into_iter().collect::<Vec<_>>();
+	intervals.sort_by_key(|&(id, (first, _))| (first, id));
+	let mut allocations = vec![];
+	let mut slot_sizes = vec![];
+	let mut availability: Vec<usize> = vec![];
+	let mut protected_slots = HashSet::new();
+	for (id, (first, last)) in intervals {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		let n = elements(g.shape(id))?;
+		let protect = protected.contains(&id);
+		let slot = if reuse && !protect {
+			(0..slot_sizes.len()).find(|&s| {
+				!protected_slots.contains(&s) && availability[s] < first && slot_sizes[s] == n
+			})
+		} else {
+			None
+		};
+		let slot = slot.unwrap_or_else(|| {
+			let slot = slot_sizes.len();
+			slot_sizes.push(n);
+			availability.push(last);
+			slot
+		});
+		availability[slot] = last;
+		if protect {
+			protected_slots.insert(slot);
+		}
+		allocations.push(Allocation {
+			node: id,
+			slot,
+			first,
+			last,
+			elements: n,
+			protected: protect,
+		});
+	}
+	Ok(StoragePlan {
+		slots: slot_sizes.len(),
+		slot_sizes,
+		allocations,
+	})
 }
 ```
 
@@ -1326,6 +2885,76 @@ fn todo_19_017() {
 }
 ```
 
+`src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
+	let kernels = kernel_bodies(g, outputs, true)?;
+	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
+	for (time, kernel) in kernels.iter().enumerate() {
+		uses.entry(kernel.output)
+			.and_modify(|v| v.1 = time)
+			.or_insert((time, time));
+		for &id in &kernel.dependencies {
+			if kernel.body.contains(&format!("b{id}[")) {
+				uses.entry(id)
+					.and_modify(|v| v.1 = time)
+					.or_insert((0, time));
+			}
+		}
+	}
+	let mut protected: HashSet<usize> = outputs.iter().chain(external).copied().collect();
+	for id in g.topology(outputs)? {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			protected.insert(id);
+		}
+	}
+	let mut intervals = uses.into_iter().collect::<Vec<_>>();
+	intervals.sort_by_key(|&(id, (first, _))| (first, id));
+	let mut allocations = vec![];
+	let mut slot_sizes = vec![];
+	let mut availability: Vec<usize> = vec![];
+	let mut protected_slots = HashSet::new();
+	for (id, (first, last)) in intervals {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		let n = elements(g.shape(id))?;
+		let protect = protected.contains(&id);
+		let slot = if reuse && !protect {
+			(0..slot_sizes.len()).find(|&s| {
+				!protected_slots.contains(&s) && availability[s] < first && slot_sizes[s] == n
+			})
+		} else {
+			None
+		};
+		let slot = slot.unwrap_or_else(|| {
+			let slot = slot_sizes.len();
+			slot_sizes.push(n);
+			availability.push(last);
+			slot
+		});
+		availability[slot] = last;
+		if protect {
+			protected_slots.insert(slot);
+		}
+		allocations.push(Allocation {
+			node: id,
+			slot,
+			first,
+			last,
+			elements: n,
+			protected: protect,
+		});
+	}
+	Ok(StoragePlan {
+		slots: slot_sizes.len(),
+		slot_sizes,
+		allocations,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_017 -- --exact
 ```
@@ -1342,6 +2971,76 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_018() {
 	suite2::actual_reuse_and_binary_cache();
+}
+```
+
+`src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
+	let kernels = kernel_bodies(g, outputs, true)?;
+	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
+	for (time, kernel) in kernels.iter().enumerate() {
+		uses.entry(kernel.output)
+			.and_modify(|v| v.1 = time)
+			.or_insert((time, time));
+		for &id in &kernel.dependencies {
+			if kernel.body.contains(&format!("b{id}[")) {
+				uses.entry(id)
+					.and_modify(|v| v.1 = time)
+					.or_insert((0, time));
+			}
+		}
+	}
+	let mut protected: HashSet<usize> = outputs.iter().chain(external).copied().collect();
+	for id in g.topology(outputs)? {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			protected.insert(id);
+		}
+	}
+	let mut intervals = uses.into_iter().collect::<Vec<_>>();
+	intervals.sort_by_key(|&(id, (first, _))| (first, id));
+	let mut allocations = vec![];
+	let mut slot_sizes = vec![];
+	let mut availability: Vec<usize> = vec![];
+	let mut protected_slots = HashSet::new();
+	for (id, (first, last)) in intervals {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		let n = elements(g.shape(id))?;
+		let protect = protected.contains(&id);
+		let slot = if reuse && !protect {
+			(0..slot_sizes.len()).find(|&s| {
+				!protected_slots.contains(&s) && availability[s] < first && slot_sizes[s] == n
+			})
+		} else {
+			None
+		};
+		let slot = slot.unwrap_or_else(|| {
+			let slot = slot_sizes.len();
+			slot_sizes.push(n);
+			availability.push(last);
+			slot
+		});
+		availability[slot] = last;
+		if protect {
+			protected_slots.insert(slot);
+		}
+		allocations.push(Allocation {
+			node: id,
+			slot,
+			first,
+			last,
+			elements: n,
+			protected: protect,
+		});
+	}
+	Ok(StoragePlan {
+		slots: slot_sizes.len(),
+		slot_sizes,
+		allocations,
+	})
 }
 ```
 
@@ -1364,6 +3063,143 @@ fn todo_19_019() {
 }
 ```
 
+`src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
+	let kernels = kernel_bodies(g, outputs, true)?;
+	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
+	for (time, kernel) in kernels.iter().enumerate() {
+		uses.entry(kernel.output)
+			.and_modify(|v| v.1 = time)
+			.or_insert((time, time));
+		for &id in &kernel.dependencies {
+			if kernel.body.contains(&format!("b{id}[")) {
+				uses.entry(id)
+					.and_modify(|v| v.1 = time)
+					.or_insert((0, time));
+			}
+		}
+	}
+	let mut protected: HashSet<usize> = outputs.iter().chain(external).copied().collect();
+	for id in g.topology(outputs)? {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			protected.insert(id);
+		}
+	}
+	let mut intervals = uses.into_iter().collect::<Vec<_>>();
+	intervals.sort_by_key(|&(id, (first, _))| (first, id));
+	let mut allocations = vec![];
+	let mut slot_sizes = vec![];
+	let mut availability: Vec<usize> = vec![];
+	let mut protected_slots = HashSet::new();
+	for (id, (first, last)) in intervals {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		let n = elements(g.shape(id))?;
+		let protect = protected.contains(&id);
+		let slot = if reuse && !protect {
+			(0..slot_sizes.len()).find(|&s| {
+				!protected_slots.contains(&s) && availability[s] < first && slot_sizes[s] == n
+			})
+		} else {
+			None
+		};
+		let slot = slot.unwrap_or_else(|| {
+			let slot = slot_sizes.len();
+			slot_sizes.push(n);
+			availability.push(last);
+			slot
+		});
+		availability[slot] = last;
+		if protect {
+			protected_slots.insert(slot);
+		}
+		allocations.push(Allocation {
+			node: id,
+			slot,
+			first,
+			last,
+			elements: n,
+			protected: protect,
+		});
+	}
+	Ok(StoragePlan {
+		slots: slot_sizes.len(),
+		slot_sizes,
+		allocations,
+	})
+}
+```
+
+`src/storage.rs` の `pub fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn run(&self,"
+	pub fn run(&self, inputs: &[Buffer]) -> Result<(Vec<Buffer>, Measurements)> {
+		let total = Instant::now();
+		self.graph.validate_inputs(inputs, &self.outputs)?;
+		self.graph.validate_indices(inputs, &self.outputs)?;
+		let allocation = Instant::now();
+		let mut blocks = self
+			.storage
+			.slot_sizes
+			.iter()
+			.map(|&n| vec![0f32; n])
+			.collect::<Vec<_>>();
+		let mut pointers = vec![std::ptr::null_mut::<c_void>(); self.graph.nodes.len()];
+		for a in &self.storage.allocations {
+			pointers[a.node] = blocks[a.slot].as_mut_ptr().cast();
+		}
+		for id in self.graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = self.graph.nodes[id].op {
+				pointers[id] = inputs[slot].data.as_ptr().cast_mut().cast();
+			}
+		}
+		let mut measurements = Measurements {
+			compile: self.compile,
+			allocation: allocation.elapsed(),
+			..Measurements::default()
+		};
+		let dims = self
+			.graph
+			.nodes
+			.iter()
+			.flat_map(|n| n.shape.iter().map(|&d| d as u64))
+			.collect::<Vec<_>>();
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let kernel = Instant::now();
+		let status = unsafe { entry(pointers.as_ptr(), dims.as_ptr()) };
+		measurements.native_and_sync = kernel.elapsed();
+		if status != 0 {
+			return Err(format!("cached native kernel status {status}"));
+		}
+		let transfer = Instant::now();
+		let result = self
+			.outputs
+			.iter()
+			.map(|&id| {
+				let data = if let Op::Input { slot } = self.graph.nodes[id].op {
+					inputs[slot].data.clone()
+				} else {
+					let a = self
+						.storage
+						.allocations
+						.iter()
+						.find(|a| a.node == id)
+						.ok_or("missing output allocation")?;
+					blocks[a.slot].clone()
+				};
+				Buffer::new(self.graph.shape(id).to_vec(), data)
+			})
+			.collect::<Result<Vec<_>>>()?;
+		measurements.transfer = transfer.elapsed();
+		measurements.total = total.elapsed();
+		Ok((result, measurements))
+	}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_019 -- --exact
 ```
@@ -1380,6 +3216,76 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_020() {
 	suite2::actual_reuse_and_binary_cache();
+}
+```
+
+`src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
+	let kernels = kernel_bodies(g, outputs, true)?;
+	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
+	for (time, kernel) in kernels.iter().enumerate() {
+		uses.entry(kernel.output)
+			.and_modify(|v| v.1 = time)
+			.or_insert((time, time));
+		for &id in &kernel.dependencies {
+			if kernel.body.contains(&format!("b{id}[")) {
+				uses.entry(id)
+					.and_modify(|v| v.1 = time)
+					.or_insert((0, time));
+			}
+		}
+	}
+	let mut protected: HashSet<usize> = outputs.iter().chain(external).copied().collect();
+	for id in g.topology(outputs)? {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			protected.insert(id);
+		}
+	}
+	let mut intervals = uses.into_iter().collect::<Vec<_>>();
+	intervals.sort_by_key(|&(id, (first, _))| (first, id));
+	let mut allocations = vec![];
+	let mut slot_sizes = vec![];
+	let mut availability: Vec<usize> = vec![];
+	let mut protected_slots = HashSet::new();
+	for (id, (first, last)) in intervals {
+		if matches!(g.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		let n = elements(g.shape(id))?;
+		let protect = protected.contains(&id);
+		let slot = if reuse && !protect {
+			(0..slot_sizes.len()).find(|&s| {
+				!protected_slots.contains(&s) && availability[s] < first && slot_sizes[s] == n
+			})
+		} else {
+			None
+		};
+		let slot = slot.unwrap_or_else(|| {
+			let slot = slot_sizes.len();
+			slot_sizes.push(n);
+			availability.push(last);
+			slot
+		});
+		availability[slot] = last;
+		if protect {
+			protected_slots.insert(slot);
+		}
+		allocations.push(Allocation {
+			node: id,
+			slot,
+			first,
+			last,
+			elements: n,
+			protected: protect,
+		});
+	}
+	Ok(StoragePlan {
+		slots: slot_sizes.len(),
+		slot_sizes,
+		allocations,
+	})
 }
 ```
 
@@ -1402,6 +3308,30 @@ fn todo_19_021() {
 }
 ```
 
+`src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+	pub fn cpu(source: String, specialization: String) -> Result<Self> {
+		let compiler = Command::new("clang")
+			.arg("--version")
+			.output()
+			.map_err(|e| e.to_string())?;
+		if !compiler.status.success() {
+			return Err("clang --version failed".into());
+		}
+		Ok(Self {
+			backend: "cpu".into(),
+			device: std::env::consts::ARCH.into(),
+			capability: "f32,unaligned-vector4,pthread".into(),
+			source,
+			compiler: String::from_utf8_lossy(&compiler.stdout).into(),
+			flags: "-std=c11 -O2 -fno-fast-math".into(),
+			abi: 1,
+			specialization,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_021 -- --exact
 ```
@@ -1419,6 +3349,30 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_19_022() {
 	suite2::actual_reuse_and_binary_cache();
 }
+```
+
+`src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+	pub fn cpu(source: String, specialization: String) -> Result<Self> {
+		let compiler = Command::new("clang")
+			.arg("--version")
+			.output()
+			.map_err(|e| e.to_string())?;
+		if !compiler.status.success() {
+			return Err("clang --version failed".into());
+		}
+		Ok(Self {
+			backend: "cpu".into(),
+			device: std::env::consts::ARCH.into(),
+			capability: "f32,unaligned-vector4,pthread".into(),
+			source,
+			compiler: String::from_utf8_lossy(&compiler.stdout).into(),
+			flags: "-std=c11 -O2 -fno-fast-math".into(),
+			abi: 1,
+			specialization,
+		})
+	}
 ```
 
 ```sh check
@@ -1478,6 +3432,399 @@ fn todo_19_025() {
 }
 ```
 
+`src/storage.rs` の `pub fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn run(&self,"
+	pub fn run(&self, inputs: &[Buffer]) -> Result<(Vec<Buffer>, Measurements)> {
+		let total = Instant::now();
+		self.graph.validate_inputs(inputs, &self.outputs)?;
+		self.graph.validate_indices(inputs, &self.outputs)?;
+		let allocation = Instant::now();
+		let mut blocks = self
+			.storage
+			.slot_sizes
+			.iter()
+			.map(|&n| vec![0f32; n])
+			.collect::<Vec<_>>();
+		let mut pointers = vec![std::ptr::null_mut::<c_void>(); self.graph.nodes.len()];
+		for a in &self.storage.allocations {
+			pointers[a.node] = blocks[a.slot].as_mut_ptr().cast();
+		}
+		for id in self.graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = self.graph.nodes[id].op {
+				pointers[id] = inputs[slot].data.as_ptr().cast_mut().cast();
+			}
+		}
+		let mut measurements = Measurements {
+			compile: self.compile,
+			allocation: allocation.elapsed(),
+			..Measurements::default()
+		};
+		let dims = self
+			.graph
+			.nodes
+			.iter()
+			.flat_map(|n| n.shape.iter().map(|&d| d as u64))
+			.collect::<Vec<_>>();
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let kernel = Instant::now();
+		let status = unsafe { entry(pointers.as_ptr(), dims.as_ptr()) };
+		measurements.native_and_sync = kernel.elapsed();
+		if status != 0 {
+			return Err(format!("cached native kernel status {status}"));
+		}
+		let transfer = Instant::now();
+		let result = self
+			.outputs
+			.iter()
+			.map(|&id| {
+				let data = if let Op::Input { slot } = self.graph.nodes[id].op {
+					inputs[slot].data.clone()
+				} else {
+					let a = self
+						.storage
+						.allocations
+						.iter()
+						.find(|a| a.node == id)
+						.ok_or("missing output allocation")?;
+					blocks[a.slot].clone()
+				};
+				Buffer::new(self.graph.shape(id).to_vec(), data)
+			})
+			.collect::<Result<Vec<_>>>()?;
+		measurements.transfer = transfer.elapsed();
+		measurements.total = total.elapsed();
+		Ok((result, measurements))
+	}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
+`src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		spec.validate(inputs)?;
+		if self.contract
+			!= (
+				spec.source.clone(),
+				spec.entry.clone(),
+				spec.lengths.len(),
+				spec.scalars.len().max(1),
+				spec.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let _execution = self
+			.execution
+			.lock()
+			.map_err(|_| "OpenCL execution mutex poisoned")?;
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if spec.lengths[spec.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: api("clGetDeviceInfo(name)", self.device.name())?,
+				timings,
+			});
+		}
+		let max = api(
+			"clGetDeviceInfo(workgroup)",
+			self.device.max_work_group_size(),
+		)?
+		.min(api(
+			"clGetKernelWorkGroupInfo",
+			self.kernel.get_work_group_size(self.device.id()),
+		)?);
+		let axes = api(
+			"clGetDeviceInfo(workitems)",
+			self.device.max_work_item_sizes(),
+		)?;
+		if spec.local > max || spec.local > axes[0] {
+			return Err(format!("OpenCL local {} exceeds limit {max}", spec.local));
+		}
+		let local_mem = api("clGetDeviceInfo(local)", self.device.local_mem_size())?;
+		if spec.shared_bytes as u64 > local_mem
+			|| api(
+				"clGetKernelWorkGroupInfo(local)",
+				self.kernel.get_local_mem_size(self.device.id()),
+			)? > local_mem
+		{
+			return Err("OpenCL local memory limit".into());
+		}
+		if spec.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		let allocation = Instant::now();
+		let mut buffers: Vec<_> = inputs
+			.iter()
+			.map(|b| unsafe {
+				api(
+					"clCreateBuffer",
+					Buffer::<f32>::create(
+						&self.context,
+						CL_MEM_READ_WRITE,
+						b.len().max(1),
+						ptr::null_mut(),
+					),
+				)
+			})
+			.collect::<Result<_, _>>()?;
+		let scalar_words = if spec.scalars.is_empty() {
+			vec![0u64]
+		} else {
+			spec.scalars.clone()
+		};
+		let mut scalar_buffer = unsafe {
+			api(
+				"clCreateBuffer(scalars)",
+				Buffer::<u64>::create(
+					&self.context,
+					CL_MEM_READ_WRITE,
+					scalar_words.len(),
+					ptr::null_mut(),
+				),
+			)?
+		};
+		timings.allocation = allocation.elapsed();
+		let transfer = Instant::now();
+		for (input, buffer) in inputs.iter().zip(&mut buffers) {
+			if !input.is_empty() {
+				unsafe {
+					api(
+						"clEnqueueWriteBuffer",
+						self.queue
+							.enqueue_write_buffer(buffer, CL_BLOCKING, 0, input, &[]),
+					)?;
+				}
+			}
+		}
+		unsafe {
+			api(
+				"clEnqueueWriteBuffer(scalars)",
+				self.queue.enqueue_write_buffer(
+					&mut scalar_buffer,
+					CL_BLOCKING,
+					0,
+					&scalar_words,
+					&[],
+				),
+			)?;
+			api(
+				"clSetKernelArg(scalars)",
+				self.kernel.set_arg(buffers.len() as u32, &scalar_buffer),
+			)?;
+		}
+		timings.transfer = transfer.elapsed();
+		for (index, buffer) in buffers.iter().enumerate() {
+			unsafe {
+				api("clSetKernelArg", self.kernel.set_arg(index as u32, buffer))?;
+			}
+		}
+		let global = [spec
+			.groups
+			.checked_mul(spec.local)
+			.ok_or("launch overflow")?];
+		let local = [spec.local];
+		let event = unsafe {
+			api(
+				"clEnqueueNDRangeKernel",
+				self.queue.enqueue_nd_range_kernel(
+					self.kernel.get(),
+					1,
+					ptr::null(),
+					global.as_ptr(),
+					local.as_ptr(),
+					&[],
+				),
+			)?
+		};
+		let sync = Instant::now();
+		api("clWaitForEvents", event.wait())?;
+		timings.synchronization = sync.elapsed();
+		if let (Ok(start), Ok(end)) = (
+			event.profiling_command_start(),
+			event.profiling_command_end(),
+		) {
+			timings.kernel = Some(Duration::from_nanos(end - start));
+		}
+		let transfer = Instant::now();
+		let mut output = vec![0.; spec.lengths[spec.output]];
+		unsafe {
+			api(
+				"clEnqueueReadBuffer",
+				self.queue.enqueue_read_buffer(
+					&buffers[spec.output],
+					CL_BLOCKING,
+					0,
+					&mut output,
+					&[],
+				),
+			)?;
+		}
+		timings.transfer += transfer.elapsed();
+		timings.total = total.elapsed();
+		Ok(Run {
+			output,
+			device: api("clGetDeviceInfo(name)", self.device.name())?,
+			timings,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_025 -- --exact
 ```
@@ -1497,6 +3844,32 @@ fn todo_19_026() {
 }
 ```
 
+`src/gemm_opt.rs` の `pub fn flops(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
+pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Result<Flops> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("zero tile".into());
+	}
+	let useful = 2u128
+		.checked_mul(m as u128)
+		.and_then(|v| v.checked_mul(n as u128))
+		.and_then(|v| v.checked_mul(k as u128))
+		.ok_or("FLOP overflow")?;
+	let padded = [
+		m.div_ceil(tm) as u128 * tm as u128,
+		n.div_ceil(tn) as u128 * tn as u128,
+		k.div_ceil(tk) as u128 * tk as u128,
+	]
+	.into_iter()
+	.try_fold(2u128, |acc, n| {
+		acc.checked_mul(n).ok_or("padded FLOP overflow")
+	})?;
+	Ok(Flops { useful, padded })
+}
+```
+
 ```sh check
 cargo test --test book_19 todo_19_026 -- --exact
 ```
@@ -1513,6 +3886,32 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_19_027() {
 	suite0::work_estimate();
+}
+```
+
+`src/gemm_opt.rs` の `pub fn flops(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
+pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Result<Flops> {
+	let (tm, tn, tk) = tile;
+	if tm == 0 || tn == 0 || tk == 0 {
+		return Err("zero tile".into());
+	}
+	let useful = 2u128
+		.checked_mul(m as u128)
+		.and_then(|v| v.checked_mul(n as u128))
+		.and_then(|v| v.checked_mul(k as u128))
+		.ok_or("FLOP overflow")?;
+	let padded = [
+		m.div_ceil(tm) as u128 * tm as u128,
+		n.div_ceil(tn) as u128 * tn as u128,
+		k.div_ceil(tk) as u128 * tk as u128,
+	]
+	.into_iter()
+	.try_fold(2u128, |acc, n| {
+		acc.checked_mul(n).ok_or("padded FLOP overflow")
+	})?;
+	Ok(Flops { useful, padded })
 }
 ```
 

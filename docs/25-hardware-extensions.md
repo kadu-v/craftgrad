@@ -806,6 +806,44 @@ fn todo_25_001() {
 }
 ```
 
+`src/backends/metal.rs` の `pub fn families(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub fn families("
+	pub fn families(&self) -> Vec<String> {
+		let known = [
+			("Apple1", MTLGPUFamily::Apple1),
+			("Apple2", MTLGPUFamily::Apple2),
+			("Apple3", MTLGPUFamily::Apple3),
+			("Apple4", MTLGPUFamily::Apple4),
+			("Apple5", MTLGPUFamily::Apple5),
+			("Apple6", MTLGPUFamily::Apple6),
+			("Apple7", MTLGPUFamily::Apple7),
+			("Apple8", MTLGPUFamily::Apple8),
+			("Apple9", MTLGPUFamily::Apple9),
+			("Mac2", MTLGPUFamily::Mac2),
+		];
+		known
+			.into_iter()
+			.filter(|(_, f)| self.device.supportsFamily(*f))
+			.map(|(name, _)| name.to_owned())
+			.collect()
+	}
+```
+
+`src/backends/metal.rs` の `pub fn limits(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub fn limits("
+	pub fn limits(&self) -> (usize, usize, usize) {
+		(
+			self.pipeline.threadExecutionWidth(),
+			self.pipeline
+				.maxTotalThreadsPerThreadgroup()
+				.min(self.device.maxThreadsPerThreadgroup().width),
+			self.device.maxThreadgroupMemoryLength(),
+		)
+	}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_001 -- --exact
 ```
@@ -822,6 +860,124 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_002() {
 	suite0::guarded_matrix_source();
+}
+```
+
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
+}
+```
+
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
 }
 ```
 
@@ -844,6 +1000,66 @@ fn todo_25_003() {
 }
 ```
 
+`src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+pub fn select(
+	d: Dialect,
+	cap: &Capability,
+	m: usize,
+	n: usize,
+	k: usize,
+	half: bool,
+	tail: bool,
+	force_fallback: bool,
+) -> Result<(Kernel, &'static str), String> {
+	if d == Dialect::Metal
+		&& cap.enabled
+		&& (!half || cap.f16)
+		&& (!force_fallback)
+		&& (tail || (m.is_multiple_of(8) && n.is_multiple_of(8) && k.is_multiple_of(8)))
+	{
+		return Ok((shader(m, n, k, half)?, "matrix"));
+	}
+	if half {
+		return Err("ordinary f32 fallback requires unpacked F16 values".into());
+	}
+	Ok((gemm(d, m, n, k, GemmTile::default())?, "ordinary"))
+}
+```
+
+`src/gpu_graph.rs` の `pub fn compile_matrix(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
+	pub fn compile_matrix(
+		graph: &Graph,
+		outputs: &[usize],
+		cap: &crate::matrix::Capability,
+		tail: bool,
+		force_fallback: bool,
+	) -> Result<Self> {
+		let mut lowered = lower(graph, outputs, Dialect::Metal, 64)?;
+		for (kernel, slots) in &mut lowered {
+			let out = *slots.last().ok_or("GPU output")?;
+			if let Some(mat) = crate::gemm_opt::recognize(graph, out) {
+				let (selected, _) = crate::matrix::select(
+					Dialect::Metal,
+					cap,
+					mat.m,
+					mat.n,
+					mat.k,
+					false,
+					tail,
+					force_fallback,
+				)?;
+				*kernel = selected;
+				*slots = vec![mat.a, mat.b, out];
+			}
+		}
+		Self::from_lowered(graph, outputs, Backend::Metal, lowered, true)
+	}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_003 -- --exact
 ```
@@ -860,6 +1076,117 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_004() {
 	suite0::half_roundtrip();
+}
+```
+
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
+}
+```
+
+`src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+pub fn select(
+	d: Dialect,
+	cap: &Capability,
+	m: usize,
+	n: usize,
+	k: usize,
+	half: bool,
+	tail: bool,
+	force_fallback: bool,
+) -> Result<(Kernel, &'static str), String> {
+	if d == Dialect::Metal
+		&& cap.enabled
+		&& (!half || cap.f16)
+		&& (!force_fallback)
+		&& (tail || (m.is_multiple_of(8) && n.is_multiple_of(8) && k.is_multiple_of(8)))
+	{
+		return Ok((shader(m, n, k, half)?, "matrix"));
+	}
+	if half {
+		return Err("ordinary f32 fallback requires unpacked F16 values".into());
+	}
+	Ok((gemm(d, m, n, k, GemmTile::default())?, "ordinary"))
 }
 ```
 
@@ -882,6 +1209,30 @@ fn todo_25_005() {
 }
 ```
 
+`src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
+
+```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+	pub fn cpu(source: String, specialization: String) -> Result<Self> {
+		let compiler = Command::new("clang")
+			.arg("--version")
+			.output()
+			.map_err(|e| e.to_string())?;
+		if !compiler.status.success() {
+			return Err("clang --version failed".into());
+		}
+		Ok(Self {
+			backend: "cpu".into(),
+			device: std::env::consts::ARCH.into(),
+			capability: "f32,unaligned-vector4,pthread".into(),
+			source,
+			compiler: String::from_utf8_lossy(&compiler.stdout).into(),
+			flags: "-std=c11 -O2 -fno-fast-math".into(),
+			abi: 1,
+			specialization,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_005 -- --exact
 ```
@@ -898,6 +1249,41 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_006() {
 	suite1::norm_same_graph_fused_and_composite();
+}
+```
+
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
 }
 ```
 
@@ -920,6 +1306,41 @@ fn todo_25_007() {
 }
 ```
 
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_007 -- --exact
 ```
@@ -936,6 +1357,89 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_008() {
 	suite0::guarded_matrix_source();
+}
+```
+
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
 }
 ```
 
@@ -958,6 +1462,89 @@ fn todo_25_009() {
 }
 ```
 
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_009 -- --exact
 ```
@@ -977,6 +1564,285 @@ fn todo_25_010() {
 }
 ```
 
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
+}
+```
+
+`src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+	fn compile_on(
+		kernel: &Kernel,
+		device: Device,
+		queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+	) -> Result<Self, String> {
+		autoreleasepool(|_| {
+			let start = Instant::now();
+			let options = MTLCompileOptions::new();
+			#[allow(deprecated)]
+			options.setFastMathEnabled(false);
+			let library = device
+				.newLibraryWithSource_options_error(
+					&NSString::from_str(&kernel.source),
+					Some(&options),
+				)
+				.map_err(|e| format!("Metal source build: {e}"))?;
+			let function = library
+				.newFunctionWithName(&NSString::from_str(&kernel.entry))
+				.ok_or("Metal entry missing")?;
+			let pipeline = device
+				.newComputePipelineStateWithFunction_error(&function)
+				.map_err(|e| format!("Metal pipeline build: {e}"))?;
+			Ok(Self {
+				device,
+				queue,
+				pipeline,
+				compile_time: start.elapsed(),
+				contract: (
+					kernel.source.clone(),
+					kernel.entry.clone(),
+					kernel.lengths.len(),
+					kernel.scalars.len().max(1),
+					kernel.local,
+				),
+			})
+		})
+	}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_010 -- --exact
 ```
@@ -993,6 +1859,63 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_011() {
 	suite0::guarded_matrix_source();
+}
+```
+
+`src/gemm_opt.rs` の `pub fn recognize(`の定義を次の全体で置き換えます。
+
+```rust file="src/gemm_opt.rs" mode="replace" item="pub fn recognize("
+pub fn recognize(g: &Graph, id: usize) -> Option<Gemm> {
+	let Op::Reduce {
+		op: Reduce::Sum,
+		x,
+		ref axes,
+		keepdim: false,
+	} = g.nodes.get(id)?.op
+	else {
+		return None;
+	};
+	if axes != &[2] {
+		return None;
+	}
+	let Op::Binary {
+		op: Binary::Mul,
+		a: aa,
+		b: bb,
+	} = g.nodes.get(x)?.op
+	else {
+		return None;
+	};
+	let Op::Reshape { x: a } = g.nodes.get(aa)?.op else {
+		return None;
+	};
+	let Op::Reshape { x: bt } = g.nodes.get(bb)?.op else {
+		return None;
+	};
+	let Op::Permute { x: b, ref axes } = g.nodes.get(bt)?.op else {
+		return None;
+	};
+	if axes != &[1, 0] {
+		return None;
+	}
+	if !matches!(g.nodes[a].op, Op::Input { .. } | Op::Stage { .. })
+		|| !matches!(g.nodes[b].op, Op::Input { .. } | Op::Stage { .. })
+	{
+		return None;
+	}
+	let sa = g.shape(a);
+	let sb = g.shape(b);
+	if sa.len() != 2 || sb.len() != 2 || sa[1] != sb[0] {
+		return None;
+	}
+	Some(Gemm {
+		a,
+		b,
+		output: id,
+		m: sa[0],
+		n: sb[1],
+		k: sa[1],
+	})
 }
 ```
 
@@ -1015,6 +1938,66 @@ fn todo_25_012() {
 }
 ```
 
+`src/gpu_graph.rs` の `pub fn compile_matrix(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
+	pub fn compile_matrix(
+		graph: &Graph,
+		outputs: &[usize],
+		cap: &crate::matrix::Capability,
+		tail: bool,
+		force_fallback: bool,
+	) -> Result<Self> {
+		let mut lowered = lower(graph, outputs, Dialect::Metal, 64)?;
+		for (kernel, slots) in &mut lowered {
+			let out = *slots.last().ok_or("GPU output")?;
+			if let Some(mat) = crate::gemm_opt::recognize(graph, out) {
+				let (selected, _) = crate::matrix::select(
+					Dialect::Metal,
+					cap,
+					mat.m,
+					mat.n,
+					mat.k,
+					false,
+					tail,
+					force_fallback,
+				)?;
+				*kernel = selected;
+				*slots = vec![mat.a, mat.b, out];
+			}
+		}
+		Self::from_lowered(graph, outputs, Backend::Metal, lowered, true)
+	}
+```
+
+`src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+pub fn select(
+	d: Dialect,
+	cap: &Capability,
+	m: usize,
+	n: usize,
+	k: usize,
+	half: bool,
+	tail: bool,
+	force_fallback: bool,
+) -> Result<(Kernel, &'static str), String> {
+	if d == Dialect::Metal
+		&& cap.enabled
+		&& (!half || cap.f16)
+		&& (!force_fallback)
+		&& (tail || (m.is_multiple_of(8) && n.is_multiple_of(8) && k.is_multiple_of(8)))
+	{
+		return Ok((shader(m, n, k, half)?, "matrix"));
+	}
+	if half {
+		return Err("ordinary f32 fallback requires unpacked F16 values".into());
+	}
+	Ok((gemm(d, m, n, k, GemmTile::default())?, "ordinary"))
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_012 -- --exact
 ```
@@ -1031,6 +2014,41 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_013() {
 	suite0::half_roundtrip();
+}
+```
+
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
 }
 ```
 
@@ -1053,6 +2071,34 @@ fn todo_25_014() {
 }
 ```
 
+`src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+pub fn select(
+	d: Dialect,
+	cap: &Capability,
+	m: usize,
+	n: usize,
+	k: usize,
+	half: bool,
+	tail: bool,
+	force_fallback: bool,
+) -> Result<(Kernel, &'static str), String> {
+	if d == Dialect::Metal
+		&& cap.enabled
+		&& (!half || cap.f16)
+		&& (!force_fallback)
+		&& (tail || (m.is_multiple_of(8) && n.is_multiple_of(8) && k.is_multiple_of(8)))
+	{
+		return Ok((shader(m, n, k, half)?, "matrix"));
+	}
+	if half {
+		return Err("ordinary f32 fallback requires unpacked F16 values".into());
+	}
+	Ok((gemm(d, m, n, k, GemmTile::default())?, "ordinary"))
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_014 -- --exact
 ```
@@ -1069,6 +2115,41 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_015() {
 	suite1::norm_same_graph_fused_and_composite();
+}
+```
+
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
 }
 ```
 
@@ -1091,6 +2172,124 @@ fn todo_25_016() {
 }
 ```
 
+`src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+pub fn probe(disabled: bool) -> Capability {
+	use crate::backends::metal::MetalProgram;
+	let mut result = Capability {
+		enabled: false,
+		f16: false,
+		families: vec![],
+		reason: String::new(),
+		device: String::new(),
+		execution_width: 0,
+		max_threads: 0,
+		local_bytes: 0,
+	};
+	if disabled {
+		result.reason = "disabled by caller".into();
+		return result;
+	}
+	let check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 8, false)?;
+		let program = MetalProgram::compile(&kernel)?;
+		result.families = program.families();
+		let (width, threads, bytes) = program.limits();
+		result.execution_width = width;
+		result.max_threads = threads;
+		result.local_bytes = bytes;
+		if width != 32 || threads < 32 || bytes < 768 {
+			return Err("matrix requires width32,32 threads,768 local bytes".into());
+		}
+		let identity = (0..64)
+			.map(|i| if i / 8 == i % 8 { 1. } else { 0. })
+			.collect::<Vec<_>>();
+		let values = (0..64).map(|i| i as f32 - 32.).collect::<Vec<_>>();
+		for (a, b) in [(&identity, &values), (&values, &identity)] {
+			let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+			result.device = run.device;
+			if !close(&run.output, &reference(a, b, 8, 8, 8), 1e-4) {
+				return Err("matrix identity execution mismatch".into());
+			}
+		}
+		let mut a = vec![0.; 64];
+		let mut b = a.clone();
+		a[2 * 8 + 5] = 1.;
+		b[5 * 8 + 3] = 7.;
+		let run = unsafe { program.run(&kernel, &[a.clone(), b.clone(), vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&a, &b, 8, 8, 8), 1e-4) {
+			return Err("matrix basis execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match check {
+		Ok(()) => {
+			result.enabled = true;
+			result.reason = "f32 compile and identity/basis execution passed".into();
+		}
+		Err(e) => {
+			result.reason = e;
+			return result;
+		}
+	}
+	let half_check = (|| -> Result<(), String> {
+		let kernel = shader(8, 8, 16, true)?;
+		let a = (0..128)
+			.map(|i| if i % 2 == 0 { 1. } else { -1. })
+			.collect::<Vec<_>>();
+		let b = vec![0.5; 128];
+		let (pa, da) = pack_half(&a);
+		let (pb, db) = pack_half(&b);
+		let run = unsafe { MetalProgram::compile(&kernel)?.run(&kernel, &[pa, pb, vec![0.; 64]]) }?;
+		if !close(&run.output, &reference(&da, &db, 8, 8, 16), 1e-3) {
+			return Err("mixed F16 execution mismatch".into());
+		}
+		Ok(())
+	})();
+	match half_check {
+		Ok(()) => result.f16 = true,
+		Err(e) => result.reason += &format!("; F16 disabled: {e}"),
+	};
+	result
+}
+```
+
+`src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
+	let gn = groups(n, 8)?;
+	let gm = groups(m, 8)?;
+	let al = m.checked_mul(k).ok_or("matrix shape overflow")?;
+	let bl = k.checked_mul(n).ok_or("matrix shape overflow")?;
+	let cl = m.checked_mul(n).ok_or("matrix shape overflow")?;
+	let input = if half { "half" } else { "float" };
+	let fragment = if half {
+		"simdgroup_half8x8"
+	} else {
+		"simdgroup_float8x8"
+	};
+	let source = format!(
+		"#include <metal_stdlib>\n#include <metal_simdgroup_matrix>\nusing namespace metal;\nkernel void chibi(device const {input}*a[[buffer(0)]],device const {input}*b[[buffer(1)]],device float*c[[buffer(2)]],constant ulong *s[[buffer(3)]],uint g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){{threadgroup {input} at[64],bt[64];threadgroup float ct[64];size_t br=g/{gn},bc=g%{gn};{fragment} left,right;simdgroup_float8x8 acc(0);for(size_t ko=0;ko<{k};ko+=8){{for(size_t z=lane;z<64;z+=32){{size_t ar=br*8+z/8,ak=ko+z%8,bk=ko+z/8,bn=bc*8+z%8;at[z]=(ar<{m}&&ak<{k})?a[ar*{k}+ak]:({input})0;bt[z]=(bk<{k}&&bn<{n})?b[bk*{n}+bn]:({input})0;}}threadgroup_barrier(mem_flags::mem_threadgroup);simdgroup_load(left,at,8,ulong2(0,0));simdgroup_load(right,bt,8,ulong2(0,0));simdgroup_multiply_accumulate(acc,left,right,acc);threadgroup_barrier(mem_flags::mem_threadgroup);}}simdgroup_store(acc,ct,8,ulong2(0,0));threadgroup_barrier(mem_flags::mem_threadgroup);for(size_t z=lane;z<64;z+=32){{size_t row=br*8+z/8,col=bc*8+z%8;if(row<{m}&&col<{n}){{c[row*{n}+col]=ct[z];}}}}}}"
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source,
+		entry: "chibi".into(),
+		lengths: vec![
+			if half { al.div_ceil(2) } else { al },
+			if half { bl.div_ceil(2) } else { bl },
+			cl,
+		],
+		output: 2,
+		groups: gm.checked_mul(gn).ok_or("matrix group overflow")?,
+		local: 32,
+		shared_bytes: if half { 512 } else { 768 },
+	})
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_016 -- --exact
 ```
@@ -1107,6 +2306,61 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_017() {
 	suite0::guarded_matrix_source();
+}
+```
+
+`src/matrix.rs` の `pub fn pack_half(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn pack_half("
+pub fn pack_half(values: &[f32]) -> (Vec<f32>, Vec<f32>) {
+	let halves = values.iter().map(|&x| f32_to_half(x)).collect::<Vec<_>>();
+	let decoded = halves.iter().map(|&h| half_to_f32(h)).collect();
+	let packed = halves
+		.chunks(2)
+		.map(|s| f32::from_bits(s[0] as u32 | ((s.get(1).copied().unwrap_or(0) as u32) << 16)))
+		.collect();
+	(packed, decoded)
+}
+```
+
+`src/matrix.rs` の `pub fn run_mixed(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
+pub fn run_mixed(
+	a: &[f32],
+	b: &[f32],
+	m: usize,
+	n: usize,
+	k: usize,
+	cap: &Capability,
+	force_fallback: bool,
+) -> Result<(crate::gpu::Run, &'static str), String> {
+	if a.len() != m.checked_mul(k).ok_or("mixed A shape")?
+		|| b.len() != k.checked_mul(n).ok_or("mixed B shape")?
+	{
+		return Err("mixed input shape".into());
+	}
+	let (packed_a, decoded_a) = pack_half(a);
+	let (packed_b, decoded_b) = pack_half(b);
+	let (kernel, buffers, path) = if cap.enabled && cap.f16 && !force_fallback {
+		(
+			shader(m, n, k, true)?,
+			vec![packed_a, packed_b, vec![0.; m * n]],
+			"matrix-f16-f32",
+		)
+	} else {
+		(
+			gemm(Dialect::Metal, m, n, k, GemmTile::default())?,
+			vec![decoded_a.clone(), decoded_b.clone(), vec![0.; m * n]],
+			"ordinary-quantized-f16",
+		)
+	};
+	let result = unsafe { crate::backends::metal::run(&kernel, &buffers) }?;
+	let expected = reference(&decoded_a, &decoded_b, m, n, k);
+	if !close(&result.output, &expected, 1e-3) {
+		return Err(format!("{path} differs from quantized f64 reference"));
+	}
+	Ok((result, path))
 }
 ```
 
@@ -1148,6 +2402,47 @@ fn todo_25_019() {
 }
 ```
 
+`src/matrix.rs` の `pub fn run_mixed(`の定義を次の全体で置き換えます。
+
+```rust file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
+pub fn run_mixed(
+	a: &[f32],
+	b: &[f32],
+	m: usize,
+	n: usize,
+	k: usize,
+	cap: &Capability,
+	force_fallback: bool,
+) -> Result<(crate::gpu::Run, &'static str), String> {
+	if a.len() != m.checked_mul(k).ok_or("mixed A shape")?
+		|| b.len() != k.checked_mul(n).ok_or("mixed B shape")?
+	{
+		return Err("mixed input shape".into());
+	}
+	let (packed_a, decoded_a) = pack_half(a);
+	let (packed_b, decoded_b) = pack_half(b);
+	let (kernel, buffers, path) = if cap.enabled && cap.f16 && !force_fallback {
+		(
+			shader(m, n, k, true)?,
+			vec![packed_a, packed_b, vec![0.; m * n]],
+			"matrix-f16-f32",
+		)
+	} else {
+		(
+			gemm(Dialect::Metal, m, n, k, GemmTile::default())?,
+			vec![decoded_a.clone(), decoded_b.clone(), vec![0.; m * n]],
+			"ordinary-quantized-f16",
+		)
+	};
+	let result = unsafe { crate::backends::metal::run(&kernel, &buffers) }?;
+	let expected = reference(&decoded_a, &decoded_b, m, n, k);
+	if !close(&result.output, &expected, 1e-3) {
+		return Err(format!("{path} differs from quantized f64 reference"));
+	}
+	Ok((result, path))
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_019 -- --exact
 ```
@@ -1167,6 +2462,181 @@ fn todo_25_020() {
 }
 ```
 
+`src/backends/metal.rs` の `pub unsafe fn run(kernel:`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
+pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+	kernel.validate(inputs)?;
+	if kernel.lengths[kernel.output] == 0 {
+		return Ok(Run {
+			output: vec![],
+			device: "Metal API not called (empty)".into(),
+			timings: Timings::default(),
+		});
+	}
+	let total = Instant::now();
+	let program = MetalProgram::compile(kernel)?;
+	let mut result = unsafe { program.run(kernel, inputs) }?;
+	result.timings.compile = program.compile_time();
+	result.timings.total = total.elapsed();
+	Ok(result)
+}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_020 -- --exact
 ```
@@ -1183,6 +2653,37 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_021() {
 	suite1::norm_same_graph_fused_and_composite();
+}
+```
+
+`src/norm_opt.rs` の `pub fn build(`の定義を次の全体で置き換えます。
+
+```rust file="src/norm_opt.rs" mode="replace" item="pub fn build("
+pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNorm> {
+	if !eps.is_finite() || eps <= 0. {
+		return Err("RMSNorm epsilon".into());
+	}
+	let shape = g.shape(x).to_vec();
+	let dim = *shape.last().ok_or("RMSNorm rank")?;
+	if dim == 0 || g.shape(weight) != [dim] {
+		return Err("RMSNorm shape".into());
+	}
+	let sq = g.binary(Binary::Mul, x, x)?;
+	let sum = g.reduce(sq, Reduce::Sum, vec![shape.len() - 1], true)?;
+	let count = g.constant(dim as f32, vec![])?;
+	let mean = g.binary(Binary::Div, sum, count)?;
+	let epsilon = g.constant(eps, vec![])?;
+	let denom = g.binary(Binary::Add, mean, epsilon)?;
+	let denom = g.unary(Unary::Sqrt, denom)?;
+	let inv = g.unary(Unary::Recip, denom)?;
+	let normalized = g.binary(Binary::Mul, x, inv)?;
+	let output = g.binary(Binary::Mul, normalized, weight)?;
+	Ok(RmsNorm {
+		x,
+		weight,
+		output,
+		eps,
+	})
 }
 ```
 
@@ -1205,6 +2706,37 @@ fn todo_25_022() {
 }
 ```
 
+`src/norm_opt.rs` の `pub fn build(`の定義を次の全体で置き換えます。
+
+```rust file="src/norm_opt.rs" mode="replace" item="pub fn build("
+pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNorm> {
+	if !eps.is_finite() || eps <= 0. {
+		return Err("RMSNorm epsilon".into());
+	}
+	let shape = g.shape(x).to_vec();
+	let dim = *shape.last().ok_or("RMSNorm rank")?;
+	if dim == 0 || g.shape(weight) != [dim] {
+		return Err("RMSNorm shape".into());
+	}
+	let sq = g.binary(Binary::Mul, x, x)?;
+	let sum = g.reduce(sq, Reduce::Sum, vec![shape.len() - 1], true)?;
+	let count = g.constant(dim as f32, vec![])?;
+	let mean = g.binary(Binary::Div, sum, count)?;
+	let epsilon = g.constant(eps, vec![])?;
+	let denom = g.binary(Binary::Add, mean, epsilon)?;
+	let denom = g.unary(Unary::Sqrt, denom)?;
+	let inv = g.unary(Unary::Recip, denom)?;
+	let normalized = g.binary(Binary::Mul, x, inv)?;
+	let output = g.binary(Binary::Mul, normalized, weight)?;
+	Ok(RmsNorm {
+		x,
+		weight,
+		output,
+		eps,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_25 todo_25_022 -- --exact
 ```
@@ -1221,6 +2753,104 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_023() {
 	suite0::guarded_matrix_source();
+}
+```
+
+`src/norm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/norm_opt.rs" mode="replace" item="pub fn compile("
+pub fn compile(
+	g: &Graph,
+	n: RmsNorm,
+	allow_fusion: bool,
+	requires_grad: bool,
+) -> Result<(Plan, &'static str)> {
+	g.verify(&[n.output])?;
+	if n.x >= g.nodes.len() || n.weight >= g.nodes.len() || g.shape(n.output) != g.shape(n.x) {
+		return Err("RMSNorm descriptor shape".into());
+	}
+	if !allow_fusion
+		|| requires_grad
+		|| !matches!(g.nodes[n.x].op, Op::Input { .. })
+		|| !matches!(g.nodes[n.weight].op, Op::Input { .. })
+	{
+		return Ok((
+			g.compile(&[n.output])?,
+			"ordinary composite (gradient/stride/disabled)",
+		));
+	}
+	let shape = g.shape(n.x);
+	let dim = *shape.last().ok_or("norm rank")?;
+	let count = crate::runtime::elements(shape)?;
+	if g.shape(n.weight) != [dim] || !n.eps.is_finite() || n.eps <= 0.0 {
+		return Err("RMSNorm descriptor weight/epsilon".into());
+	}
+	if dim == 0 {
+		return Err("RMSNorm zero dimension".into());
+	}
+	let rows = count / dim;
+	let (ordinary, _, _) = render(g, &[n.output], true)?;
+	let _ = ordinary;
+	let source = format!(
+		"{C_HELPERS}int chibi_entry(void*const*buffers,const uint64_t*s){{float*x=(float*)buffers[{x}],*w=(float*)buffers[{weight}],*out=(float*)buffers[{output}];for(size_t row=0;row<{rows};row++){{float sum=0.0f;for(size_t col=0;col<{dim};col++){{float v=x[row*{dim}+col];sum+=v*v;}}float inv=1.0f/sqrtf(sum/{dim}.0f+chibi_bits({eps}u));for(size_t col=0;col<{dim};col++){{out[row*{dim}+col]=x[row*{dim}+col]*inv*w[col];}}}}return 0;}}",
+		x = n.x,
+		weight = n.weight,
+		output = n.output,
+		eps = n.eps.to_bits()
+	);
+	let plan = Plan::compile_source_specialized(g, &[n.output], source)?;
+	Ok((plan, "fused RMSNorm"))
+}
+```
+
+`examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
+
+```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
+fn main() -> chinigrad::Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![1, 2])?;
+	let w = g.input(1, vec![2])?;
+	let n = build(&mut g, x, w, 1.)?;
+	let (fused, path) = compile(&g, n, true, false)?;
+	let (ordinary, _) = compile(&g, n, false, false)?;
+	let input = [
+		Buffer::new(vec![1, 2], vec![1., -1.])?,
+		Buffer::new(vec![2], vec![1., 1.])?,
+	];
+	let a = fused.run(&input)?;
+	let b = ordinary.run(&input)?;
+	let error = a[0]
+		.data
+		.iter()
+		.zip(&b[0].data)
+		.map(|(a, b)| (a - b).abs())
+		.fold(0f32, f32::max);
+	if error > 1e-5 {
+		return Err(format!("RMSNorm max error {error}"));
+	}
+	let compiler = std::process::Command::new("clang")
+		.arg("--version")
+		.output()
+		.map_err(|e| e.to_string())?;
+	let compiler = String::from_utf8_lossy(&compiler.stdout)
+		.lines()
+		.next()
+		.unwrap_or("unknown")
+		.to_owned();
+	let commit = std::process::Command::new("git")
+		.args(["rev-parse", "HEAD"])
+		.output()
+		.ok()
+		.filter(|o| o.status.success())
+		.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+		.unwrap_or("uncommitted".into());
+	std::fs::create_dir_all(".audit").map_err(|e| e.to_string())?;
+	let record = format!(
+		"commit\tdevice\tcompiler\tcommand\tinput\tmax_error\tpath\tunsupported_scope\n{commit}\tcpu\t{compiler}\tcargo run --example student_norm\tx=[1,-1],weight=[1,1],eps=1\t{error}\t{path}\tnoncontiguous and gradient requests use composite Graph; GPU status NOT_RUN\n"
+	);
+	std::fs::write(".audit/student_norm.tsv", &record).map_err(|e| e.to_string())?;
+	println!("{record}output={:?}", a[0].data);
+	Ok(())
 }
 ```
 
@@ -1259,6 +2889,57 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_25_025() {
 	suite0::half_roundtrip();
+}
+```
+
+`examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
+
+```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
+fn main() -> chinigrad::Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![1, 2])?;
+	let w = g.input(1, vec![2])?;
+	let n = build(&mut g, x, w, 1.)?;
+	let (fused, path) = compile(&g, n, true, false)?;
+	let (ordinary, _) = compile(&g, n, false, false)?;
+	let input = [
+		Buffer::new(vec![1, 2], vec![1., -1.])?,
+		Buffer::new(vec![2], vec![1., 1.])?,
+	];
+	let a = fused.run(&input)?;
+	let b = ordinary.run(&input)?;
+	let error = a[0]
+		.data
+		.iter()
+		.zip(&b[0].data)
+		.map(|(a, b)| (a - b).abs())
+		.fold(0f32, f32::max);
+	if error > 1e-5 {
+		return Err(format!("RMSNorm max error {error}"));
+	}
+	let compiler = std::process::Command::new("clang")
+		.arg("--version")
+		.output()
+		.map_err(|e| e.to_string())?;
+	let compiler = String::from_utf8_lossy(&compiler.stdout)
+		.lines()
+		.next()
+		.unwrap_or("unknown")
+		.to_owned();
+	let commit = std::process::Command::new("git")
+		.args(["rev-parse", "HEAD"])
+		.output()
+		.ok()
+		.filter(|o| o.status.success())
+		.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+		.unwrap_or("uncommitted".into());
+	std::fs::create_dir_all(".audit").map_err(|e| e.to_string())?;
+	let record = format!(
+		"commit\tdevice\tcompiler\tcommand\tinput\tmax_error\tpath\tunsupported_scope\n{commit}\tcpu\t{compiler}\tcargo run --example student_norm\tx=[1,-1],weight=[1,1],eps=1\t{error}\t{path}\tnoncontiguous and gradient requests use composite Graph; GPU status NOT_RUN\n"
+	);
+	std::fs::write(".audit/student_norm.tsv", &record).map_err(|e| e.to_string())?;
+	println!("{record}output={:?}", a[0].data);
+	Ok(())
 }
 ```
 

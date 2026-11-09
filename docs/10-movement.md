@@ -182,6 +182,27 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn broadcast_index(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn broadcast_index("
+	fn broadcast_index(&self, input: usize, output: usize, index: &str) -> String {
+		let rank = self.g.shape(input).len();
+		let outer = self.g.shape(output).len();
+		self.flatten(
+			input,
+			&(0..rank)
+				.map(|a| {
+					format!(
+						"({} == 1 ? 0 : {})",
+						self.dim(input, a),
+						self.coord(output, index, outer - rank + a)
+					)
+				})
+				.collect::<Vec<_>>(),
+		)
+	}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -190,6 +211,29 @@ cargo test --quiet --test movement
 <!-- todo:10-003 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -200,6 +244,30 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `pub fn broadcast(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn broadcast("
+pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
+	let rank = a.len().max(b.len());
+	let mut out = vec![1; rank];
+	for k in 0..rank {
+		let x = a.len().checked_sub(k + 1).map(|i| a[i]).unwrap_or(1);
+		let y = b.len().checked_sub(k + 1).map(|i| b[i]).unwrap_or(1);
+		out[rank - k - 1] = if x == y {
+			x
+		} else if x == 1 {
+			y
+		} else if y == 1 {
+			x
+		} else {
+			return Err("incompatible broadcast shapes".into());
+		};
+	}
+	elements(&out)?;
+	Ok(out)
+}
+```
+
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
@@ -208,6 +276,17 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 <!-- todo:10-005 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn verify_node(` の `Op::Reshape` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Reshape"
+			Op::Reshape { x } => {
+				if elements(s(*x))? != elements(out)? {
+					return Err("reshape changes element count".into());
+				}
+				out.to_vec()
+			}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -218,6 +297,18 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn verify_node(` の `Op::Permute` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Permute"
+			Op::Permute { x, axes } => {
+				axes_valid(axes, s(*x).len())?;
+				if axes.len() != s(*x).len() {
+					return Err("permute rank mismatch".into());
+				}
+				axes.iter().map(|&a| s(*x)[a]).collect()
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
@@ -226,6 +317,27 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 <!-- todo:10-007 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn flatten(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn flatten("
+	fn flatten(&self, id: usize, c: &[String]) -> String {
+		if c.is_empty() {
+			return "0".into();
+		}
+		format!(
+			"({})",
+			c.iter()
+				.enumerate()
+				.map(|(a, c)| format!(
+					"({c}) * {}",
+					self.product(id, a + 1..self.g.shape(id).len())
+				))
+				.collect::<Vec<_>>()
+				.join(" + ")
+		)
+	}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -236,6 +348,29 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -244,6 +379,20 @@ cargo test --quiet --test movement
 <!-- todo:10-009 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn expr(` の `Op::Shrink` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
+			Op::Shrink { x, ranges } => {
+				let c = ranges
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| format!("({}+{lo})", self.coord(id, index, a)))
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -254,6 +403,27 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn verify_node(` の `Op::Shrink` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Shrink"
+			Op::Shrink { x, ranges } => {
+				if ranges.len() != s(*x).len() {
+					return Err("shrink rank mismatch".into());
+				}
+				ranges
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, hi))| {
+						if lo <= hi && hi <= s(*x)[a] {
+							Ok(hi - lo)
+						} else {
+							Err("invalid shrink range".to_string())
+						}
+					})
+					.collect::<Result<_>>()?
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -262,6 +432,42 @@ cargo test --quiet --test movement
 <!-- todo:10-011 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+			Op::Pad { x, pads } => {
+				let c = (0..pads.len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				let checks = pads
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| {
+						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
+					})
+					.collect::<Vec<_>>();
+				let target = self.name();
+				code.push_str(&format!(
+					"float {target}=0.0f;\nif ({}) {{\n",
+					if checks.is_empty() {
+						"1".into()
+					} else {
+						checks.join(" && ")
+					}
+				));
+				let xi = self.flatten(
+					x,
+					&c.iter()
+						.zip(&pads)
+						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
+						.collect::<Vec<_>>(),
+				);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!("{target}={value};\n}}\n"));
+				return Ok(target);
+			}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -272,6 +478,42 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+			Op::Pad { x, pads } => {
+				let c = (0..pads.len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				let checks = pads
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| {
+						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
+					})
+					.collect::<Vec<_>>();
+				let target = self.name();
+				code.push_str(&format!(
+					"float {target}=0.0f;\nif ({}) {{\n",
+					if checks.is_empty() {
+						"1".into()
+					} else {
+						checks.join(" && ")
+					}
+				));
+				let xi = self.flatten(
+					x,
+					&c.iter()
+						.zip(&pads)
+						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
+						.collect::<Vec<_>>(),
+				);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!("{target}={value};\n}}\n"));
+				return Ok(target);
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -280,6 +522,29 @@ cargo test --quiet --test movement
 <!-- todo:10-013 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -290,6 +555,25 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn expr(` の `Op::Flip` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Flip"
+			Op::Flip { x, axes } => {
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						let c = self.coord(id, index, a);
+						if axes.contains(&a) {
+							format!("({}-1-{c})", self.dim(x, a))
+						} else {
+							c
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -298,6 +582,15 @@ cargo test --quiet --test movement
 <!-- todo:10-015 -->
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `fn verify_node(` の `Op::Flip` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Flip"
+			Op::Flip { x, axes } => {
+				axes_valid(axes, s(*x).len())?;
+				s(*x).to_vec()
+			}
+```
 
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
@@ -308,6 +601,30 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn expr(` の `Op::Stack` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
+			Op::Stack { xs, axis } => {
+				let target = self.name();
+				code.push_str(&format!("float {target}=0.0f;\n"));
+				let select = self.coord(id, index, axis);
+				for (j, x) in xs.into_iter().enumerate() {
+					code.push_str(&format!(
+						"{}if ({select} == {j}) {{\n",
+						if j == 0 { "" } else { "else " }
+					));
+					let c = (0..self.g.shape(id).len())
+						.filter(|&a| a != axis)
+						.map(|a| self.coord(id, index, a))
+						.collect::<Vec<_>>();
+					let xi = self.flatten(x, &c);
+					let value = self.expr(x, &xi, code)?;
+					code.push_str(&format!("{target}={value};\n}}\n"));
+				}
+				return Ok(target);
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -316,6 +633,30 @@ cargo test --quiet --test movement
 <!-- todo:10-017 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn expr(` の `Op::Stack` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
+			Op::Stack { xs, axis } => {
+				let target = self.name();
+				code.push_str(&format!("float {target}=0.0f;\n"));
+				let select = self.coord(id, index, axis);
+				for (j, x) in xs.into_iter().enumerate() {
+					code.push_str(&format!(
+						"{}if ({select} == {j}) {{\n",
+						if j == 0 { "" } else { "else " }
+					));
+					let c = (0..self.g.shape(id).len())
+						.filter(|&a| a != axis)
+						.map(|a| self.coord(id, index, a))
+						.collect::<Vec<_>>();
+					let xi = self.flatten(x, &c);
+					let value = self.expr(x, &xi, code)?;
+					code.push_str(&format!("{target}={value};\n}}\n"));
+				}
+				return Ok(target);
+			}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -326,6 +667,23 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn verify_node(` の `Op::Stack` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Stack"
+			Op::Stack { xs, axis } => {
+				if xs.is_empty() {
+					return Err("empty stack".into());
+				}
+				let base = s(xs[0]);
+				if *axis > base.len() || xs.iter().any(|&x| s(x) != base) {
+					return Err("stack shape/axis mismatch".into());
+				}
+				let mut shape = base.to_vec();
+				shape.insert(*axis, xs.len());
+				shape
+			}
+```
+
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
@@ -334,6 +692,29 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 <!-- todo:10-019 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -344,6 +725,29 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test movement
 ```
@@ -352,6 +756,29 @@ cargo test --quiet --test movement
 <!-- todo:10-021 -->
 
 `tests/movement.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn movement("
+fn movement() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 3])?;
+	let t = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(t, vec![6])?;
+	let f = g.flip(r, vec![0])?;
+	let p = g.pad(f, vec![(1, 2)])?;
+	let s = g.shrink(p, vec![(1, 7)])?;
+	let z = g.stack(vec![r, s], 0)?;
+	let out = compare(&g, &[z], &[buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.])])?;
+	assert_eq!(
+		out[0].data,
+		[1., 4., 2., 5., 3., 6., 6., 3., 5., 2., 4., 1.]
+	);
+	assert!(g.permute(x, vec![0, 0]).is_err());
+	assert!(g.reshape(x, vec![7]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test movement
@@ -362,6 +789,40 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
 
+`tests/movement.rs` の `fn broadcast_empty_and_negative_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
+fn broadcast_empty_and_negative_shapes() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.input(0, vec![2, 3])?;
+	let b = g.input(1, vec![3])?;
+	let y = g.binary(Binary::Add, a, b)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[
+			buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.]),
+			buffer(&[3], &[10., 20., 30.])
+		])?[0]
+			.data,
+		[11., 22., 33., 14., 25., 36.]
+	);
+	let bad = g.constant(1., vec![2])?;
+	assert!(g.binary(Binary::Add, a, bad).is_err());
+	assert!(g.flip(a, vec![0, 0]).is_err());
+	assert!(g.stack(vec![a, b], 0).is_err());
+	assert!(g.shrink(a, vec![(1, 0), (0, 3)]).is_err());
+	let mut g = Graph::default();
+	let x = g.input(0, vec![0, 3])?;
+	let p = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(p, vec![0])?;
+	assert!(
+		g.compile(&[r])?.run(&[buffer(&[0, 3], &[])])?[0]
+			.data
+			.is_empty()
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
@@ -371,6 +832,30 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `tests/movement.rs` の `gather_scatter` で、この経路の値または拒否条件を確認する。
 
+`tests/movement.rs` の `fn gather_scatter(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn gather_scatter("
+fn gather_scatter() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3, 2])?;
+	let ids = g.input(1, vec![3])?;
+	let y = g.gather(x, ids, 0)?;
+	let zero = g.constant(0., vec![3, 2])?;
+	let z = g.scatter_add(zero, ids, y, 0)?;
+	let inputs = [
+		buffer(&[3, 2], &[1., 2., 3., 4., 5., 6.]),
+		buffer(&[3], &[2., 0., 2.]),
+	];
+	let out = compare(&g, &[y, z], &inputs)?;
+	assert_eq!(out[0].data, [5., 6., 1., 2., 5., 6.]);
+	assert_eq!(out[1].data, [1., 2., 0., 0., 10., 12.]);
+	let mut bad = inputs.clone();
+	bad[1].data[0] = 3.;
+	assert!(g.compile(&[z])?.run(&bad).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test movement gather_scatter
 ```
@@ -379,6 +864,40 @@ cargo test --quiet --test movement gather_scatter
 <!-- todo:10-024 -->
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
+
+`tests/movement.rs` の `fn broadcast_empty_and_negative_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
+fn broadcast_empty_and_negative_shapes() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.input(0, vec![2, 3])?;
+	let b = g.input(1, vec![3])?;
+	let y = g.binary(Binary::Add, a, b)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[
+			buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.]),
+			buffer(&[3], &[10., 20., 30.])
+		])?[0]
+			.data,
+		[11., 22., 33., 14., 25., 36.]
+	);
+	let bad = g.constant(1., vec![2])?;
+	assert!(g.binary(Binary::Add, a, bad).is_err());
+	assert!(g.flip(a, vec![0, 0]).is_err());
+	assert!(g.stack(vec![a, b], 0).is_err());
+	assert!(g.shrink(a, vec![(1, 0), (0, 3)]).is_err());
+	let mut g = Graph::default();
+	let x = g.input(0, vec![0, 3])?;
+	let p = g.permute(x, vec![1, 0])?;
+	let r = g.reshape(p, vec![0])?;
+	assert!(
+		g.compile(&[r])?.run(&[buffer(&[0, 3], &[])])?[0]
+			.data
+			.is_empty()
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes

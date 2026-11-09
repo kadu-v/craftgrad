@@ -1572,6 +1572,30 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 実装箇所は `nn::attention::rms_norm` である。この要件に対する実行可能な確認は `transformer_reference::causal_rope_and_softmax` に置く。
 
+`src/nn/attention.rs` の `pub fn rms_norm(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/attention.rs" mode="replace" item="pub fn rms_norm("
+pub fn rms_norm(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<NodeId> {
+	let dim = *g
+		.shape(x)
+		.last()
+		.ok_or("RMSNorm requires a final dimension")?;
+	if dim == 0 || g.shape(weight) != [dim] || eps <= 0. || !eps.is_finite() {
+		return Err("RMSNorm shape/epsilon".into());
+	}
+	let axis = g.shape(x).len() - 1;
+	let square = g.binary(Binary::Mul, x, x)?;
+	let sum = g.reduce(square, Reduce::Sum, vec![axis], true)?;
+	let divisor = g.constant(dim as f32, vec![])?;
+	let mean = g.binary(Binary::Div, sum, divisor)?;
+	let eps = g.constant(eps, vec![])?;
+	let variance = g.binary(Binary::Add, mean, eps)?;
+	let root = g.unary(Unary::Sqrt, variance)?;
+	let norm = g.binary(Binary::Div, x, root)?;
+	g.binary(Binary::Mul, norm, weight)
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
@@ -1582,6 +1606,20 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 
 実装箇所は `nn::attention::softmax` である。この要件に対する実行可能な確認は `transformer_reference::causal_rope_and_softmax` に置く。
+
+`src/nn/mod.rs` の `pub fn log_softmax(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/mod.rs" mode="replace" item="pub fn log_softmax("
+pub fn log_softmax(g: &mut Graph, x: NodeId, axis: usize) -> Result<NodeId> {
+	let m = g.reduce(x, Reduce::Max, vec![axis], true)?;
+	let m = g.stop_gradient(m)?;
+	let shift = g.binary(Binary::Sub, x, m)?;
+	let ex = g.unary(Unary::Exp, shift)?;
+	let sum = g.reduce(ex, Reduce::Sum, vec![axis], true)?;
+	let log = g.unary(Unary::Log, sum)?;
+	g.binary(Binary::Sub, shift, log)
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
@@ -1594,6 +1632,47 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 実装箇所は `nn::attention::apply_rope` である。この要件に対する実行可能な確認は `transformer_reference::causal_rope_and_softmax` に置く。
 
+`src/nn/attention.rs` の `pub fn apply_rope(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/attention.rs" mode="replace" item="pub fn apply_rope("
+pub fn apply_rope(g: &mut Graph, x: NodeId, start: usize, theta: f64) -> Result<NodeId> {
+	let shape = g.shape(x).to_vec();
+	if shape.len() != 3 || shape[2] % 2 != 0 || shape[2] == 0 || !theta.is_finite() || theta <= 0. {
+		return Err("RoPE shape/theta".into());
+	}
+	let (t, h, d) = (shape[0], shape[1], shape[2]);
+	let half = d / 2;
+	let mut positions = Vec::new();
+	for pos in 0..t {
+		let absolute = start.checked_add(pos).ok_or("RoPE position overflow")?;
+		let mut dimensions = Vec::new();
+		for channel in 0..d {
+			let r = channel % half;
+			let angle = absolute as f64 / theta.powf(2. * r as f64 / d as f64);
+			let (c, s) = (angle.cos() as f32, angle.sin() as f32);
+			let a = g.shrink(x, vec![(pos, pos + 1), (0, h), (r, r + 1)])?;
+			let b = g.shrink(x, vec![(pos, pos + 1), (0, h), (r + half, r + half + 1)])?;
+			let a = g.reshape(a, vec![h])?;
+			let b = g.reshape(b, vec![h])?;
+			let cc = g.constant(c, vec![])?;
+			let ss = g.constant(s, vec![])?;
+			let output = if channel < half {
+				let ac = g.binary(Binary::Mul, a, cc)?;
+				let bs = g.binary(Binary::Mul, b, ss)?;
+				g.binary(Binary::Sub, ac, bs)?
+			} else {
+				let as_ = g.binary(Binary::Mul, a, ss)?;
+				let bc = g.binary(Binary::Mul, b, cc)?;
+				g.binary(Binary::Add, as_, bc)?
+			};
+			dimensions.push(output);
+		}
+		positions.push(g.stack(dimensions, 1)?);
+	}
+	g.stack(positions, 0)
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
@@ -1604,6 +1683,67 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 
 実装箇所は `nn::attention::attention` である。この要件に対する実行可能な確認は `transformer_reference::causal_rope_and_softmax` に置く。
+
+`src/nn/attention.rs` の `pub fn attention(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/attention.rs" mode="replace" item="pub fn attention("
+pub fn attention(
+	g: &mut Graph,
+	q: NodeId,
+	k: NodeId,
+	v: NodeId,
+	query_start: usize,
+	causal: bool,
+) -> Result<NodeId> {
+	let qs = g.shape(q).to_vec();
+	let ks = g.shape(k).to_vec();
+	if qs.len() != 3
+		|| ks.len() != 3
+		|| g.shape(v) != ks
+		|| qs[2] != ks[2]
+		|| ks[1] == 0
+		|| qs[1] % ks[1] != 0
+		|| qs[2] == 0
+		|| ks[0] == 0
+	{
+		return Err("attention shape or GQA ratio".into());
+	}
+	let (t, h, d, s, hkv) = (qs[0], qs[1], qs[2], ks[0], ks[1]);
+	let ratio = h / hkv;
+	let mut heads = Vec::new();
+	for head in 0..h {
+		let kh = head / ratio;
+		let qq = g.shrink(q, vec![(0, t), (head, head + 1), (0, d)])?;
+		let qq = g.reshape(qq, vec![t, d])?;
+		let kk = g.shrink(k, vec![(0, s), (kh, kh + 1), (0, d)])?;
+		let kk = g.reshape(kk, vec![s, d])?;
+		let kt = g.permute(kk, vec![1, 0])?;
+		let scores = g.matmul(qq, kt)?;
+		let scale = g.constant(1. / (d as f32).sqrt(), vec![])?;
+		let scores = g.binary(Binary::Mul, scores, scale)?;
+		let mut mask_values = Vec::with_capacity(t * s);
+		for row in 0..t {
+			let position = query_start
+				.checked_add(row)
+				.ok_or("query position overflow")?;
+			for col in 0..s {
+				mask_values.push(if !causal || col <= position {
+					0.
+				} else {
+					f32::NEG_INFINITY
+				});
+			}
+		}
+		let mask = constant_array(g, vec![t, s], &mask_values)?;
+		let scores = g.binary(Binary::Add, scores, mask)?;
+		let probabilities = softmax(g, scores, 1)?;
+		let vv = g.shrink(v, vec![(0, s), (kh, kh + 1), (0, d)])?;
+		let vv = g.reshape(vv, vec![s, d])?;
+		heads.push(g.matmul(probabilities, vv)?);
+	}
+	g.stack(heads, 1)
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
@@ -1632,6 +1772,138 @@ fn zero_transformer() {
 
 実装箇所は `nn::qwen::register_graph` である。この要件に対する実行可能な確認は `transformer_reference::zero_transformer` に置く。
 
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
 ```
@@ -1643,6 +1915,138 @@ cargo test --offline --test transformer_reference zero_transformer -- --exact
 
 実装箇所は `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::zero_transformer` に置く。
 
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
 ```
@@ -1653,6 +2057,138 @@ cargo test --offline --test transformer_reference zero_transformer -- --exact
 
 
 実装箇所は `nn::silu` である。この要件に対する実行可能な確認は `transformer_reference::zero_transformer` に置く。
+
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
@@ -1700,6 +2236,29 @@ cargo test --offline --test transformer_reference nonzero_layer_boundaries_refer
 
 実装箇所は `transformer_reference::reference` である。この要件に対する実行可能な確認は `transformer_reference::nonzero_layer_boundaries_reference` に置く。
 
+`tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+fn nonzero_layer_boundaries_reference() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 11).unwrap();
+	let (actual, _) = run(&c, &weights, &[1, 2, 3], None);
+	let reference = reference(&c, &weights, &[1, 2, 3]);
+	if let Ok(path) = std::env::var("CHIBI_REFERENCE_OUT") {
+		std::fs::write(path, serde_json::to_vec_pretty(&reference).unwrap()).unwrap();
+	}
+	let saved: Vec<Vec<f32>> =
+		serde_json::from_slice(include_bytes!("../fixtures/tiny-transformer.json")).unwrap();
+	if std::env::var_os("CHIBI_REFERENCE_OUT").is_none() {
+		assert_eq!(reference, saved);
+	}
+
+	for (a, b) in actual.iter().zip(reference) {
+		close(&a.data, &b, 1e-5, 1e-4);
+	}
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
 ```
@@ -1739,6 +2298,31 @@ fn complete_public_registration() {
 
 実装箇所は `fetch::Manifest::validate` である。この要件に対する実行可能な確認は `transformer_reference::complete_public_registration` に置く。
 
+`src/model_assets.rs` の `pub fn verified_files(`の定義を次の全体で置き換えます。
+
+```rust file="src/model_assets.rs" mode="replace" item="pub fn verified_files("
+pub fn verified_files(
+	manifest: &Path,
+	directory: &Path,
+	download: bool,
+) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
+	let bytes = std::fs::read(manifest).map_err(|e| e.to_string())?;
+	let manifest: Manifest = serde_json::from_value(crate::safetensor::unique_json(&bytes)?)
+		.map_err(|e| e.to_string())?;
+	manifest.validate()?;
+	let mut files = BTreeMap::new();
+	for asset in &manifest.files {
+		let bytes = if download {
+			fetch(directory, asset)?
+		} else {
+			verified_read(&directory.join(&asset.name), asset)?
+		};
+		files.insert(asset.name.clone(), bytes);
+	}
+	Ok((manifest, files))
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
@@ -1749,6 +2333,45 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 
 実装箇所は `nn::qwen::QwenConfig::validate` である。この要件に対する実行可能な確認は `transformer_reference::complete_public_registration` に置く。
+
+`src/nn/qwen.rs` の `pub fn validate(`（`impl QwenConfig` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn validate(" within="impl QwenConfig"
+	pub fn validate(&self) -> Result<()> {
+		if self.use_mrope
+			|| self.attention_dropout != 0.
+			|| (!self.architectures.is_empty() && self.architectures != ["Qwen2ForCausalLM"])
+			|| self.model_type != "qwen2"
+			|| self.hidden_act != "silu"
+			|| self.use_sliding_window
+			|| self.rope_scaling.is_some()
+		{
+			return Err("unsupported Qwen architecture/activation/rope/sliding window".into());
+		}
+		if [
+			self.hidden_size,
+			self.intermediate_size,
+			self.num_hidden_layers,
+			self.num_attention_heads,
+			self.num_key_value_heads,
+			self.vocab_size,
+			self.max_position_embeddings,
+		]
+		.contains(&0)
+			|| self.hidden_size % self.num_attention_heads != 0
+			|| self.num_attention_heads % self.num_key_value_heads != 0
+			|| (self.hidden_size / self.num_attention_heads) % 2 != 0
+			|| self.vocab_size > 16_777_216
+			|| self.rms_norm_eps <= 0.
+			|| !self.rms_norm_eps.is_finite()
+			|| self.rope_theta <= 0.
+			|| !self.rope_theta.is_finite()
+		{
+			return Err("invalid Qwen dimensions/norm/theta".into());
+		}
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
@@ -1761,6 +2384,60 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 実装箇所は `nn::qwen::parameter_registry` である。この要件に対する実行可能な確認は `transformer_reference::complete_public_registration` に置く。
 
+`src/nn/qwen.rs` の `pub fn parameter_registry(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn parameter_registry("
+pub fn parameter_registry(c: &QwenConfig) -> Result<Registry> {
+	c.validate()?;
+	let mut registry = Registry::default();
+	let mut id = 0u32;
+	let mut register = |name: String, shape: Vec<usize>| -> Result<()> {
+		registry.register(
+			&name,
+			Spec {
+				id,
+				slot: id as usize,
+				dtype: DType::F32,
+				shape,
+				trainable: true,
+			},
+		)?;
+		id = id.checked_add(1).ok_or("parameter ID overflow")?;
+		Ok(())
+	};
+	let d = c.hidden_size;
+	let kd = c.num_key_value_heads * (d / c.num_attention_heads);
+	register("model.embed_tokens.weight".into(), vec![c.vocab_size, d])?;
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		register(format!("{p}.input_layernorm.weight"), vec![d])?;
+		for (name, out) in [("q_proj", d), ("k_proj", kd), ("v_proj", kd)] {
+			register(format!("{p}.self_attn.{name}.weight"), vec![out, d])?;
+			register(format!("{p}.self_attn.{name}.bias"), vec![out])?;
+		}
+		register(format!("{p}.self_attn.o_proj.weight"), vec![d, d])?;
+		register(format!("{p}.post_attention_layernorm.weight"), vec![d])?;
+		register(
+			format!("{p}.mlp.gate_proj.weight"),
+			vec![c.intermediate_size, d],
+		)?;
+		register(
+			format!("{p}.mlp.up_proj.weight"),
+			vec![c.intermediate_size, d],
+		)?;
+		register(
+			format!("{p}.mlp.down_proj.weight"),
+			vec![d, c.intermediate_size],
+		)?;
+	}
+	register("model.norm.weight".into(), vec![d])?;
+	if !c.tie_word_embeddings {
+		register("lm_head.weight".into(), vec![c.vocab_size, d])?;
+	}
+	Ok(registry)
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
@@ -1772,6 +2449,138 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 実装箇所は `nn::linear` である。この要件に対する実行可能な確認は `transformer_reference::complete_public_registration` に置く。
 
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
@@ -1782,6 +2591,32 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 
 実装箇所は `nn::qwen::load_parameters` である。この要件に対する実行可能な確認は `transformer_reference::complete_public_registration` に置く。
+
+`src/nn/qwen.rs` の `pub fn load_parameters(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn load_parameters("
+pub fn load_parameters(
+	c: &QwenConfig,
+	loaded: &BTreeMap<String, TensorRecord>,
+) -> Result<TensorSet> {
+	let registry = parameter_registry(c)?;
+	let mut converted = BTreeMap::new();
+	for (name, tensor) in loaded {
+		converted.insert(
+			name.clone(),
+			TensorRecord::from_buffer(&tensor.to_buffer()?),
+		);
+	}
+	if c.tie_word_embeddings {
+		if let Some(output) = converted.remove("lm_head.weight") {
+			if converted.get("model.embed_tokens.weight") != Some(&output) {
+				return Err("tied embedding/output payload mismatch".into());
+			}
+		}
+	}
+	registry.validate(&converted, false)
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
@@ -1832,6 +2667,55 @@ fn official_tokenizer_ids() {
 
 実装箇所は `model_assets::load` である。この要件に対する実行可能な確認は `qwen_tokenizer::official_tokenizer_ids` に置く。
 
+`src/model_assets.rs` の `pub fn load(`の定義を次の全体で置き換えます。
+
+```rust file="src/model_assets.rs" mode="replace" item="pub fn load("
+pub fn load(manifest: &Path, directory: &Path, download: bool) -> Result<ModelAssets> {
+	let (manifest, files) = verified_files(manifest, directory, download)?;
+	let required = |name: &str| {
+		files
+			.get(name)
+			.ok_or_else(|| format!("manifest missing {name}"))
+	};
+	let config: QwenConfig =
+		serde_json::from_value(crate::safetensor::unique_json(required("config.json")?)?)
+			.map_err(|e| e.to_string())?;
+	config.require_public_05b()?;
+	let raw = if let Some(index) = files.get("model.safetensors.index.json") {
+		crate::fetch::load_shards(index, &files)?
+	} else {
+		crate::safetensor::read(required("model.safetensors")?)?
+	};
+	let state = load_parameters(&config, &raw)?;
+	let tokenizer = tokenizers::Tokenizer::from_bytes(required("tokenizer.json")?)
+		.map_err(|e| e.to_string())?;
+	let tokenizer_config = crate::safetensor::unique_json(required("tokenizer_config.json")?)?;
+	if tokenizer_config
+		.get("tokenizer_class")
+		.and_then(|v| v.as_str())
+		!= Some("Qwen2Tokenizer")
+	{
+		return Err("unsupported tokenizer class".into());
+	}
+	let generation = crate::safetensor::unique_json(required("generation_config.json")?)?;
+	let eos = generation
+		.get("eos_token_id")
+		.and_then(|v| v.as_u64())
+		.and_then(|v| u32::try_from(v).ok())
+		.ok_or("EOS token ID")?;
+	if eos as usize >= config.vocab_size {
+		return Err("EOS vocabulary range".into());
+	}
+	Ok(ModelAssets {
+		config,
+		state,
+		tokenizer,
+		manifest,
+		eos,
+	})
+}
+```
+
 ```sh check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
 ```
@@ -1850,6 +2734,42 @@ cargo run --offline --example qwen_tokenize
 
 実装箇所は `model_assets::encode` である。この要件に対する実行可能な確認は `qwen_tokenizer::official_tokenizer_ids` に置く。
 
+`tests/qwen_tokenizer.rs` の `fn official_tokenizer_ids(`の定義を次の全体で置き換えます。
+
+```rust file="tests/qwen_tokenizer.rs" mode="replace" item="fn official_tokenizer_ids("
+fn official_tokenizer_ids() {
+	let manifest: Manifest =
+		serde_json::from_slice(include_bytes!("../fixtures/qwen25/manifest.json")).unwrap();
+	manifest.validate().unwrap();
+	let asset = manifest
+		.files
+		.iter()
+		.find(|a| a.name == "tokenizer.json")
+		.unwrap();
+	let bytes = verified_read(
+		std::path::Path::new("fixtures/qwen25/tokenizer.json"),
+		asset,
+	)
+	.unwrap();
+	let tokenizer = tokenizers::Tokenizer::from_bytes(bytes).unwrap();
+	let fixture: serde_json::Value =
+		serde_json::from_slice(include_bytes!("../fixtures/qwen25/tokenizer-fixture.json"))
+			.unwrap();
+	for row in fixture.as_array().unwrap() {
+		let expected = row["ids"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|v| v.as_u64().unwrap() as u32)
+			.collect::<Vec<_>>();
+		assert_eq!(
+			encode(&tokenizer, row["text"].as_str().unwrap()).unwrap(),
+			expected
+		);
+	}
+}
+```
+
 ```sh check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
 ```
@@ -1860,6 +2780,17 @@ cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --i
 
 
 実装箇所は `model_assets::encode` である。この要件に対する実行可能な確認は `qwen_tokenizer::official_tokenizer_ids` に置く。
+
+`src/model_assets.rs` の `pub fn encode(`の定義を次の全体で置き換えます。
+
+```rust file="src/model_assets.rs" mode="replace" item="pub fn encode("
+pub fn encode(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>> {
+	tokenizer
+		.encode(text, false)
+		.map(|e| e.get_ids().to_vec())
+		.map_err(|e| e.to_string())
+}
+```
 
 ```sh check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
@@ -1947,6 +2878,105 @@ cargo run --offline --example qwen_infer -- --manifest fixtures/qwen25/manifest.
 
 実装箇所は `nn::qwen::token_buffer` である。この要件に対する実行可能な確認は `qwen_public::all_24_layers_reference` に置く。
 
+`examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
+
+```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+fn main() -> Result<()> {
+	let args = std::env::args().collect::<Vec<_>>();
+	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+	let manifest = arg("--manifest").unwrap_or("fixtures/qwen25/manifest.json".into());
+	let directory = arg("--assets").unwrap_or("fixtures/qwen25".into());
+	let assets = model_assets::load(
+		Path::new(&manifest),
+		Path::new(&directory),
+		args.iter().any(|a| a == "--download"),
+	)?;
+	let mut c = assets.config.clone();
+	c.max_position_embeddings = arg("--context")
+		.unwrap_or("16".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	if c.max_position_embeddings > assets.config.max_position_embeddings
+		|| c.max_position_embeddings == 0
+	{
+		return Err("requested context capacity".into());
+	}
+	let count = arg("--max-new-tokens")
+		.unwrap_or("1".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	let text = arg("--text").unwrap_or("Hello".into());
+	let mut input = model_assets::encode(&assets.tokenizer, &text)?;
+	if input
+		.len()
+		.checked_add(count)
+		.ok_or("token capacity overflow")?
+		> c.max_position_embeddings
+	{
+		return Err("prompt plus generation exceeds context before compilation".into());
+	}
+	let registry = parameter_registry(&c)?;
+	let weight_bindings = registry.bind(&assets.state)?;
+	let slot = weight_bindings.len();
+	let mut cache = KvState::new(&c)?;
+	let mut generated = Vec::new();
+	for _ in 0..count {
+		let mut graph = Graph::default();
+		let params = register_graph(&mut graph, &registry)?;
+		let tokens = graph.input(slot, vec![input.len()])?;
+		let mut bindings = weight_bindings.clone();
+		bindings.push(token_buffer(&input, &c)?);
+		let mut cache_ids = Vec::new();
+		for (layer, (key, value)) in cache.keys.iter().zip(&cache.values).enumerate() {
+			cache_ids.push((
+				graph.input(slot + 1 + 2 * layer, key.shape.clone())?,
+				graph.input(slot + 2 + 2 * layer, value.shape.clone())?,
+			));
+			bindings.extend([key.clone(), value.clone()]);
+		}
+		let forward = logits_all(
+			&mut graph,
+			&c,
+			&params,
+			tokens,
+			cache.valid,
+			Some(&cache_ids),
+		)?;
+		let mut outputs = vec![forward.logits];
+		for (k, v) in forward.cache_outputs {
+			outputs.extend([k, v]);
+		}
+		let plan = graph.compile(&outputs)?;
+		let result = plan.run(&bindings)?;
+		let next = greedy(&result[0])?;
+		if args.iter().any(|a| a == "--dump") {
+			eprintln!(
+				"tokens={input:?} logits={:?} layers={} heads={}/{} position={} cache_valid={} graph_nodes={}",
+				result[0].shape,
+				c.num_hidden_layers,
+				c.num_attention_heads,
+				c.num_key_value_heads,
+				cache.valid,
+				cache.valid,
+				graph.nodes.len()
+			);
+		}
+		cache.adopt(&result[1..], input.len())?;
+		generated.push(next as u32);
+		if next as u32 == assets.eos {
+			break;
+		}
+		input = vec![next as u32];
+	}
+	let output = assets
+		.tokenizer
+		.decode(&generated, false)
+		.map_err(|e| e.to_string())?;
+	println!("ids={generated:?}\n{output}");
+	Ok(())
+}
+```
+
 ```sh check requires=qwen
 cargo test --offline --test qwen_public all_24_layers_reference -- --exact --ignored
 ```
@@ -1981,6 +3011,26 @@ fn immutable_cache_matches_prefix() {
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`src/nn/qwen.rs` の `pub fn new(`（`impl KvState` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn new(" within="impl KvState"
+	pub fn new(c: &QwenConfig) -> Result<Self> {
+		let shape = vec![
+			c.max_position_embeddings,
+			c.num_key_value_heads,
+			c.hidden_size / c.num_attention_heads,
+		];
+		let elements = shape.iter().product();
+		let buffer = Buffer::new(shape, vec![0.; elements])?;
+		Ok(Self {
+			keys: vec![buffer.clone(); c.num_hidden_layers],
+			values: vec![buffer; c.num_hidden_layers],
+			valid: 0,
+			capacity: c.max_position_embeddings,
+		})
+	}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -1991,6 +3041,138 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
+
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
@@ -2003,6 +3185,138 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+pub fn logits_all_with_attention<F>(
+	g: &mut Graph,
+	c: &QwenConfig,
+	params: &BTreeMap<String, NodeId>,
+	tokens: NodeId,
+	start: usize,
+	cache: Option<&[(NodeId, NodeId)]>,
+	attention_builder: &mut F,
+) -> Result<Forward>
+where
+	F: FnMut(&mut Graph, NodeId, NodeId, NodeId, usize, bool) -> Result<NodeId>,
+{
+	c.validate()?;
+	let shape = g.shape(tokens);
+	if shape.len() != 1 || shape[0] == 0 {
+		return Err("tokens must be nonempty rank one".into());
+	}
+	let t = shape[0];
+	if start.checked_add(t).ok_or("context overflow")? > c.max_position_embeddings {
+		return Err("input exceeds context capacity".into());
+	}
+	if cache.is_none() && start != 0 {
+		return Err("nonzero position requires a cache".into());
+	}
+	if cache.is_some_and(|v| v.len() != c.num_hidden_layers) {
+		return Err("cache layer count".into());
+	}
+	let get = |name: &str| {
+		params
+			.get(name)
+			.copied()
+			.ok_or_else(|| format!("missing graph parameter {name}"))
+	};
+	let d = c.hidden_size;
+	let hd = d / c.num_attention_heads;
+	let kd = c.num_key_value_heads;
+	let mut x = super::attention::embedding(g, get("model.embed_tokens.weight")?, tokens)?;
+	let mut boundaries = vec![x];
+	let mut cache_outputs = Vec::new();
+	for layer in 0..c.num_hidden_layers {
+		let p = format!("model.layers.{layer}");
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.input_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let projection = |name: &str, heads: usize, g: &mut Graph| -> Result<NodeId> {
+			let value = linear(
+				g,
+				n,
+				get(&format!("{p}.self_attn.{name}.weight"))?,
+				Some(get(&format!("{p}.self_attn.{name}.bias"))?),
+			)?;
+			g.reshape(value, vec![t, heads, hd])
+		};
+		let q = projection("q_proj", c.num_attention_heads, g)?;
+		let k = projection("k_proj", kd, g)?;
+		let v = projection("v_proj", kd, g)?;
+		let q = apply_rope(g, q, start, c.rope_theta)?;
+		let k = apply_rope(g, k, start, c.rope_theta)?;
+		let (k, v) = if let Some(old) = cache {
+			let (ck, cv) = old[layer];
+			let expected = [c.max_position_embeddings, kd, hd];
+			if g.shape(ck) != expected || g.shape(cv) != expected {
+				return Err("cache capacity shape".into());
+			}
+			let (k, v) = if start == 0 {
+				(k, v)
+			} else {
+				let ranges = vec![(0, start), (0, kd), (0, hd)];
+				let prefix_k = g.shrink(ck, ranges.clone())?;
+				let prefix_v = g.shrink(cv, ranges)?;
+				(
+					concatenate(g, prefix_k, k, 0)?,
+					concatenate(g, prefix_v, v, 0)?,
+				)
+			};
+			let pads = vec![(0, c.max_position_embeddings - start - t), (0, 0), (0, 0)];
+			let new_k = g.pad(k, pads.clone())?;
+			let new_v = g.pad(v, pads)?;
+			let new_k = g.stage(new_k)?;
+			let new_v = g.stage(new_v)?;
+			cache_outputs.push((new_k, new_v));
+			let ranges = vec![(0, start + t), (0, kd), (0, hd)];
+			(g.shrink(new_k, ranges.clone())?, g.shrink(new_v, ranges)?)
+		} else {
+			(k, v)
+		};
+		let attended = attention_builder(g, q, k, v, start, true)?;
+		let attended = g.reshape(attended, vec![t, d])?;
+		let projected = linear(
+			g,
+			attended,
+			get(&format!("{p}.self_attn.o_proj.weight"))?,
+			None,
+		)?;
+		x = g.binary(Binary::Add, x, projected)?;
+		let n = rms_norm(
+			g,
+			x,
+			get(&format!("{p}.post_attention_layernorm.weight"))?,
+			c.rms_norm_eps,
+		)?;
+		let gate = linear(g, n, get(&format!("{p}.mlp.gate_proj.weight"))?, None)?;
+		let gate = silu(g, gate)?;
+		let up = linear(g, n, get(&format!("{p}.mlp.up_proj.weight"))?, None)?;
+		let product = g.binary(Binary::Mul, gate, up)?;
+		let down = linear(g, product, get(&format!("{p}.mlp.down_proj.weight"))?, None)?;
+		x = g.binary(Binary::Add, x, down)?;
+		x = g.stage(x)?;
+		boundaries.push(x);
+	}
+	let x = rms_norm(g, x, get("model.norm.weight")?, c.rms_norm_eps)?;
+	boundaries.push(x);
+	let output = get(if c.tie_word_embeddings {
+		"model.embed_tokens.weight"
+	} else {
+		"lm_head.weight"
+	})?;
+	let logits = linear(g, x, output, None)?;
+	Ok(Forward {
+		logits,
+		boundaries,
+		cache_outputs,
+	})
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2013,6 +3327,33 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
+
+`src/nn/qwen.rs` の `pub fn adopt(`（`impl KvState` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/nn/qwen.rs" mode="replace" item="pub fn adopt(" within="impl KvState"
+	pub fn adopt(&mut self, outputs: &[Buffer], tokens: usize) -> Result<()> {
+		if outputs.len() != 2 * self.keys.len()
+			|| self
+				.valid
+				.checked_add(tokens)
+				.ok_or("cache length overflow")?
+				> self.capacity
+		{
+			return Err("cache adoption shape or capacity".into());
+		}
+		let mut candidate = self.clone();
+		for (i, pair) in outputs.chunks_exact(2).enumerate() {
+			if pair[0].shape != self.keys[i].shape || pair[1].shape != self.values[i].shape {
+				return Err("cache output shape".into());
+			}
+			candidate.keys[i] = pair[0].clone();
+			candidate.values[i] = pair[1].clone();
+		}
+		candidate.valid += tokens;
+		*self = candidate;
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
@@ -2025,6 +3366,28 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+fn immutable_cache_matches_prefix() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 7).unwrap();
+	let mut cache = KvState::new(&c).unwrap();
+	let old = cache.keys[0].data.clone();
+	let (_, outputs) = run(&c, &weights, &[1, 2], Some(&cache));
+	assert_eq!(cache.keys[0].data, old);
+	cache.adopt(&outputs, 2).unwrap();
+	let (cached, outputs) = run(&c, &weights, &[3], Some(&cache));
+	cache.adopt(&outputs, 1).unwrap();
+	let (full, _) = run(&c, &weights, &[1, 2, 3], None);
+	let v = c.vocab_size;
+	close(&cached[0].data, &full[0].data[2 * v..3 * v], 1e-5, 1e-4);
+	assert_eq!(cache.valid, 3);
+	cache.reset();
+	assert_eq!(cache.valid, 0);
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2035,6 +3398,105 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `nn::qwen::logits_all` の cache 候補構築と `nn::qwen::KvState::{adopt,reset}` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
+
+`examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
+
+```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+fn main() -> Result<()> {
+	let args = std::env::args().collect::<Vec<_>>();
+	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+	let manifest = arg("--manifest").unwrap_or("fixtures/qwen25/manifest.json".into());
+	let directory = arg("--assets").unwrap_or("fixtures/qwen25".into());
+	let assets = model_assets::load(
+		Path::new(&manifest),
+		Path::new(&directory),
+		args.iter().any(|a| a == "--download"),
+	)?;
+	let mut c = assets.config.clone();
+	c.max_position_embeddings = arg("--context")
+		.unwrap_or("16".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	if c.max_position_embeddings > assets.config.max_position_embeddings
+		|| c.max_position_embeddings == 0
+	{
+		return Err("requested context capacity".into());
+	}
+	let count = arg("--max-new-tokens")
+		.unwrap_or("1".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	let text = arg("--text").unwrap_or("Hello".into());
+	let mut input = model_assets::encode(&assets.tokenizer, &text)?;
+	if input
+		.len()
+		.checked_add(count)
+		.ok_or("token capacity overflow")?
+		> c.max_position_embeddings
+	{
+		return Err("prompt plus generation exceeds context before compilation".into());
+	}
+	let registry = parameter_registry(&c)?;
+	let weight_bindings = registry.bind(&assets.state)?;
+	let slot = weight_bindings.len();
+	let mut cache = KvState::new(&c)?;
+	let mut generated = Vec::new();
+	for _ in 0..count {
+		let mut graph = Graph::default();
+		let params = register_graph(&mut graph, &registry)?;
+		let tokens = graph.input(slot, vec![input.len()])?;
+		let mut bindings = weight_bindings.clone();
+		bindings.push(token_buffer(&input, &c)?);
+		let mut cache_ids = Vec::new();
+		for (layer, (key, value)) in cache.keys.iter().zip(&cache.values).enumerate() {
+			cache_ids.push((
+				graph.input(slot + 1 + 2 * layer, key.shape.clone())?,
+				graph.input(slot + 2 + 2 * layer, value.shape.clone())?,
+			));
+			bindings.extend([key.clone(), value.clone()]);
+		}
+		let forward = logits_all(
+			&mut graph,
+			&c,
+			&params,
+			tokens,
+			cache.valid,
+			Some(&cache_ids),
+		)?;
+		let mut outputs = vec![forward.logits];
+		for (k, v) in forward.cache_outputs {
+			outputs.extend([k, v]);
+		}
+		let plan = graph.compile(&outputs)?;
+		let result = plan.run(&bindings)?;
+		let next = greedy(&result[0])?;
+		if args.iter().any(|a| a == "--dump") {
+			eprintln!(
+				"tokens={input:?} logits={:?} layers={} heads={}/{} position={} cache_valid={} graph_nodes={}",
+				result[0].shape,
+				c.num_hidden_layers,
+				c.num_attention_heads,
+				c.num_key_value_heads,
+				cache.valid,
+				cache.valid,
+				graph.nodes.len()
+			);
+		}
+		cache.adopt(&result[1..], input.len())?;
+		generated.push(next as u32);
+		if next as u32 == assets.eos {
+			break;
+		}
+		input = vec![next as u32];
+	}
+	let output = assets
+		.tokenizer
+		.decode(&generated, false)
+		.map_err(|e| e.to_string())?;
+	println!("ids={generated:?}\n{output}");
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
@@ -2047,6 +3509,28 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+fn immutable_cache_matches_prefix() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 7).unwrap();
+	let mut cache = KvState::new(&c).unwrap();
+	let old = cache.keys[0].data.clone();
+	let (_, outputs) = run(&c, &weights, &[1, 2], Some(&cache));
+	assert_eq!(cache.keys[0].data, old);
+	cache.adopt(&outputs, 2).unwrap();
+	let (cached, outputs) = run(&c, &weights, &[3], Some(&cache));
+	cache.adopt(&outputs, 1).unwrap();
+	let (full, _) = run(&c, &weights, &[1, 2, 3], None);
+	let v = c.vocab_size;
+	close(&cached[0].data, &full[0].data[2 * v..3 * v], 1e-5, 1e-4);
+	assert_eq!(cache.valid, 3);
+	cache.reset();
+	assert_eq!(cache.valid, 0);
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2057,6 +3541,29 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::nonzero_layer_boundaries_reference` に置く。
+
+`tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+fn nonzero_layer_boundaries_reference() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 11).unwrap();
+	let (actual, _) = run(&c, &weights, &[1, 2, 3], None);
+	let reference = reference(&c, &weights, &[1, 2, 3]);
+	if let Ok(path) = std::env::var("CHIBI_REFERENCE_OUT") {
+		std::fs::write(path, serde_json::to_vec_pretty(&reference).unwrap()).unwrap();
+	}
+	let saved: Vec<Vec<f32>> =
+		serde_json::from_slice(include_bytes!("../fixtures/tiny-transformer.json")).unwrap();
+	if std::env::var_os("CHIBI_REFERENCE_OUT").is_none() {
+		assert_eq!(reference, saved);
+	}
+
+	for (a, b) in actual.iter().zip(reference) {
+		close(&a.data, &b, 1e-5, 1e-4);
+	}
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
@@ -2069,6 +3576,28 @@ cargo test --offline --test transformer_reference nonzero_layer_boundaries_refer
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+fn immutable_cache_matches_prefix() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 7).unwrap();
+	let mut cache = KvState::new(&c).unwrap();
+	let old = cache.keys[0].data.clone();
+	let (_, outputs) = run(&c, &weights, &[1, 2], Some(&cache));
+	assert_eq!(cache.keys[0].data, old);
+	cache.adopt(&outputs, 2).unwrap();
+	let (cached, outputs) = run(&c, &weights, &[3], Some(&cache));
+	cache.adopt(&outputs, 1).unwrap();
+	let (full, _) = run(&c, &weights, &[1, 2, 3], None);
+	let v = c.vocab_size;
+	close(&cached[0].data, &full[0].data[2 * v..3 * v], 1e-5, 1e-4);
+	assert_eq!(cache.valid, 3);
+	cache.reset();
+	assert_eq!(cache.valid, 0);
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2079,6 +3608,28 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
+
+`tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+fn immutable_cache_matches_prefix() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 7).unwrap();
+	let mut cache = KvState::new(&c).unwrap();
+	let old = cache.keys[0].data.clone();
+	let (_, outputs) = run(&c, &weights, &[1, 2], Some(&cache));
+	assert_eq!(cache.keys[0].data, old);
+	cache.adopt(&outputs, 2).unwrap();
+	let (cached, outputs) = run(&c, &weights, &[3], Some(&cache));
+	cache.adopt(&outputs, 1).unwrap();
+	let (full, _) = run(&c, &weights, &[1, 2, 3], None);
+	let v = c.vocab_size;
+	close(&cached[0].data, &full[0].data[2 * v..3 * v], 1e-5, 1e-4);
+	assert_eq!(cache.valid, 3);
+	cache.reset();
+	assert_eq!(cache.valid, 0);
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
@@ -2091,6 +3642,28 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+fn immutable_cache_matches_prefix() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 7).unwrap();
+	let mut cache = KvState::new(&c).unwrap();
+	let old = cache.keys[0].data.clone();
+	let (_, outputs) = run(&c, &weights, &[1, 2], Some(&cache));
+	assert_eq!(cache.keys[0].data, old);
+	cache.adopt(&outputs, 2).unwrap();
+	let (cached, outputs) = run(&c, &weights, &[3], Some(&cache));
+	cache.adopt(&outputs, 1).unwrap();
+	let (full, _) = run(&c, &weights, &[1, 2, 3], None);
+	let v = c.vocab_size;
+	close(&cached[0].data, &full[0].data[2 * v..3 * v], 1e-5, 1e-4);
+	assert_eq!(cache.valid, 3);
+	cache.reset();
+	assert_eq!(cache.valid, 0);
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2102,6 +3675,105 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::immutable_cache_matches_prefix` に置く。
 
+`examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
+
+```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+fn main() -> Result<()> {
+	let args = std::env::args().collect::<Vec<_>>();
+	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+	let manifest = arg("--manifest").unwrap_or("fixtures/qwen25/manifest.json".into());
+	let directory = arg("--assets").unwrap_or("fixtures/qwen25".into());
+	let assets = model_assets::load(
+		Path::new(&manifest),
+		Path::new(&directory),
+		args.iter().any(|a| a == "--download"),
+	)?;
+	let mut c = assets.config.clone();
+	c.max_position_embeddings = arg("--context")
+		.unwrap_or("16".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	if c.max_position_embeddings > assets.config.max_position_embeddings
+		|| c.max_position_embeddings == 0
+	{
+		return Err("requested context capacity".into());
+	}
+	let count = arg("--max-new-tokens")
+		.unwrap_or("1".into())
+		.parse::<usize>()
+		.map_err(|e| e.to_string())?;
+	let text = arg("--text").unwrap_or("Hello".into());
+	let mut input = model_assets::encode(&assets.tokenizer, &text)?;
+	if input
+		.len()
+		.checked_add(count)
+		.ok_or("token capacity overflow")?
+		> c.max_position_embeddings
+	{
+		return Err("prompt plus generation exceeds context before compilation".into());
+	}
+	let registry = parameter_registry(&c)?;
+	let weight_bindings = registry.bind(&assets.state)?;
+	let slot = weight_bindings.len();
+	let mut cache = KvState::new(&c)?;
+	let mut generated = Vec::new();
+	for _ in 0..count {
+		let mut graph = Graph::default();
+		let params = register_graph(&mut graph, &registry)?;
+		let tokens = graph.input(slot, vec![input.len()])?;
+		let mut bindings = weight_bindings.clone();
+		bindings.push(token_buffer(&input, &c)?);
+		let mut cache_ids = Vec::new();
+		for (layer, (key, value)) in cache.keys.iter().zip(&cache.values).enumerate() {
+			cache_ids.push((
+				graph.input(slot + 1 + 2 * layer, key.shape.clone())?,
+				graph.input(slot + 2 + 2 * layer, value.shape.clone())?,
+			));
+			bindings.extend([key.clone(), value.clone()]);
+		}
+		let forward = logits_all(
+			&mut graph,
+			&c,
+			&params,
+			tokens,
+			cache.valid,
+			Some(&cache_ids),
+		)?;
+		let mut outputs = vec![forward.logits];
+		for (k, v) in forward.cache_outputs {
+			outputs.extend([k, v]);
+		}
+		let plan = graph.compile(&outputs)?;
+		let result = plan.run(&bindings)?;
+		let next = greedy(&result[0])?;
+		if args.iter().any(|a| a == "--dump") {
+			eprintln!(
+				"tokens={input:?} logits={:?} layers={} heads={}/{} position={} cache_valid={} graph_nodes={}",
+				result[0].shape,
+				c.num_hidden_layers,
+				c.num_attention_heads,
+				c.num_key_value_heads,
+				cache.valid,
+				cache.valid,
+				graph.nodes.len()
+			);
+		}
+		cache.adopt(&result[1..], input.len())?;
+		generated.push(next as u32);
+		if next as u32 == assets.eos {
+			break;
+		}
+		input = vec![next as u32];
+	}
+	let output = assets
+		.tokenizer
+		.decode(&generated, false)
+		.map_err(|e| e.to_string())?;
+	println!("ids={generated:?}\n{output}");
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
@@ -2112,6 +3784,29 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 
 実装箇所は `transformer_reference::reference` と `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::nonzero_layer_boundaries_reference` に置く。
+
+`tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
+
+```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+fn nonzero_layer_boundaries_reference() {
+	let c = QwenConfig::tiny();
+	let weights = initialize(&c, 11).unwrap();
+	let (actual, _) = run(&c, &weights, &[1, 2, 3], None);
+	let reference = reference(&c, &weights, &[1, 2, 3]);
+	if let Ok(path) = std::env::var("CHIBI_REFERENCE_OUT") {
+		std::fs::write(path, serde_json::to_vec_pretty(&reference).unwrap()).unwrap();
+	}
+	let saved: Vec<Vec<f32>> =
+		serde_json::from_slice(include_bytes!("../fixtures/tiny-transformer.json")).unwrap();
+	if std::env::var_os("CHIBI_REFERENCE_OUT").is_none() {
+		assert_eq!(reference, saved);
+	}
+
+	for (a, b) in actual.iter().zip(reference) {
+		close(&a.data, &b, 1e-5, 1e-4);
+	}
+}
+```
 
 ```sh check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact

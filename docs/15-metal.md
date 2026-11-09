@@ -927,6 +927,18 @@ fn todo_15_001() {
 }
 ```
 
+`src/backends/metal.rs` の `pub fn compile(kernel:`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub fn compile(kernel:"
+	pub fn compile(kernel: &Kernel) -> Result<Self, String> {
+		let device = MTLCreateSystemDefaultDevice().ok_or("Metal device unavailable")?;
+		let queue = device
+			.newCommandQueue()
+			.ok_or("Metal newCommandQueue returned nil")?;
+		Self::compile_on(kernel, device, queue)
+	}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_001 -- --exact --ignored
 ```
@@ -943,6 +955,121 @@ cargo test --test book_15 --features metal todo_15_001 -- --exact --ignored
 #[test]
 fn todo_15_002() {
 	source_contract();
+}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -967,6 +1094,48 @@ fn todo_15_003() {
 }
 ```
 
+`src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+	fn compile_on(
+		kernel: &Kernel,
+		device: Device,
+		queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+	) -> Result<Self, String> {
+		autoreleasepool(|_| {
+			let start = Instant::now();
+			let options = MTLCompileOptions::new();
+			#[allow(deprecated)]
+			options.setFastMathEnabled(false);
+			let library = device
+				.newLibraryWithSource_options_error(
+					&NSString::from_str(&kernel.source),
+					Some(&options),
+				)
+				.map_err(|e| format!("Metal source build: {e}"))?;
+			let function = library
+				.newFunctionWithName(&NSString::from_str(&kernel.entry))
+				.ok_or("Metal entry missing")?;
+			let pipeline = device
+				.newComputePipelineStateWithFunction_error(&function)
+				.map_err(|e| format!("Metal pipeline build: {e}"))?;
+			Ok(Self {
+				device,
+				queue,
+				pipeline,
+				compile_time: start.elapsed(),
+				contract: (
+					kernel.source.clone(),
+					kernel.entry.clone(),
+					kernel.lengths.len(),
+					kernel.scalars.len().max(1),
+					kernel.local,
+				),
+			})
+		})
+	}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_003 -- --exact --ignored
 ```
@@ -986,6 +1155,160 @@ cargo test --test book_15 --features metal todo_15_003 -- --exact --ignored
 fn todo_15_004() {
 	hardware_contract();
 }
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
 ```
 
 ```sh check requires=metal
@@ -1028,6 +1351,19 @@ fn todo_15_006() {
 }
 ```
 
+`src/gpu.rs` の `pub fn groups(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu.rs" mode="replace" item="pub fn groups("
+pub fn groups(n: usize, local: usize) -> Result<usize, String> {
+	if local == 0 {
+		return Err("zero local size".into());
+	}
+	let groups = n / local + usize::from(!n.is_multiple_of(local));
+	groups.checked_mul(local).ok_or("launch overflow")?;
+	Ok(groups)
+}
+```
+
 ```sh check
 cargo test --test book_15 todo_15_006 -- --exact
 ```
@@ -1044,6 +1380,121 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_15_007() {
 	source_contract();
+}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -1066,6 +1517,160 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_15_008() {
 	hardware_contract();
 }
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
 ```
 
 ```sh check requires=metal
@@ -1108,6 +1713,90 @@ fn todo_15_010() {
 }
 ```
 
+`src/backends/metal.rs` の `pub unsafe fn run(kernel:`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
+pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+	kernel.validate(inputs)?;
+	if kernel.lengths[kernel.output] == 0 {
+		return Ok(Run {
+			output: vec![],
+			device: "Metal API not called (empty)".into(),
+			timings: Timings::default(),
+		});
+	}
+	let total = Instant::now();
+	let program = MetalProgram::compile(kernel)?;
+	let mut result = unsafe { program.run(kernel, inputs) }?;
+	result.timings.compile = program.compile_time();
+	result.timings.total = total.elapsed();
+	Ok(result)
+}
+```
+
+`src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+	fn from_lowered(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		lowered: Vec<(Kernel, Vec<usize>)>,
+		specialized: bool,
+	) -> Result<Self> {
+		let mut steps: Vec<Step> = vec![];
+		let mut sources = vec![];
+		for (kernel, slots) in lowered {
+			sources.push(kernel.source.clone());
+			let program = if kernel.lengths[kernel.output] == 0 {
+				Program::Unavailable
+			} else if let Some(seed) = steps
+				.iter()
+				.find(|step| !matches!(step.program, Program::Unavailable))
+			{
+				seed.program.compile_next(&kernel)?
+			} else {
+				match backend {
+					Backend::Metal => {
+						#[cfg(all(target_os = "macos", feature = "metal"))]
+						{
+							Program::Metal(crate::backends::metal::MetalProgram::compile(&kernel)?)
+						}
+						#[cfg(not(all(target_os = "macos", feature = "metal")))]
+						{
+							return Err("Metal feature/macOS required".into());
+						}
+					}
+					Backend::OpenCl => {
+						#[cfg(feature = "opencl")]
+						{
+							Program::OpenCl(crate::backends::opencl::OpenClProgram::compile(
+								&kernel, 0, 0,
+							)?)
+						}
+						#[cfg(not(feature = "opencl"))]
+						{
+							return Err("OpenCL feature required".into());
+						}
+					}
+				}
+			};
+			steps.push(Step {
+				kernel,
+				slots,
+				program,
+			});
+		}
+		Ok(Self {
+			graph: graph.clone(),
+			outputs: outputs.to_vec(),
+			sources,
+			specialized,
+			steps,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_15 todo_15_010 -- --exact
 ```
@@ -1129,6 +1818,245 @@ fn todo_15_011() {
 }
 ```
 
+`src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
+		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
+			return Err("optimized GPU plan shape mismatch".into());
+		}
+		if shapes.len() != self.graph.nodes.len() {
+			return Err("GPU shape table".into());
+		}
+		let mut graph = self.graph.clone();
+		for (node, shape) in graph.nodes.iter_mut().zip(shapes) {
+			if node.shape.len() != shape.len() {
+				return Err("GPU rank change".into());
+			}
+			elements(shape)?;
+			node.shape = shape.clone();
+		}
+		graph.verify(&self.outputs)?;
+		let mut logical_inputs = inputs.to_vec();
+		for (id, node) in graph.nodes.iter().enumerate() {
+			if let Op::Input { slot } = node.op {
+				let n = elements(graph.shape(id))?;
+				let input = inputs.get(slot).ok_or("missing GPU input")?;
+				if input.shape.len() != graph.shape(id).len() || input.data.len() < n {
+					return Err("GPU input rank/capacity".into());
+				}
+				logical_inputs[slot] =
+					Buffer::new(graph.shape(id).to_vec(), input.data[..n].to_vec())?;
+			}
+		}
+		graph.validate_inputs(&logical_inputs, &self.outputs)?;
+		graph.validate_indices(&logical_inputs, &self.outputs)?;
+		let mut values = graph
+			.nodes
+			.iter()
+			.map(|n| Buffer::zeros(n.shape.clone()))
+			.collect::<Result<Vec<_>>>()?;
+		for id in graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = graph.nodes[id].op {
+				values[id] = inputs[slot].clone();
+			}
+		}
+		for step in &self.steps {
+			let mut kernel = step.kernel.clone();
+			kernel.lengths = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						step.kernel.lengths[index]
+					} else {
+						values[id].data.len()
+					}
+				})
+				.collect();
+			if !self.specialized {
+				kernel.scalars = shapes.iter().flatten().map(|&n| n as u64).collect();
+			}
+			if !self.specialized {
+				kernel.groups = groups(kernel.lengths[kernel.output], kernel.local)?;
+			}
+			if kernel.lengths[kernel.output] == 0 {
+				continue;
+			}
+			let buffers = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						vec![1.; kernel.lengths[index]]
+					} else {
+						values[id].data.clone()
+					}
+				})
+				.collect::<Vec<_>>();
+			let run = step.program.run(&kernel, &buffers)?;
+			values[*step.slots.last().unwrap()].data = run.output;
+		}
+		Ok(self.outputs.iter().map(|&id| values[id].clone()).collect())
+	}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_011 -- --exact --ignored
 ```
@@ -1145,6 +2073,154 @@ cargo test --test book_15 --features metal todo_15_011 -- --exact --ignored
 #[test]
 fn todo_15_012() {
 	source_contract();
+}
+```
+
+`src/graph.rs` の `fn coord(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn coord("
+	fn coord(&self, id: usize, index: &str, axis: usize) -> String {
+		format!(
+			"((({index}) / {}) % {})",
+			self.product(id, axis + 1..self.g.shape(id).len()),
+			self.dim(id, axis)
+		)
+	}
+```
+
+`src/graph.rs` の `fn flatten(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn flatten("
+	fn flatten(&self, id: usize, c: &[String]) -> String {
+		if c.is_empty() {
+			return "0".into();
+		}
+		format!(
+			"({})",
+			c.iter()
+				.enumerate()
+				.map(|(a, c)| format!(
+					"({c}) * {}",
+					self.product(id, a + 1..self.g.shape(id).len())
+				))
+				.collect::<Vec<_>>()
+				.join(" + ")
+		)
+	}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -1169,6 +2245,157 @@ fn todo_15_013() {
 }
 ```
 
+`src/graph.rs` の `fn expr(` の `Op::Expand` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
+			Op::Expand { x } => {
+				let xi = self.broadcast_index(x, id, index);
+				return self.expr(x, &xi, code);
+			}
+```
+
+`src/graph.rs` の `fn expr(` の `Op::Permute` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Permute"
+			Op::Permute { x, axes } => {
+				let mut c = vec![String::new(); axes.len()];
+				for (a, &old) in axes.iter().enumerate() {
+					c[old] = self.coord(id, index, a)
+				}
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+```
+
+`src/graph.rs` の `fn expr(` の `Op::Shrink` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
+			Op::Shrink { x, ranges } => {
+				let c = ranges
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| format!("({}+{lo})", self.coord(id, index, a)))
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
+}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_013 -- --exact --ignored
 ```
@@ -1188,6 +2415,157 @@ fn todo_15_014() {
 }
 ```
 
+`src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+			Op::Pad { x, pads } => {
+				let c = (0..pads.len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				let checks = pads
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| {
+						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
+					})
+					.collect::<Vec<_>>();
+				let target = self.name();
+				code.push_str(&format!(
+					"float {target}=0.0f;\nif ({}) {{\n",
+					if checks.is_empty() {
+						"1".into()
+					} else {
+						checks.join(" && ")
+					}
+				));
+				let xi = self.flatten(
+					x,
+					&c.iter()
+						.zip(&pads)
+						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
+						.collect::<Vec<_>>(),
+				);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!("{target}={value};\n}}\n"));
+				return Ok(target);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
+}
+```
+
 ```sh check
 cargo test --test book_15 todo_15_014 -- --exact
 ```
@@ -1204,6 +2582,157 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_15_015() {
 	source_contract();
+}
+```
+
+`src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+			Op::Pad { x, pads } => {
+				let c = (0..pads.len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				let checks = pads
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| {
+						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
+					})
+					.collect::<Vec<_>>();
+				let target = self.name();
+				code.push_str(&format!(
+					"float {target}=0.0f;\nif ({}) {{\n",
+					if checks.is_empty() {
+						"1".into()
+					} else {
+						checks.join(" && ")
+					}
+				));
+				let xi = self.flatten(
+					x,
+					&c.iter()
+						.zip(&pads)
+						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
+						.collect::<Vec<_>>(),
+				);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!("{target}={value};\n}}\n"));
+				return Ok(target);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -1249,6 +2778,176 @@ fn todo_15_017() {
 }
 ```
 
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
+}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_017 -- --exact --ignored
 ```
@@ -1267,6 +2966,193 @@ cargo test --test book_15 --features metal todo_15_017 -- --exact --ignored
 #[ignore = "requires real device"]
 fn todo_15_018() {
 	hardware_contract();
+}
+```
+
+`src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
+		let sa = self.get(a)?.shape.clone();
+		let sb = self.get(b)?.shape.clone();
+		if sa.len() != 2 || sb.len() != 2 || sa[1] != sb[0] {
+			return Err("matmul requires [M,K] and [K,N]".into());
+		}
+		let aa = self.reshape(a, vec![sa[0], 1, sa[1]])?;
+		let bt = self.permute(b, vec![1, 0])?;
+		let bb = self.reshape(bt, vec![1, sb[1], sb[0]])?;
+		let products = self.binary(Binary::Mul, aa, bb)?;
+		self.reduce(products, Reduce::Sum, vec![2], false)
+	}
+```
+
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -1291,6 +3177,176 @@ fn todo_15_019() {
 }
 ```
 
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
+}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_019 -- --exact --ignored
 ```
@@ -1309,6 +3365,173 @@ cargo test --test book_15 --features metal todo_15_019 -- --exact --ignored
 #[ignore = "requires real device"]
 fn todo_15_020() {
 	hardware_contract();
+}
+```
+
+`src/graph.rs` の `pub fn reduce(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn reduce("
+	pub fn reduce(
+		&mut self,
+		x: NodeId,
+		op: Reduce,
+		axes: Vec<usize>,
+		keepdim: bool,
+	) -> Result<NodeId> {
+		let input = &self.get(x)?.shape;
+		axes_valid(&axes, input.len())?;
+		let shape = input
+			.iter()
+			.enumerate()
+			.filter_map(|(i, &d)| {
+				if axes.contains(&i) {
+					if keepdim { Some(1) } else { None }
+				} else {
+					Some(d)
+				}
+			})
+			.collect();
+		self.insert(
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			},
+			shape,
+		)
+	}
+```
+
+`src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
+		let sa = self.get(a)?.shape.clone();
+		let sb = self.get(b)?.shape.clone();
+		if sa.len() != 2 || sb.len() != 2 || sa[1] != sb[0] {
+			return Err("matmul requires [M,K] and [K,N]".into());
+		}
+		let aa = self.reshape(a, vec![sa[0], 1, sa[1]])?;
+		let bt = self.permute(b, vec![1, 0])?;
+		let bb = self.reshape(bt, vec![1, sb[1], sb[0]])?;
+		let products = self.binary(Binary::Mul, aa, bb)?;
+		self.reduce(products, Reduce::Sum, vec![2], false)
+	}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -1331,6 +3554,154 @@ cargo test --test book_15 --features metal todo_15_020 -- --exact --ignored
 fn todo_15_021() {
 	hardware_contract();
 }
+```
+
+`src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+	fn from_lowered(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		lowered: Vec<(Kernel, Vec<usize>)>,
+		specialized: bool,
+	) -> Result<Self> {
+		let mut steps: Vec<Step> = vec![];
+		let mut sources = vec![];
+		for (kernel, slots) in lowered {
+			sources.push(kernel.source.clone());
+			let program = if kernel.lengths[kernel.output] == 0 {
+				Program::Unavailable
+			} else if let Some(seed) = steps
+				.iter()
+				.find(|step| !matches!(step.program, Program::Unavailable))
+			{
+				seed.program.compile_next(&kernel)?
+			} else {
+				match backend {
+					Backend::Metal => {
+						#[cfg(all(target_os = "macos", feature = "metal"))]
+						{
+							Program::Metal(crate::backends::metal::MetalProgram::compile(&kernel)?)
+						}
+						#[cfg(not(all(target_os = "macos", feature = "metal")))]
+						{
+							return Err("Metal feature/macOS required".into());
+						}
+					}
+					Backend::OpenCl => {
+						#[cfg(feature = "opencl")]
+						{
+							Program::OpenCl(crate::backends::opencl::OpenClProgram::compile(
+								&kernel, 0, 0,
+							)?)
+						}
+						#[cfg(not(feature = "opencl"))]
+						{
+							return Err("OpenCL feature required".into());
+						}
+					}
+				}
+			};
+			steps.push(Step {
+				kernel,
+				slots,
+				program,
+			});
+		}
+		Ok(Self {
+			graph: graph.clone(),
+			outputs: outputs.to_vec(),
+			sources,
+			specialized,
+			steps,
+		})
+	}
+```
+
+`src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
+		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
+			return Err("optimized GPU plan shape mismatch".into());
+		}
+		if shapes.len() != self.graph.nodes.len() {
+			return Err("GPU shape table".into());
+		}
+		let mut graph = self.graph.clone();
+		for (node, shape) in graph.nodes.iter_mut().zip(shapes) {
+			if node.shape.len() != shape.len() {
+				return Err("GPU rank change".into());
+			}
+			elements(shape)?;
+			node.shape = shape.clone();
+		}
+		graph.verify(&self.outputs)?;
+		let mut logical_inputs = inputs.to_vec();
+		for (id, node) in graph.nodes.iter().enumerate() {
+			if let Op::Input { slot } = node.op {
+				let n = elements(graph.shape(id))?;
+				let input = inputs.get(slot).ok_or("missing GPU input")?;
+				if input.shape.len() != graph.shape(id).len() || input.data.len() < n {
+					return Err("GPU input rank/capacity".into());
+				}
+				logical_inputs[slot] =
+					Buffer::new(graph.shape(id).to_vec(), input.data[..n].to_vec())?;
+			}
+		}
+		graph.validate_inputs(&logical_inputs, &self.outputs)?;
+		graph.validate_indices(&logical_inputs, &self.outputs)?;
+		let mut values = graph
+			.nodes
+			.iter()
+			.map(|n| Buffer::zeros(n.shape.clone()))
+			.collect::<Result<Vec<_>>>()?;
+		for id in graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = graph.nodes[id].op {
+				values[id] = inputs[slot].clone();
+			}
+		}
+		for step in &self.steps {
+			let mut kernel = step.kernel.clone();
+			kernel.lengths = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						step.kernel.lengths[index]
+					} else {
+						values[id].data.len()
+					}
+				})
+				.collect();
+			if !self.specialized {
+				kernel.scalars = shapes.iter().flatten().map(|&n| n as u64).collect();
+			}
+			if !self.specialized {
+				kernel.groups = groups(kernel.lengths[kernel.output], kernel.local)?;
+			}
+			if kernel.lengths[kernel.output] == 0 {
+				continue;
+			}
+			let buffers = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						vec![1.; kernel.lengths[index]]
+					} else {
+						values[id].data.clone()
+					}
+				})
+				.collect::<Vec<_>>();
+			let run = step.program.run(&kernel, &buffers)?;
+			values[*step.slots.last().unwrap()].data = run.output;
+		}
+		Ok(self.outputs.iter().map(|&id| values[id].clone()).collect())
+	}
 ```
 
 ```sh check requires=metal
@@ -1392,6 +3763,202 @@ fn todo_15_024() {
 }
 ```
 
+`src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+	fn compile_on(
+		kernel: &Kernel,
+		device: Device,
+		queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+	) -> Result<Self, String> {
+		autoreleasepool(|_| {
+			let start = Instant::now();
+			let options = MTLCompileOptions::new();
+			#[allow(deprecated)]
+			options.setFastMathEnabled(false);
+			let library = device
+				.newLibraryWithSource_options_error(
+					&NSString::from_str(&kernel.source),
+					Some(&options),
+				)
+				.map_err(|e| format!("Metal source build: {e}"))?;
+			let function = library
+				.newFunctionWithName(&NSString::from_str(&kernel.entry))
+				.ok_or("Metal entry missing")?;
+			let pipeline = device
+				.newComputePipelineStateWithFunction_error(&function)
+				.map_err(|e| format!("Metal pipeline build: {e}"))?;
+			Ok(Self {
+				device,
+				queue,
+				pipeline,
+				compile_time: start.elapsed(),
+				contract: (
+					kernel.source.clone(),
+					kernel.entry.clone(),
+					kernel.lengths.len(),
+					kernel.scalars.len().max(1),
+					kernel.local,
+				),
+			})
+		})
+	}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_024 -- --exact --ignored
 ```
@@ -1413,6 +3980,160 @@ fn todo_15_025() {
 }
 ```
 
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
 ```sh check requires=metal
 cargo test --test book_15 --features metal todo_15_025 -- --exact --ignored
 ```
@@ -1429,6 +4150,121 @@ cargo test --test book_15 --features metal todo_15_025 -- --exact --ignored
 #[test]
 fn todo_15_026() {
 	source_contract();
+}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 

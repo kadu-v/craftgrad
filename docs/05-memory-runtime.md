@@ -386,7 +386,7 @@ impl Kernel {
 		}
 		Ok(self.execute(&inputs)?.1)
 	}
-	pub fn render(&self) -> Result<String> {
+	pub fn lower(&self) -> Result<crate::native::KernelBody> {
 		self.verify()?;
 		fn emit(body: &[Stmt], out: &mut String) {
 			for s in body {
@@ -416,6 +416,10 @@ impl Kernel {
 			body,
 			dependencies: accesses.read.into_iter().collect(),
 		};
+		Ok(kernel)
+	}
+	pub fn render(&self) -> Result<String> {
+		let kernel = self.lower()?;
 		Ok(crate::native::render_entry(
 			crate::scalar::SCALAR_HELPERS,
 			&(0..self.storage.len()).collect::<Vec<_>>(),
@@ -649,6 +653,48 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `pub fn render(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn render("
+	pub fn render(&self) -> Result<String> {
+		let kernel = self.lower()?;
+		Ok(crate::native::render_entry(
+			crate::scalar::SCALAR_HELPERS,
+			&(0..self.storage.len()).collect::<Vec<_>>(),
+			&[kernel],
+		))
+	}
+```
+
+`src/kernel.rs` の `fn evaluate(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn evaluate("
+	fn evaluate(
+		&self,
+		expr: &Expr,
+		axes: &HashMap<usize, i32>,
+		memory: &[Vec<f32>],
+		initialized: &[Vec<bool>],
+		access: &mut Accesses,
+	) -> Result<f32> {
+		match expr {
+			Expr::Const(v) => Ok(*v),
+			Expr::Load(view, index) => {
+				let i = self.address(*view, index, axes)?;
+				if !initialized[view.storage][i] {
+					return Err("LOAD before initialization/AFTER".into());
+				}
+				access.read.insert(view.storage);
+				Ok(memory[view.storage][i])
+			}
+			Expr::Add(a, b) => Ok(self.evaluate(a, axes, memory, initialized, access)?
+				+ self.evaluate(b, axes, memory, initialized, access)?),
+			Expr::Mul(a, b) => Ok(self.evaluate(a, axes, memory, initialized, access)?
+				* self.evaluate(b, axes, memory, initialized, access)?),
+		}
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -657,6 +703,55 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-003 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn run("
+	pub fn run(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+		let mut slots = HashSet::new();
+		let mut storage = self
+			.kernel
+			.storage
+			.iter()
+			.map(|s| vec![0.; s.len])
+			.collect::<Vec<_>>();
+		let mut pointers = storage
+			.iter_mut()
+			.map(|b| b.as_mut_ptr().cast::<c_void>())
+			.collect::<Vec<_>>();
+		for (id, s) in self.kernel.storage.iter().enumerate() {
+			if let Some(slot) = s.input {
+				slots.insert(slot);
+				let input = inputs.get(slot).ok_or("missing kernel input")?;
+				if input.len() != s.len {
+					return Err("kernel input length mismatch".into());
+				}
+				pointers[id] = input.as_ptr().cast_mut().cast();
+			}
+		}
+		if slots.len() != inputs.len() {
+			return Err("extra kernel input".into());
+		}
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(pointers.as_ptr(), std::ptr::null()) };
+		if status != 0 {
+			return Err("memory kernel failed".into());
+		}
+		Ok(self
+			.kernel
+			.outputs
+			.iter()
+			.map(|v| {
+				if let Some(slot) = self.kernel.storage[v.storage].input {
+					inputs[slot][v.offset..v.offset + v.len].to_vec()
+				} else {
+					storage[v.storage][v.offset..v.offset + v.len].to_vec()
+				}
+			})
+			.collect())
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -667,6 +762,55 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
 
+`src/kernel.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn run("
+	pub fn run(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+		let mut slots = HashSet::new();
+		let mut storage = self
+			.kernel
+			.storage
+			.iter()
+			.map(|s| vec![0.; s.len])
+			.collect::<Vec<_>>();
+		let mut pointers = storage
+			.iter_mut()
+			.map(|b| b.as_mut_ptr().cast::<c_void>())
+			.collect::<Vec<_>>();
+		for (id, s) in self.kernel.storage.iter().enumerate() {
+			if let Some(slot) = s.input {
+				slots.insert(slot);
+				let input = inputs.get(slot).ok_or("missing kernel input")?;
+				if input.len() != s.len {
+					return Err("kernel input length mismatch".into());
+				}
+				pointers[id] = input.as_ptr().cast_mut().cast();
+			}
+		}
+		if slots.len() != inputs.len() {
+			return Err("extra kernel input".into());
+		}
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(pointers.as_ptr(), std::ptr::null()) };
+		if status != 0 {
+			return Err("memory kernel failed".into());
+		}
+		Ok(self
+			.kernel
+			.outputs
+			.iter()
+			.map(|v| {
+				if let Some(slot) = self.kernel.storage[v.storage].input {
+					inputs[slot][v.offset..v.offset + v.len].to_vec()
+				} else {
+					storage[v.storage][v.offset..v.offset + v.len].to_vec()
+				}
+			})
+			.collect())
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
@@ -675,6 +819,49 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 <!-- todo:05-005 -->
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
+
+`tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+fn fixed_accesses_and_vector_add() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(1)?;
+	k.body = vec![store(
+		out,
+		I::Const(0),
+		E::Load(x, I::Const(2)).add(E::Const(1.)),
+	)];
+	k.outputs = vec![out];
+	assert_eq!(k.compile()?.run(&[vec![10., 20., 30.]])?, vec![vec![31.]]);
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let y = k.input(1, 3)?;
+	let out = k.alloc(3)?;
+	let other = k.alloc(3)?;
+	assert_ne!(out.storage, other.storage);
+	k.body = (0..3)
+		.map(|i| {
+			store(
+				out,
+				I::Const(i),
+				E::Load(x, I::Const(i)).add(E::Load(y, I::Const(i))),
+			)
+		})
+		.collect();
+	k.outputs = vec![out];
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3.], vec![10., 20., 30.]])?,
+		vec![vec![11., 22., 33.]]
+	);
+	assert!(
+		k.compile()?
+			.run(&[vec![1., 2.], vec![10., 20., 30.]])
+			.is_err()
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
@@ -685,6 +872,55 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn walk("
+	fn walk(
+		&self,
+		body: &[Stmt],
+		axes: &mut HashMap<usize, i32>,
+		memory: &mut [Vec<f32>],
+		initialized: &mut [Vec<bool>],
+		access: &mut Accesses,
+		budget: &mut usize,
+	) -> Result<()> {
+		for statement in body {
+			*budget = budget
+				.checked_sub(1)
+				.ok_or("verification work exceeds finite proof budget")?;
+			match statement {
+				Stmt::Store { view, index, value } => {
+					if self
+						.storage
+						.get(view.storage)
+						.ok_or("STORE unknown storage")?
+						.input
+						.is_some()
+					{
+						return Err("STORE to readonly input".into());
+					}
+					let address = self.address(*view, index, axes)?;
+					let value = self.evaluate(value, axes, memory, initialized, access)?;
+					memory[view.storage][address] = value;
+					initialized[view.storage][address] = true;
+					access.write.insert(view.storage);
+				}
+				Stmt::Range { axis, len, body } => {
+					if axes.contains_key(axis) || *len > i32::MAX as usize {
+						return Err("duplicate RANGE or i32 overflow".into());
+					}
+					for i in 0..*len {
+						axes.insert(*axis, i as i32);
+						self.walk(body, axes, memory, initialized, access, budget)?;
+					}
+					axes.remove(axis);
+				}
+			}
+		}
+		Ok(())
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -693,6 +929,55 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-007 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn walk("
+	fn walk(
+		&self,
+		body: &[Stmt],
+		axes: &mut HashMap<usize, i32>,
+		memory: &mut [Vec<f32>],
+		initialized: &mut [Vec<bool>],
+		access: &mut Accesses,
+		budget: &mut usize,
+	) -> Result<()> {
+		for statement in body {
+			*budget = budget
+				.checked_sub(1)
+				.ok_or("verification work exceeds finite proof budget")?;
+			match statement {
+				Stmt::Store { view, index, value } => {
+					if self
+						.storage
+						.get(view.storage)
+						.ok_or("STORE unknown storage")?
+						.input
+						.is_some()
+					{
+						return Err("STORE to readonly input".into());
+					}
+					let address = self.address(*view, index, axes)?;
+					let value = self.evaluate(value, axes, memory, initialized, access)?;
+					memory[view.storage][address] = value;
+					initialized[view.storage][address] = true;
+					access.write.insert(view.storage);
+				}
+				Stmt::Range { axis, len, body } => {
+					if axes.contains_key(axis) || *len > i32::MAX as usize {
+						return Err("duplicate RANGE or i32 overflow".into());
+					}
+					for i in 0..*len {
+						axes.insert(*axis, i as i32);
+						self.walk(body, axes, memory, initialized, access, budget)?;
+					}
+					axes.remove(axis);
+				}
+			}
+		}
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -703,6 +988,37 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+fn memory_state_and_views() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(3)?;
+	let state = k.alloc(1)?;
+	k.body = vec![
+		store(state, I::Const(0), E::Const(1.)),
+		store(out, I::Const(0), E::Load(state, I::Const(0))),
+		store(state, I::Const(0), E::Const(2.)),
+		store(out, I::Const(1), E::Load(state, I::Const(0))),
+		store(out, I::Const(2), E::Load(x.shrink(1, 3)?, I::Const(0))),
+	];
+	k.outputs = vec![out];
+	assert_eq!(x.storage, x.shrink(1, 3)?.storage);
+	assert_eq!(
+		k.compile()?.run(&[vec![10., 20., 30.]])?,
+		vec![vec![1., 2., 20.]]
+	);
+	let access = k.verify()?;
+	assert!(access.read.contains(&x.storage));
+	assert!(access.write.contains(&out.storage));
+	let bad = store(out, I::Const(0), E::Load(k.alloc(1)?, I::Const(0)));
+	k.body.insert(0, bad);
+	assert!(k.compile().is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -711,6 +1027,55 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-009 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn walk("
+	fn walk(
+		&self,
+		body: &[Stmt],
+		axes: &mut HashMap<usize, i32>,
+		memory: &mut [Vec<f32>],
+		initialized: &mut [Vec<bool>],
+		access: &mut Accesses,
+		budget: &mut usize,
+	) -> Result<()> {
+		for statement in body {
+			*budget = budget
+				.checked_sub(1)
+				.ok_or("verification work exceeds finite proof budget")?;
+			match statement {
+				Stmt::Store { view, index, value } => {
+					if self
+						.storage
+						.get(view.storage)
+						.ok_or("STORE unknown storage")?
+						.input
+						.is_some()
+					{
+						return Err("STORE to readonly input".into());
+					}
+					let address = self.address(*view, index, axes)?;
+					let value = self.evaluate(value, axes, memory, initialized, access)?;
+					memory[view.storage][address] = value;
+					initialized[view.storage][address] = true;
+					access.write.insert(view.storage);
+				}
+				Stmt::Range { axis, len, body } => {
+					if axes.contains_key(axis) || *len > i32::MAX as usize {
+						return Err("duplicate RANGE or i32 overflow".into());
+					}
+					for i in 0..*len {
+						axes.insert(*axis, i as i32);
+						self.walk(body, axes, memory, initialized, access, budget)?;
+					}
+					axes.remove(axis);
+				}
+			}
+		}
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -721,6 +1086,78 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `pub fn inline_effect(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn inline_effect("
+	pub fn inline_effect(&mut self, callee: &Kernel, args: &[View]) -> Result<Vec<View>> {
+		callee.verify()?;
+		let mut mapping = vec![];
+		for storage in &callee.storage {
+			let view = if let Some(slot) = storage.input {
+				let view = *args.get(slot).ok_or("effect CALL missing argument")?;
+				if view.len != storage.len {
+					return Err("effect CALL length mismatch".into());
+				}
+				view
+			} else {
+				self.allocate(storage.len, None, storage.register)?
+			};
+			mapping.push(view);
+		}
+		fn max_axis(body: &[Stmt]) -> usize {
+			body.iter()
+				.map(|s| match s {
+					Stmt::Range { axis, body, .. } => (*axis + 1).max(max_axis(body)),
+					_ => 0,
+				})
+				.max()
+				.unwrap_or(0)
+		}
+		let axis_offset = max_axis(&self.body);
+		fn index(x: &Index, offset: usize) -> Index {
+			match x {
+				Index::Const(v) => Index::Const(*v),
+				Index::Axis(a) => Index::Axis(a + offset),
+				Index::Add(a, b) => index(a, offset).add(index(b, offset)),
+				Index::Mul(a, b) => index(a, offset).mul(index(b, offset)),
+			}
+		}
+		fn view(v: View, map: &[View]) -> Result<View> {
+			map[v.storage].shrink(
+				v.offset,
+				v.offset.checked_add(v.len).ok_or("effect view overflow")?,
+			)
+		}
+		fn expr(x: &Expr, map: &[View], offset: usize) -> Result<Expr> {
+			Ok(match x {
+				Expr::Const(v) => Expr::Const(*v),
+				Expr::Load(v, i) => Expr::Load(view(*v, map)?, index(i, offset)),
+				Expr::Add(a, b) => expr(a, map, offset)?.add(expr(b, map, offset)?),
+				Expr::Mul(a, b) => expr(a, map, offset)?.mul(expr(b, map, offset)?),
+			})
+		}
+		fn statements(body: &[Stmt], map: &[View], offset: usize) -> Result<Vec<Stmt>> {
+			body.iter()
+				.map(|s| {
+					Ok(match s {
+						Stmt::Store {
+							view: v,
+							index: i,
+							value,
+						} => store(view(*v, map)?, index(i, offset), expr(value, map, offset)?),
+						Stmt::Range { axis, len, body } => {
+							range(axis + offset, *len, statements(body, map, offset)?)
+						}
+					})
+				})
+				.collect()
+		}
+		self.body
+			.extend(statements(&callee.body, &mapping, axis_offset)?);
+		callee.outputs.iter().map(|&v| view(v, &mapping)).collect()
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -729,6 +1166,24 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-011 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `pub fn shrink(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn shrink("
+	pub fn shrink(self, start: usize, end: usize) -> Result<Self> {
+		if start > end || end > self.len {
+			return Err("invalid memory SHRINK".into());
+		}
+		Ok(Self {
+			storage: self.storage,
+			offset: self
+				.offset
+				.checked_add(start)
+				.ok_or("view offset overflow")?,
+			len: end - start,
+		})
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -739,6 +1194,27 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn address("
+	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
+		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
+		if view
+			.offset
+			.checked_add(view.len)
+			.filter(|&n| n <= storage.len)
+			.is_none()
+		{
+			return Err("view exceeds storage".into());
+		}
+		let i = usize::try_from(index.value(axes)?).map_err(|_| "negative INDEX")?;
+		if i >= view.len {
+			return Err("INDEX exceeds view".into());
+		}
+		view.offset.checked_add(i).ok_or("address overflow".into())
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -747,6 +1223,30 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-013 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<Accesses> {
+		let count = self
+			.storage
+			.iter()
+			.filter_map(|s| s.input)
+			.max()
+			.map(|n| n + 1)
+			.unwrap_or(0);
+		let mut inputs = vec![vec![]; count];
+		for s in &self.storage {
+			if let Some(slot) = s.input {
+				if !inputs[slot].is_empty() && inputs[slot].len() != s.len {
+					return Err("input alias lengths differ".into());
+				}
+				inputs[slot] = vec![0.; s.len]
+			}
+		}
+		Ok(self.execute(&inputs)?.1)
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -757,6 +1257,49 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
 
+`tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+fn fixed_accesses_and_vector_add() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(1)?;
+	k.body = vec![store(
+		out,
+		I::Const(0),
+		E::Load(x, I::Const(2)).add(E::Const(1.)),
+	)];
+	k.outputs = vec![out];
+	assert_eq!(k.compile()?.run(&[vec![10., 20., 30.]])?, vec![vec![31.]]);
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let y = k.input(1, 3)?;
+	let out = k.alloc(3)?;
+	let other = k.alloc(3)?;
+	assert_ne!(out.storage, other.storage);
+	k.body = (0..3)
+		.map(|i| {
+			store(
+				out,
+				I::Const(i),
+				E::Load(x, I::Const(i)).add(E::Load(y, I::Const(i))),
+			)
+		})
+		.collect();
+	k.outputs = vec![out];
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3.], vec![10., 20., 30.]])?,
+		vec![vec![11., 22., 33.]]
+	);
+	assert!(
+		k.compile()?
+			.run(&[vec![1., 2.], vec![10., 20., 30.]])
+			.is_err()
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
@@ -765,6 +1308,49 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 <!-- todo:05-015 -->
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
+
+`tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+fn fixed_accesses_and_vector_add() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(1)?;
+	k.body = vec![store(
+		out,
+		I::Const(0),
+		E::Load(x, I::Const(2)).add(E::Const(1.)),
+	)];
+	k.outputs = vec![out];
+	assert_eq!(k.compile()?.run(&[vec![10., 20., 30.]])?, vec![vec![31.]]);
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let y = k.input(1, 3)?;
+	let out = k.alloc(3)?;
+	let other = k.alloc(3)?;
+	assert_ne!(out.storage, other.storage);
+	k.body = (0..3)
+		.map(|i| {
+			store(
+				out,
+				I::Const(i),
+				E::Load(x, I::Const(i)).add(E::Load(y, I::Const(i))),
+			)
+		})
+		.collect();
+	k.outputs = vec![out];
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3.], vec![10., 20., 30.]])?,
+		vec![vec![11., 22., 33.]]
+	);
+	assert!(
+		k.compile()?
+			.run(&[vec![1., 2.], vec![10., 20., 30.]])
+			.is_err()
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
@@ -775,6 +1361,30 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
 
+`src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<Accesses> {
+		let count = self
+			.storage
+			.iter()
+			.filter_map(|s| s.input)
+			.max()
+			.map(|n| n + 1)
+			.unwrap_or(0);
+		let mut inputs = vec![vec![]; count];
+		for s in &self.storage {
+			if let Some(slot) = s.input {
+				if !inputs[slot].is_empty() && inputs[slot].len() != s.len {
+					return Err("input alias lengths differ".into());
+				}
+				inputs[slot] = vec![0.; s.len]
+			}
+		}
+		Ok(self.execute(&inputs)?.1)
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
@@ -783,6 +1393,24 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 <!-- todo:05-017 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `pub fn shrink(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn shrink("
+	pub fn shrink(self, start: usize, end: usize) -> Result<Self> {
+		if start > end || end > self.len {
+			return Err("invalid memory SHRINK".into());
+		}
+		Ok(Self {
+			storage: self.storage,
+			offset: self
+				.offset
+				.checked_add(start)
+				.ok_or("view offset overflow")?,
+			len: end - start,
+		})
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -793,6 +1421,27 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn address("
+	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
+		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
+		if view
+			.offset
+			.checked_add(view.len)
+			.filter(|&n| n <= storage.len)
+			.is_none()
+		{
+			return Err("view exceeds storage".into());
+		}
+		let i = usize::try_from(index.value(axes)?).map_err(|_| "negative INDEX")?;
+		if i >= view.len {
+			return Err("INDEX exceeds view".into());
+		}
+		view.offset.checked_add(i).ok_or("address overflow".into())
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -801,6 +1450,30 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-019 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<Accesses> {
+		let count = self
+			.storage
+			.iter()
+			.filter_map(|s| s.input)
+			.max()
+			.map(|n| n + 1)
+			.unwrap_or(0);
+		let mut inputs = vec![vec![]; count];
+		for s in &self.storage {
+			if let Some(slot) = s.input {
+				if !inputs[slot].is_empty() && inputs[slot].len() != s.len {
+					return Err("input alias lengths differ".into());
+				}
+				inputs[slot] = vec![0.; s.len]
+			}
+		}
+		Ok(self.execute(&inputs)?.1)
+	}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -811,6 +1484,32 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`src/kernel.rs` の `fn allocate(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn allocate("
+	fn allocate(&mut self, len: usize, input: Option<usize>, register: bool) -> Result<View> {
+		if len > i32::MAX as usize
+			|| len
+				.checked_mul(4)
+				.filter(|&n| n <= isize::MAX as usize)
+				.is_none()
+		{
+			return Err("storage size overflow".into());
+		}
+		let storage = self.storage.len();
+		self.storage.push(Storage {
+			len,
+			input,
+			register,
+		});
+		Ok(View {
+			storage,
+			offset: 0,
+			len,
+		})
+	}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -819,6 +1518,49 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-021 -->
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
+
+`tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+fn fixed_accesses_and_vector_add() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(1)?;
+	k.body = vec![store(
+		out,
+		I::Const(0),
+		E::Load(x, I::Const(2)).add(E::Const(1.)),
+	)];
+	k.outputs = vec![out];
+	assert_eq!(k.compile()?.run(&[vec![10., 20., 30.]])?, vec![vec![31.]]);
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let y = k.input(1, 3)?;
+	let out = k.alloc(3)?;
+	let other = k.alloc(3)?;
+	assert_ne!(out.storage, other.storage);
+	k.body = (0..3)
+		.map(|i| {
+			store(
+				out,
+				I::Const(i),
+				E::Load(x, I::Const(i)).add(E::Load(y, I::Const(i))),
+			)
+		})
+		.collect();
+	k.outputs = vec![out];
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3.], vec![10., 20., 30.]])?,
+		vec![vec![11., 22., 33.]]
+	);
+	assert!(
+		k.compile()?
+			.run(&[vec![1., 2.], vec![10., 20., 30.]])
+			.is_err()
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
@@ -829,6 +1571,49 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
 
+`tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+fn fixed_accesses_and_vector_add() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(1)?;
+	k.body = vec![store(
+		out,
+		I::Const(0),
+		E::Load(x, I::Const(2)).add(E::Const(1.)),
+	)];
+	k.outputs = vec![out];
+	assert_eq!(k.compile()?.run(&[vec![10., 20., 30.]])?, vec![vec![31.]]);
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let y = k.input(1, 3)?;
+	let out = k.alloc(3)?;
+	let other = k.alloc(3)?;
+	assert_ne!(out.storage, other.storage);
+	k.body = (0..3)
+		.map(|i| {
+			store(
+				out,
+				I::Const(i),
+				E::Load(x, I::Const(i)).add(E::Load(y, I::Const(i))),
+			)
+		})
+		.collect();
+	k.outputs = vec![out];
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3.], vec![10., 20., 30.]])?,
+		vec![vec![11., 22., 33.]]
+	);
+	assert!(
+		k.compile()?
+			.run(&[vec![1., 2.], vec![10., 20., 30.]])
+			.is_err()
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
@@ -837,6 +1622,37 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 <!-- todo:05-023 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+fn memory_state_and_views() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(3)?;
+	let state = k.alloc(1)?;
+	k.body = vec![
+		store(state, I::Const(0), E::Const(1.)),
+		store(out, I::Const(0), E::Load(state, I::Const(0))),
+		store(state, I::Const(0), E::Const(2.)),
+		store(out, I::Const(1), E::Load(state, I::Const(0))),
+		store(out, I::Const(2), E::Load(x.shrink(1, 3)?, I::Const(0))),
+	];
+	k.outputs = vec![out];
+	assert_eq!(x.storage, x.shrink(1, 3)?.storage);
+	assert_eq!(
+		k.compile()?.run(&[vec![10., 20., 30.]])?,
+		vec![vec![1., 2., 20.]]
+	);
+	let access = k.verify()?;
+	assert!(access.read.contains(&x.storage));
+	assert!(access.write.contains(&out.storage));
+	let bad = store(out, I::Const(0), E::Load(k.alloc(1)?, I::Const(0)));
+	k.body.insert(0, bad);
+	assert!(k.compile().is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime
@@ -847,6 +1663,37 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+fn memory_state_and_views() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(3)?;
+	let state = k.alloc(1)?;
+	k.body = vec![
+		store(state, I::Const(0), E::Const(1.)),
+		store(out, I::Const(0), E::Load(state, I::Const(0))),
+		store(state, I::Const(0), E::Const(2.)),
+		store(out, I::Const(1), E::Load(state, I::Const(0))),
+		store(out, I::Const(2), E::Load(x.shrink(1, 3)?, I::Const(0))),
+	];
+	k.outputs = vec![out];
+	assert_eq!(x.storage, x.shrink(1, 3)?.storage);
+	assert_eq!(
+		k.compile()?.run(&[vec![10., 20., 30.]])?,
+		vec![vec![1., 2., 20.]]
+	);
+	let access = k.verify()?;
+	assert!(access.read.contains(&x.storage));
+	assert!(access.write.contains(&out.storage));
+	let bad = store(out, I::Const(0), E::Load(k.alloc(1)?, I::Const(0)));
+	k.body.insert(0, bad);
+	assert!(k.compile().is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -856,6 +1703,37 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+fn memory_state_and_views() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(3)?;
+	let state = k.alloc(1)?;
+	k.body = vec![
+		store(state, I::Const(0), E::Const(1.)),
+		store(out, I::Const(0), E::Load(state, I::Const(0))),
+		store(state, I::Const(0), E::Const(2.)),
+		store(out, I::Const(1), E::Load(state, I::Const(0))),
+		store(out, I::Const(2), E::Load(x.shrink(1, 3)?, I::Const(0))),
+	];
+	k.outputs = vec![out];
+	assert_eq!(x.storage, x.shrink(1, 3)?.storage);
+	assert_eq!(
+		k.compile()?.run(&[vec![10., 20., 30.]])?,
+		vec![vec![1., 2., 20.]]
+	);
+	let access = k.verify()?;
+	assert!(access.read.contains(&x.storage));
+	assert!(access.write.contains(&out.storage));
+	let bad = store(out, I::Const(0), E::Load(k.alloc(1)?, I::Const(0)));
+	k.body.insert(0, bad);
+	assert!(k.compile().is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test memory_runtime
 ```
@@ -864,6 +1742,37 @@ cargo test --quiet --test memory_runtime
 <!-- todo:05-026 -->
 
 `tests/memory_runtime.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
+
+```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+fn memory_state_and_views() -> Result<()> {
+	let mut k = Kernel::default();
+	let x = k.input(0, 3)?;
+	let out = k.alloc(3)?;
+	let state = k.alloc(1)?;
+	k.body = vec![
+		store(state, I::Const(0), E::Const(1.)),
+		store(out, I::Const(0), E::Load(state, I::Const(0))),
+		store(state, I::Const(0), E::Const(2.)),
+		store(out, I::Const(1), E::Load(state, I::Const(0))),
+		store(out, I::Const(2), E::Load(x.shrink(1, 3)?, I::Const(0))),
+	];
+	k.outputs = vec![out];
+	assert_eq!(x.storage, x.shrink(1, 3)?.storage);
+	assert_eq!(
+		k.compile()?.run(&[vec![10., 20., 30.]])?,
+		vec![vec![1., 2., 20.]]
+	);
+	let access = k.verify()?;
+	assert!(access.read.contains(&x.storage));
+	assert!(access.write.contains(&out.storage));
+	let bad = store(out, I::Const(0), E::Load(k.alloc(1)?, I::Const(0)));
+	k.body.insert(0, bad);
+	assert!(k.compile().is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test memory_runtime

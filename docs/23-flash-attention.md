@@ -999,7 +999,7 @@ use chinigrad::{
 	nn::qwen::{
 		QwenConfig, logits_all_with_attention, parameter_registry, register_graph, token_buffer,
 	},
-	training::initialize,
+	nn::qwen::initialize,
 };
 #[test]
 fn same_model_logits_and_cache() {
@@ -1338,6 +1338,67 @@ fn todo_23_001() {
 }
 ```
 
+`src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+pub fn reference(
+	s: AttentionShape,
+	q: &[f32],
+	k: &[f32],
+	v: &[f32],
+	valid: &[bool],
+) -> Result<Reference, String> {
+	s.validate(q, k, v, valid)?;
+	let mut result = Reference {
+		scores: vec![0.; s.queries * s.heads * s.keys],
+		masked_scores: vec![f64::NEG_INFINITY; s.queries * s.heads * s.keys],
+		probabilities: vec![0.; s.queries * s.heads * s.keys],
+		output: vec![0.; q.len()],
+	};
+	let scale = 1. / (s.dim as f64).sqrt();
+	for t in 0..s.queries {
+		for h in 0..s.heads {
+			let row = (t * s.heads + h) * s.keys;
+			let qbase = (t * s.heads + h) * s.dim;
+			let kh = h / (s.heads / s.kv_heads);
+			let mut max = f64::NEG_INFINITY;
+			for j in 0..s.keys {
+				if !s.allowed(t, j, valid) {
+					continue;
+				}
+				let base = (j * s.kv_heads + kh) * s.dim;
+				let score = (0..s.dim)
+					.map(|d| q[qbase + d] as f64 * k[base + d] as f64)
+					.sum::<f64>() * scale;
+				result.scores[row + j] = score;
+				result.masked_scores[row + j] = score;
+				max = max.max(score);
+			}
+			if max == f64::NEG_INFINITY {
+				continue;
+			}
+			let mut sum = 0.;
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					result.probabilities[row + j] = (result.masked_scores[row + j] - max).exp();
+					sum += result.probabilities[row + j];
+				}
+			}
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					let p = result.probabilities[row + j] / sum;
+					result.probabilities[row + j] = p;
+					for d in 0..s.dim {
+						result.output[qbase + d] += p * v[(j * s.kv_heads + kh) * s.dim + d] as f64;
+					}
+				}
+			}
+		}
+	}
+	Ok(result)
+}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_001 -- --exact
 ```
@@ -1354,6 +1415,98 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_23_002() {
 	suite0::online_boundary_masks_gqa();
+}
+```
+
+`src/flash.rs` の `pub fn validate(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn validate("
+	pub fn validate(&self, q: &[f32], k: &[f32], v: &[f32], valid: &[bool]) -> Result<(), String> {
+		if self.dim == 0
+			|| self.heads == 0
+			|| self.kv_heads == 0
+			|| !self.heads.is_multiple_of(self.kv_heads)
+		{
+			return Err("attention heads/dim".into());
+		}
+		let qn = self
+			.queries
+			.checked_mul(self.heads)
+			.and_then(|n| n.checked_mul(self.dim))
+			.ok_or("attention shape overflow")?;
+		let kn = self
+			.keys
+			.checked_mul(self.kv_heads)
+			.and_then(|n| n.checked_mul(self.dim))
+			.ok_or("attention shape overflow")?;
+		self.query_start
+			.checked_add(self.queries)
+			.ok_or("query position overflow")?;
+		if q.len() != qn || k.len() != kn || v.len() != kn || valid.len() != self.keys {
+			return Err("attention input shape".into());
+		}
+		Ok(())
+	}
+```
+
+`src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+pub fn reference(
+	s: AttentionShape,
+	q: &[f32],
+	k: &[f32],
+	v: &[f32],
+	valid: &[bool],
+) -> Result<Reference, String> {
+	s.validate(q, k, v, valid)?;
+	let mut result = Reference {
+		scores: vec![0.; s.queries * s.heads * s.keys],
+		masked_scores: vec![f64::NEG_INFINITY; s.queries * s.heads * s.keys],
+		probabilities: vec![0.; s.queries * s.heads * s.keys],
+		output: vec![0.; q.len()],
+	};
+	let scale = 1. / (s.dim as f64).sqrt();
+	for t in 0..s.queries {
+		for h in 0..s.heads {
+			let row = (t * s.heads + h) * s.keys;
+			let qbase = (t * s.heads + h) * s.dim;
+			let kh = h / (s.heads / s.kv_heads);
+			let mut max = f64::NEG_INFINITY;
+			for j in 0..s.keys {
+				if !s.allowed(t, j, valid) {
+					continue;
+				}
+				let base = (j * s.kv_heads + kh) * s.dim;
+				let score = (0..s.dim)
+					.map(|d| q[qbase + d] as f64 * k[base + d] as f64)
+					.sum::<f64>() * scale;
+				result.scores[row + j] = score;
+				result.masked_scores[row + j] = score;
+				max = max.max(score);
+			}
+			if max == f64::NEG_INFINITY {
+				continue;
+			}
+			let mut sum = 0.;
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					result.probabilities[row + j] = (result.masked_scores[row + j] - max).exp();
+					sum += result.probabilities[row + j];
+				}
+			}
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					let p = result.probabilities[row + j] / sum;
+					result.probabilities[row + j] = p;
+					for d in 0..s.dim {
+						result.output[qbase + d] += p * v[(j * s.kv_heads + kh) * s.dim + d] as f64;
+					}
+				}
+			}
+		}
+	}
+	Ok(result)
 }
 ```
 
@@ -1414,6 +1567,138 @@ fn todo_23_005() {
 }
 ```
 
+`src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+pub fn reference(
+	s: AttentionShape,
+	q: &[f32],
+	k: &[f32],
+	v: &[f32],
+	valid: &[bool],
+) -> Result<Reference, String> {
+	s.validate(q, k, v, valid)?;
+	let mut result = Reference {
+		scores: vec![0.; s.queries * s.heads * s.keys],
+		masked_scores: vec![f64::NEG_INFINITY; s.queries * s.heads * s.keys],
+		probabilities: vec![0.; s.queries * s.heads * s.keys],
+		output: vec![0.; q.len()],
+	};
+	let scale = 1. / (s.dim as f64).sqrt();
+	for t in 0..s.queries {
+		for h in 0..s.heads {
+			let row = (t * s.heads + h) * s.keys;
+			let qbase = (t * s.heads + h) * s.dim;
+			let kh = h / (s.heads / s.kv_heads);
+			let mut max = f64::NEG_INFINITY;
+			for j in 0..s.keys {
+				if !s.allowed(t, j, valid) {
+					continue;
+				}
+				let base = (j * s.kv_heads + kh) * s.dim;
+				let score = (0..s.dim)
+					.map(|d| q[qbase + d] as f64 * k[base + d] as f64)
+					.sum::<f64>() * scale;
+				result.scores[row + j] = score;
+				result.masked_scores[row + j] = score;
+				max = max.max(score);
+			}
+			if max == f64::NEG_INFINITY {
+				continue;
+			}
+			let mut sum = 0.;
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					result.probabilities[row + j] = (result.masked_scores[row + j] - max).exp();
+					sum += result.probabilities[row + j];
+				}
+			}
+			for j in 0..s.keys {
+				if s.allowed(t, j, valid) {
+					let p = result.probabilities[row + j] / sum;
+					result.probabilities[row + j] = p;
+					for d in 0..s.dim {
+						result.output[qbase + d] += p * v[(j * s.kv_heads + kh) * s.dim + d] as f64;
+					}
+				}
+			}
+		}
+	}
+	Ok(result)
+}
+```
+
+`src/flash.rs` の `pub fn graph_reference(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn graph_reference("
+pub fn graph_reference(
+	g: &mut crate::Graph,
+	q: usize,
+	k: usize,
+	v: usize,
+	s: AttentionShape,
+	valid: &[bool],
+) -> crate::Result<usize> {
+	use crate::{Binary, Reduce, Unary};
+	if g.shape(q) != [s.queries, s.heads, s.dim]
+		|| g.shape(k) != [s.keys, s.kv_heads, s.dim]
+		|| g.shape(v) != g.shape(k)
+		|| valid.len() != s.keys
+	{
+		return Err("ordinary attention graph shape".into());
+	}
+	let mut times = vec![];
+	for t in 0..s.queries {
+		let mut heads = vec![];
+		for h in 0..s.heads {
+			let allowed = (0..s.keys)
+				.map(|j| s.allowed(t, j, valid))
+				.collect::<Vec<_>>();
+			if !allowed.iter().any(|&v| v) {
+				heads.push(g.constant(0., vec![s.dim])?);
+				continue;
+			}
+			let kh = h / (s.heads / s.kv_heads);
+			let qq = g.shrink(q, vec![(t, t + 1), (h, h + 1), (0, s.dim)])?;
+			let qq = g.reshape(qq, vec![1, s.dim])?;
+			let kk = g.shrink(k, vec![(0, s.keys), (kh, kh + 1), (0, s.dim)])?;
+			let kk = g.reshape(kk, vec![s.keys, s.dim])?;
+			let vv = g.shrink(v, vec![(0, s.keys), (kh, kh + 1), (0, s.dim)])?;
+			let vv = g.reshape(vv, vec![s.keys, s.dim])?;
+			let mut mask = vec![];
+			for &ok in &allowed {
+				mask.push(g.constant(if ok { 1. } else { 0. }, vec![])?);
+			}
+			let mask = g.stack(mask, 0)?;
+			let mask = g.reshape(mask, vec![s.keys, 1])?;
+			let zero = g.constant(0., vec![])?;
+			let kk = g.where_(mask, kk, zero)?;
+			let vv = g.where_(mask, vv, zero)?;
+			let kt = g.permute(kk, vec![1, 0])?;
+			let score = g.matmul(qq, kt)?;
+			let scale = g.constant(1. / (s.dim as f32).sqrt(), vec![])?;
+			let score = g.binary(Binary::Mul, score, scale)?;
+			let mask = g.reshape(mask, vec![1, s.keys])?;
+			let neg = g.constant(f32::NEG_INFINITY, vec![])?;
+			let score = g.where_(mask, score, neg)?;
+			let max = g.reduce(score, Reduce::Max, vec![1], true)?;
+			let max = g.stop_gradient(max)?;
+			let shifted = g.binary(Binary::Sub, score, max)?;
+			let exp = g.unary(Unary::Exp, shifted)?;
+			let sum = g.reduce(exp, Reduce::Sum, vec![1], true)?;
+			let probs = g.binary(Binary::Div, exp, sum)?;
+			let out = g.matmul(probs, vv)?;
+			heads.push(g.reshape(out, vec![s.dim])?);
+		}
+		times.push(g.stack(heads, 0)?);
+	}
+	if s.queries == 0 {
+		return g.constant(0., vec![0, s.heads, s.dim]);
+	}
+	g.stack(times, 0)
+}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_005 -- --exact
 ```
@@ -1431,6 +1716,43 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_23_006() {
 	suite0::online_boundary_masks_gqa();
 }
+```
+
+`src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
+		if tile == 0
+			|| s.dim == 0
+			|| s.heads == 0
+			|| s.kv_heads == 0
+			|| !s.heads.is_multiple_of(s.kv_heads)
+		{
+			return Err("flash shape/tile".into());
+		}
+		let causal = if s.causal {
+			format!("j<={}+t", s.query_start)
+		} else {
+			"1".into()
+		};
+		let source = format!(
+			"{}int chibi_entry(void*const*buffers,const uint64_t*s){{const float*q=buffers[0],*k=buffers[1],*v=buffers[2],*valid=buffers[3];float*out=buffers[4];for(size_t t=0;t<{queries};t++){{for(size_t h=0;h<{heads};h++){{size_t qb=(t*{heads}+h)*{dim},kh=h/{ratio};float m=-INFINITY,l=0.0f,u[{dim}]={{0}};for(size_t start=0;start<{keys};start+={tile}){{size_t end={keys}-start<{tile}?{keys}:start+{tile};float tm=-INFINITY,scores[{tile}];for(size_t j=start;j<end;j++){{scores[j-start]=-INFINITY;if(valid[j]!=0.0f&&({causal})){{float score=0.0f;for(size_t d=0;d<{dim};d++){{score+=q[qb+d]*k[(j*{kv}+kh)*{dim}+d];}}score/=sqrtf({dim}.0f);scores[j-start]=score;tm=fmaxf(tm,score);}}}}if(tm==-INFINITY)continue;float nm=fmaxf(m,tm),alpha=l==0.0f?0.0f:expf(m-nm);l*=alpha;for(size_t d=0;d<{dim};d++){{u[d]*=alpha;}}for(size_t j=start;j<end;j++){{if(valid[j]!=0.0f&&({causal})){{float p=expf(scores[j-start]-nm);l+=p;for(size_t d=0;d<{dim};d++){{u[d]+=p*v[(j*{kv}+kh)*{dim}+d];}}}}}}m=nm;}}for(size_t d=0;d<{dim};d++){{out[qb+d]=l>0.0f?u[d]/l:0.0f;}}}}}}return 0;}}",
+			crate::graph::C_HELPERS,
+			queries = s.queries,
+			heads = s.heads,
+			dim = s.dim,
+			ratio = s.heads / s.kv_heads,
+			keys = s.keys,
+			kv = s.kv_heads
+		);
+		let library = unsafe { crate::runtime::NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			source,
+			shape: s,
+			tile,
+			library,
+		})
+	}
 ```
 
 ```sh check
@@ -1452,6 +1774,43 @@ fn todo_23_007() {
 }
 ```
 
+`src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
+		if tile == 0
+			|| s.dim == 0
+			|| s.heads == 0
+			|| s.kv_heads == 0
+			|| !s.heads.is_multiple_of(s.kv_heads)
+		{
+			return Err("flash shape/tile".into());
+		}
+		let causal = if s.causal {
+			format!("j<={}+t", s.query_start)
+		} else {
+			"1".into()
+		};
+		let source = format!(
+			"{}int chibi_entry(void*const*buffers,const uint64_t*s){{const float*q=buffers[0],*k=buffers[1],*v=buffers[2],*valid=buffers[3];float*out=buffers[4];for(size_t t=0;t<{queries};t++){{for(size_t h=0;h<{heads};h++){{size_t qb=(t*{heads}+h)*{dim},kh=h/{ratio};float m=-INFINITY,l=0.0f,u[{dim}]={{0}};for(size_t start=0;start<{keys};start+={tile}){{size_t end={keys}-start<{tile}?{keys}:start+{tile};float tm=-INFINITY,scores[{tile}];for(size_t j=start;j<end;j++){{scores[j-start]=-INFINITY;if(valid[j]!=0.0f&&({causal})){{float score=0.0f;for(size_t d=0;d<{dim};d++){{score+=q[qb+d]*k[(j*{kv}+kh)*{dim}+d];}}score/=sqrtf({dim}.0f);scores[j-start]=score;tm=fmaxf(tm,score);}}}}if(tm==-INFINITY)continue;float nm=fmaxf(m,tm),alpha=l==0.0f?0.0f:expf(m-nm);l*=alpha;for(size_t d=0;d<{dim};d++){{u[d]*=alpha;}}for(size_t j=start;j<end;j++){{if(valid[j]!=0.0f&&({causal})){{float p=expf(scores[j-start]-nm);l+=p;for(size_t d=0;d<{dim};d++){{u[d]+=p*v[(j*{kv}+kh)*{dim}+d];}}}}}}m=nm;}}for(size_t d=0;d<{dim};d++){{out[qb+d]=l>0.0f?u[d]/l:0.0f;}}}}}}return 0;}}",
+			crate::graph::C_HELPERS,
+			queries = s.queries,
+			heads = s.heads,
+			dim = s.dim,
+			ratio = s.heads / s.kv_heads,
+			keys = s.keys,
+			kv = s.kv_heads
+		);
+		let library = unsafe { crate::runtime::NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			source,
+			shape: s,
+			tile,
+			library,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_007 -- --exact
 ```
@@ -1471,6 +1830,43 @@ fn todo_23_008() {
 }
 ```
 
+`src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
+		if tile == 0
+			|| s.dim == 0
+			|| s.heads == 0
+			|| s.kv_heads == 0
+			|| !s.heads.is_multiple_of(s.kv_heads)
+		{
+			return Err("flash shape/tile".into());
+		}
+		let causal = if s.causal {
+			format!("j<={}+t", s.query_start)
+		} else {
+			"1".into()
+		};
+		let source = format!(
+			"{}int chibi_entry(void*const*buffers,const uint64_t*s){{const float*q=buffers[0],*k=buffers[1],*v=buffers[2],*valid=buffers[3];float*out=buffers[4];for(size_t t=0;t<{queries};t++){{for(size_t h=0;h<{heads};h++){{size_t qb=(t*{heads}+h)*{dim},kh=h/{ratio};float m=-INFINITY,l=0.0f,u[{dim}]={{0}};for(size_t start=0;start<{keys};start+={tile}){{size_t end={keys}-start<{tile}?{keys}:start+{tile};float tm=-INFINITY,scores[{tile}];for(size_t j=start;j<end;j++){{scores[j-start]=-INFINITY;if(valid[j]!=0.0f&&({causal})){{float score=0.0f;for(size_t d=0;d<{dim};d++){{score+=q[qb+d]*k[(j*{kv}+kh)*{dim}+d];}}score/=sqrtf({dim}.0f);scores[j-start]=score;tm=fmaxf(tm,score);}}}}if(tm==-INFINITY)continue;float nm=fmaxf(m,tm),alpha=l==0.0f?0.0f:expf(m-nm);l*=alpha;for(size_t d=0;d<{dim};d++){{u[d]*=alpha;}}for(size_t j=start;j<end;j++){{if(valid[j]!=0.0f&&({causal})){{float p=expf(scores[j-start]-nm);l+=p;for(size_t d=0;d<{dim};d++){{u[d]+=p*v[(j*{kv}+kh)*{dim}+d];}}}}}}m=nm;}}for(size_t d=0;d<{dim};d++){{out[qb+d]=l>0.0f?u[d]/l:0.0f;}}}}}}return 0;}}",
+			crate::graph::C_HELPERS,
+			queries = s.queries,
+			heads = s.heads,
+			dim = s.dim,
+			ratio = s.heads / s.kv_heads,
+			keys = s.keys,
+			kv = s.kv_heads
+		);
+		let library = unsafe { crate::runtime::NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			source,
+			shape: s,
+			tile,
+			library,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_008 -- --exact
 ```
@@ -1487,6 +1883,108 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_23_009() {
 	suite0::native_c_and_composite_graph();
+}
+```
+
+`src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
+		if tile == 0
+			|| s.dim == 0
+			|| s.heads == 0
+			|| s.kv_heads == 0
+			|| !s.heads.is_multiple_of(s.kv_heads)
+		{
+			return Err("flash shape/tile".into());
+		}
+		let causal = if s.causal {
+			format!("j<={}+t", s.query_start)
+		} else {
+			"1".into()
+		};
+		let source = format!(
+			"{}int chibi_entry(void*const*buffers,const uint64_t*s){{const float*q=buffers[0],*k=buffers[1],*v=buffers[2],*valid=buffers[3];float*out=buffers[4];for(size_t t=0;t<{queries};t++){{for(size_t h=0;h<{heads};h++){{size_t qb=(t*{heads}+h)*{dim},kh=h/{ratio};float m=-INFINITY,l=0.0f,u[{dim}]={{0}};for(size_t start=0;start<{keys};start+={tile}){{size_t end={keys}-start<{tile}?{keys}:start+{tile};float tm=-INFINITY,scores[{tile}];for(size_t j=start;j<end;j++){{scores[j-start]=-INFINITY;if(valid[j]!=0.0f&&({causal})){{float score=0.0f;for(size_t d=0;d<{dim};d++){{score+=q[qb+d]*k[(j*{kv}+kh)*{dim}+d];}}score/=sqrtf({dim}.0f);scores[j-start]=score;tm=fmaxf(tm,score);}}}}if(tm==-INFINITY)continue;float nm=fmaxf(m,tm),alpha=l==0.0f?0.0f:expf(m-nm);l*=alpha;for(size_t d=0;d<{dim};d++){{u[d]*=alpha;}}for(size_t j=start;j<end;j++){{if(valid[j]!=0.0f&&({causal})){{float p=expf(scores[j-start]-nm);l+=p;for(size_t d=0;d<{dim};d++){{u[d]+=p*v[(j*{kv}+kh)*{dim}+d];}}}}}}m=nm;}}for(size_t d=0;d<{dim};d++){{out[qb+d]=l>0.0f?u[d]/l:0.0f;}}}}}}return 0;}}",
+			crate::graph::C_HELPERS,
+			queries = s.queries,
+			heads = s.heads,
+			dim = s.dim,
+			ratio = s.heads / s.kv_heads,
+			keys = s.keys,
+			kv = s.kv_heads
+		);
+		let library = unsafe { crate::runtime::NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			source,
+			shape: s,
+			tile,
+			library,
+		})
+	}
+```
+
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
 }
 ```
 
@@ -1528,6 +2026,71 @@ fn todo_23_011() {
 }
 ```
 
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_011 -- --exact
 ```
@@ -1544,6 +2107,71 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_23_012() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
+}
+```
+
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
 }
 ```
 
@@ -1566,6 +2194,71 @@ fn todo_23_013() {
 }
 ```
 
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_013 -- --exact
 ```
@@ -1582,6 +2275,71 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_23_014() {
 	suite0::online_boundary_masks_gqa();
+}
+```
+
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
 }
 ```
 
@@ -1604,6 +2362,71 @@ fn todo_23_015() {
 }
 ```
 
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_015 -- --exact
 ```
@@ -1620,6 +2443,71 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_23_016() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
+}
+```
+
+`src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
+	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
+		return Err("attention heads/dim".into());
+	}
+	s.queries
+		.checked_mul(s.heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention query shape overflow")?;
+	s.keys
+		.checked_mul(s.kv_heads)
+		.and_then(|n| n.checked_mul(s.dim))
+		.ok_or("attention key shape overflow")?;
+	s.query_start
+		.checked_add(s.queries)
+		.ok_or("attention position overflow")?;
+	if tile == 0 {
+		return Err("attention tile=0".into());
+	}
+	let bytes = tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.ok_or("attention local overflow")?;
+	let space = match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	};
+	let barrier = match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	};
+	let allowed = if s.causal {
+		format!("j<={}+t", s.query_start)
+	} else {
+		"1".into()
+	};
+	let body = format!(
+		"{space} float kk[{tile}*{dim}],vv[{tile}*{dim}];size_t t=g/{heads},h=g%{heads},kh=h/{ratio},qb=g*{dim};float m=-INFINITY,den=0.0f,u[{dim}];for(size_t a=0;a<{dim};a++){{u[a]=0.0f;}}for(size_t start=0;start<{keys};start+={tile}){{for(size_t z=l;z<{tile}*{dim};z+=32){{size_t j=start+z/{dim},a=z%{dim};bool ok=j<{keys}&&({allowed})&&b3[j]!=0.0f;if(ok){{kk[z]=b1[(j*{kv}+kh)*{dim}+a];vv[z]=b2[(j*{kv}+kh)*{dim}+a];}}else{{kk[z]=0.0f;vv[z]=0.0f;}}}}{barrier}if(l==0){{for(size_t off=0;off<{tile};off++){{size_t j=start+off;if(j<{keys}&&({allowed})&&b3[j]!=0.0f){{float score=0.0f;for(size_t a=0;a<{dim};a++){{score+=b0[qb+a]*kk[off*{dim}+a];}}score*=1.0f/sqrt((float){dim});float nm=fmax(m,score);float alpha=den==0.0f?0.0f:exp(m-nm),p=exp(score-nm);den=den*alpha+p;for(size_t a=0;a<{dim};a++){{u[a]=u[a]*alpha+p*vv[off*{dim}+a];}}m=nm;}}}}}}{barrier}}}if(l==0){{for(size_t a=0;a<{dim};a++){{b4[qb+a]=den>0.0f?u[a]/den:0.0f;}}}}",
+		dim = s.dim,
+		heads = s.heads,
+		ratio = s.heads / s.kv_heads,
+		keys = s.keys,
+		kv = s.kv_heads
+	);
+	Ok(Kernel {
+		scalars: vec![],
+		source: header(d, 5, &body),
+		entry: "chibi".into(),
+		lengths: vec![
+			s.queries * s.heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys * s.kv_heads * s.dim,
+			s.keys,
+			s.queries * s.heads * s.dim,
+		],
+		output: 4,
+		groups: s.queries * s.heads,
+		local: 32,
+		shared_bytes: bytes,
+	})
 }
 ```
 
@@ -1642,6 +2530,140 @@ fn todo_23_017() {
 }
 ```
 
+`src/flash.rs` の `pub fn select(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn select("
+pub fn select(
+	s: AttentionShape,
+	requires_grad: bool,
+	local_limit: usize,
+	tile: usize,
+) -> AttentionPath {
+	if requires_grad {
+		return AttentionPath::Ordinary("training requires ordinary backward");
+	}
+	if tile == 0
+		|| s.dim == 0
+		|| s.heads == 0
+		|| s.kv_heads == 0
+		|| !s.heads.is_multiple_of(s.kv_heads)
+	{
+		return AttentionPath::Ordinary("unsupported shape");
+	}
+	if tile
+		.checked_mul(s.dim)
+		.and_then(|n| n.checked_mul(8))
+		.is_none_or(|n| n > local_limit)
+	{
+		return AttentionPath::Ordinary("local memory limit");
+	}
+	AttentionPath::Online
+}
+```
+
+`src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+	pub fn compile_flash(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		boundaries: &[crate::flash::Boundary],
+		requires_grad: bool,
+		local_bytes: usize,
+	) -> Result<Self> {
+		use std::collections::{HashMap, HashSet};
+		if requires_grad {
+			return Self::compile(graph, outputs, backend, 64);
+		}
+		let reachable = graph.topology(outputs)?.into_iter().collect::<HashSet<_>>();
+		let mut skipped = HashSet::new();
+		let mut replacements = HashMap::new();
+		for boundary in boundaries {
+			if [boundary.q, boundary.k, boundary.v, boundary.output]
+				.iter()
+				.any(|&id| id >= graph.nodes.len())
+			{
+				return Err("GPU attention boundary node".into());
+			}
+			if graph.shape(boundary.q)
+				!= [
+					boundary.shape.queries,
+					boundary.shape.heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.k)
+				!= [
+					boundary.shape.keys,
+					boundary.shape.kv_heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.v) != graph.shape(boundary.k)
+			{
+				return Err("GPU attention boundary shape".into());
+			}
+			if graph.shape(boundary.output) != graph.shape(boundary.q) {
+				return Err("GPU attention boundary output shape".into());
+			}
+			if !reachable.contains(&boundary.output) {
+				continue;
+			}
+			if crate::flash::select(boundary.shape, false, local_bytes, boundary.tile)
+				!= crate::flash::AttentionPath::Online
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if !matches!(graph.nodes[boundary.output].op, Op::Stage { .. }) {
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if ![boundary.q, boundary.k, boundary.v]
+				.iter()
+				.all(|&id| matches!(graph.nodes[id].op, Op::Stage { .. } | Op::Input { .. }))
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			let before = graph
+				.topology(&[boundary.q, boundary.k, boundary.v])?
+				.into_iter()
+				.collect::<HashSet<_>>();
+			let inside = graph
+				.topology(&[boundary.output])?
+				.into_iter()
+				.filter(|id| !before.contains(id))
+				.collect::<HashSet<_>>();
+			skipped.extend(crate::flash::boundary_skips(
+				graph,
+				outputs,
+				&reachable,
+				&inside,
+				boundary.output,
+			)?);
+			let kernel = crate::flash::shader(backend.dialect(), boundary.shape, boundary.tile)?;
+			replacements.insert(
+				boundary.output,
+				(
+					kernel,
+					vec![
+						boundary.q,
+						boundary.k,
+						boundary.v,
+						usize::MAX,
+						boundary.output,
+					],
+				),
+			);
+		}
+		let ordinary = lower(graph, outputs, backend.dialect(), 64)?;
+		let mut lowered = vec![];
+		for (kernel, slots) in ordinary {
+			let id = *slots.last().ok_or("attention output")?;
+			if skipped.contains(&id) {
+				continue;
+			}
+			lowered.push(replacements.remove(&id).unwrap_or((kernel, slots)));
+		}
+		Self::from_lowered(graph, outputs, backend, lowered, true)
+	}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_017 -- --exact
 ```
@@ -1661,6 +2683,237 @@ fn todo_23_018() {
 }
 ```
 
+`src/flash.rs` の `pub fn compile_boundaries(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
+pub fn compile_boundaries(
+	g: &crate::Graph,
+	outputs: &[usize],
+	boundaries: &[Boundary],
+	requires_grad: bool,
+) -> crate::Result<(crate::Plan, String)> {
+	use std::collections::HashSet;
+	if requires_grad || boundaries.is_empty() {
+		return Ok((
+			g.compile(outputs)?,
+			"ordinary attention (training/no boundaries)".into(),
+		));
+	}
+	let reachable = g.topology(outputs)?.into_iter().collect::<HashSet<_>>();
+	let mut skipped = HashSet::new();
+	let mut replacements = std::collections::HashMap::new();
+	for boundary in boundaries {
+		if !reachable.contains(&boundary.output) {
+			continue;
+		}
+		if [boundary.q, boundary.k, boundary.v, boundary.output]
+			.iter()
+			.any(|&id| id >= g.nodes.len())
+		{
+			return Err("attention boundary node".into());
+		}
+		if g.shape(boundary.q)
+			!= [
+				boundary.shape.queries,
+				boundary.shape.heads,
+				boundary.shape.dim,
+			] || g.shape(boundary.k)
+			!= [
+				boundary.shape.keys,
+				boundary.shape.kv_heads,
+				boundary.shape.dim,
+			] || g.shape(boundary.v) != g.shape(boundary.k)
+			|| g.shape(boundary.output) != g.shape(boundary.q)
+		{
+			return Err("attention boundary shape".into());
+		}
+		if !matches!(g.nodes[boundary.output].op, crate::Op::Stage { .. }) {
+			return Ok((
+				g.compile(outputs)?,
+				"ordinary attention (unstaged output)".into(),
+			));
+		}
+		if ![boundary.q, boundary.k, boundary.v].iter().all(|&id| {
+			matches!(
+				g.nodes[id].op,
+				crate::Op::Stage { .. } | crate::Op::Input { .. }
+			)
+		}) {
+			return Ok((
+				g.compile(outputs)?,
+				"ordinary attention (unstaged QKV)".into(),
+			));
+		}
+		let before = g
+			.topology(&[boundary.q, boundary.k, boundary.v])?
+			.into_iter()
+			.collect::<HashSet<_>>();
+		let inside = g
+			.topology(&[boundary.output])?
+			.into_iter()
+			.filter(|id| !before.contains(id))
+			.collect::<HashSet<_>>();
+		skipped.extend(boundary_skips(
+			g,
+			outputs,
+			&reachable,
+			&inside,
+			boundary.output,
+		)?);
+		let plan = FlashPlan::compile(boundary.shape, boundary.tile)?;
+		let begin = plan
+			.source
+			.find("int chibi_entry")
+			.ok_or("native attention entry")?;
+		let begin = begin + plan.source[begin..].find('{').unwrap() + 1;
+		let end = plan
+			.source
+			.rfind("return 0;")
+			.ok_or("native attention return")?;
+		let mut body = plan.source[begin..end]
+			.replace(",*valid=buffers[3]", "")
+			.replace("valid[j]!=0.0f", "1");
+		for (index, id) in [
+			(0, boundary.q),
+			(1, boundary.k),
+			(2, boundary.v),
+			(4, boundary.output),
+		] {
+			body = body.replace(&format!("buffers[{index}]"), &format!("binding_{id}_"));
+		}
+		for id in [boundary.q, boundary.k, boundary.v, boundary.output] {
+			body = body.replace(&format!("binding_{id}_"), &format!("buffers[{id}]"));
+		}
+		replacements.insert(boundary.output, format!("{{{body}}}\n"));
+	}
+	let kernels = crate::graph::kernel_bodies(g, outputs, true)?;
+	let mut source = crate::graph::C_HELPERS.to_string();
+	source += "int chibi_entry(void*const*buffers,const uint64_t*s){\n";
+	for id in g.topology(outputs)? {
+		source += &format!("float*b{id}=(float*)buffers[{id}];\n");
+	}
+	for kernel in kernels {
+		if skipped.contains(&kernel.output) {
+			continue;
+		}
+		source += replacements.get(&kernel.output).unwrap_or(&kernel.body);
+	}
+	source += "return 0;\n}\n";
+	let plan = crate::Plan::compile_source_specialized(g, outputs, source)?;
+	Ok((
+		plan,
+		format!(
+			"online attention boundaries={} pruned kernels={}",
+			replacements.len(),
+			skipped.len()
+		),
+	))
+}
+```
+
+`src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+	pub fn compile_flash(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		boundaries: &[crate::flash::Boundary],
+		requires_grad: bool,
+		local_bytes: usize,
+	) -> Result<Self> {
+		use std::collections::{HashMap, HashSet};
+		if requires_grad {
+			return Self::compile(graph, outputs, backend, 64);
+		}
+		let reachable = graph.topology(outputs)?.into_iter().collect::<HashSet<_>>();
+		let mut skipped = HashSet::new();
+		let mut replacements = HashMap::new();
+		for boundary in boundaries {
+			if [boundary.q, boundary.k, boundary.v, boundary.output]
+				.iter()
+				.any(|&id| id >= graph.nodes.len())
+			{
+				return Err("GPU attention boundary node".into());
+			}
+			if graph.shape(boundary.q)
+				!= [
+					boundary.shape.queries,
+					boundary.shape.heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.k)
+				!= [
+					boundary.shape.keys,
+					boundary.shape.kv_heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.v) != graph.shape(boundary.k)
+			{
+				return Err("GPU attention boundary shape".into());
+			}
+			if graph.shape(boundary.output) != graph.shape(boundary.q) {
+				return Err("GPU attention boundary output shape".into());
+			}
+			if !reachable.contains(&boundary.output) {
+				continue;
+			}
+			if crate::flash::select(boundary.shape, false, local_bytes, boundary.tile)
+				!= crate::flash::AttentionPath::Online
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if !matches!(graph.nodes[boundary.output].op, Op::Stage { .. }) {
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if ![boundary.q, boundary.k, boundary.v]
+				.iter()
+				.all(|&id| matches!(graph.nodes[id].op, Op::Stage { .. } | Op::Input { .. }))
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			let before = graph
+				.topology(&[boundary.q, boundary.k, boundary.v])?
+				.into_iter()
+				.collect::<HashSet<_>>();
+			let inside = graph
+				.topology(&[boundary.output])?
+				.into_iter()
+				.filter(|id| !before.contains(id))
+				.collect::<HashSet<_>>();
+			skipped.extend(crate::flash::boundary_skips(
+				graph,
+				outputs,
+				&reachable,
+				&inside,
+				boundary.output,
+			)?);
+			let kernel = crate::flash::shader(backend.dialect(), boundary.shape, boundary.tile)?;
+			replacements.insert(
+				boundary.output,
+				(
+					kernel,
+					vec![
+						boundary.q,
+						boundary.k,
+						boundary.v,
+						usize::MAX,
+						boundary.output,
+					],
+				),
+			);
+		}
+		let ordinary = lower(graph, outputs, backend.dialect(), 64)?;
+		let mut lowered = vec![];
+		for (kernel, slots) in ordinary {
+			let id = *slots.last().ok_or("attention output")?;
+			if skipped.contains(&id) {
+				continue;
+			}
+			lowered.push(replacements.remove(&id).unwrap_or((kernel, slots)));
+		}
+		Self::from_lowered(graph, outputs, backend, lowered, true)
+	}
+```
+
 ```sh check
 cargo test --test book_23 todo_23_018 -- --exact
 ```
@@ -1678,6 +2931,237 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_23_019() {
 	suite0::all_masked_and_late_max();
 }
+```
+
+`src/flash.rs` の `pub fn compile_boundaries(`の定義を次の全体で置き換えます。
+
+```rust file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
+pub fn compile_boundaries(
+	g: &crate::Graph,
+	outputs: &[usize],
+	boundaries: &[Boundary],
+	requires_grad: bool,
+) -> crate::Result<(crate::Plan, String)> {
+	use std::collections::HashSet;
+	if requires_grad || boundaries.is_empty() {
+		return Ok((
+			g.compile(outputs)?,
+			"ordinary attention (training/no boundaries)".into(),
+		));
+	}
+	let reachable = g.topology(outputs)?.into_iter().collect::<HashSet<_>>();
+	let mut skipped = HashSet::new();
+	let mut replacements = std::collections::HashMap::new();
+	for boundary in boundaries {
+		if !reachable.contains(&boundary.output) {
+			continue;
+		}
+		if [boundary.q, boundary.k, boundary.v, boundary.output]
+			.iter()
+			.any(|&id| id >= g.nodes.len())
+		{
+			return Err("attention boundary node".into());
+		}
+		if g.shape(boundary.q)
+			!= [
+				boundary.shape.queries,
+				boundary.shape.heads,
+				boundary.shape.dim,
+			] || g.shape(boundary.k)
+			!= [
+				boundary.shape.keys,
+				boundary.shape.kv_heads,
+				boundary.shape.dim,
+			] || g.shape(boundary.v) != g.shape(boundary.k)
+			|| g.shape(boundary.output) != g.shape(boundary.q)
+		{
+			return Err("attention boundary shape".into());
+		}
+		if !matches!(g.nodes[boundary.output].op, crate::Op::Stage { .. }) {
+			return Ok((
+				g.compile(outputs)?,
+				"ordinary attention (unstaged output)".into(),
+			));
+		}
+		if ![boundary.q, boundary.k, boundary.v].iter().all(|&id| {
+			matches!(
+				g.nodes[id].op,
+				crate::Op::Stage { .. } | crate::Op::Input { .. }
+			)
+		}) {
+			return Ok((
+				g.compile(outputs)?,
+				"ordinary attention (unstaged QKV)".into(),
+			));
+		}
+		let before = g
+			.topology(&[boundary.q, boundary.k, boundary.v])?
+			.into_iter()
+			.collect::<HashSet<_>>();
+		let inside = g
+			.topology(&[boundary.output])?
+			.into_iter()
+			.filter(|id| !before.contains(id))
+			.collect::<HashSet<_>>();
+		skipped.extend(boundary_skips(
+			g,
+			outputs,
+			&reachable,
+			&inside,
+			boundary.output,
+		)?);
+		let plan = FlashPlan::compile(boundary.shape, boundary.tile)?;
+		let begin = plan
+			.source
+			.find("int chibi_entry")
+			.ok_or("native attention entry")?;
+		let begin = begin + plan.source[begin..].find('{').unwrap() + 1;
+		let end = plan
+			.source
+			.rfind("return 0;")
+			.ok_or("native attention return")?;
+		let mut body = plan.source[begin..end]
+			.replace(",*valid=buffers[3]", "")
+			.replace("valid[j]!=0.0f", "1");
+		for (index, id) in [
+			(0, boundary.q),
+			(1, boundary.k),
+			(2, boundary.v),
+			(4, boundary.output),
+		] {
+			body = body.replace(&format!("buffers[{index}]"), &format!("binding_{id}_"));
+		}
+		for id in [boundary.q, boundary.k, boundary.v, boundary.output] {
+			body = body.replace(&format!("binding_{id}_"), &format!("buffers[{id}]"));
+		}
+		replacements.insert(boundary.output, format!("{{{body}}}\n"));
+	}
+	let kernels = crate::graph::kernel_bodies(g, outputs, true)?;
+	let mut source = crate::graph::C_HELPERS.to_string();
+	source += "int chibi_entry(void*const*buffers,const uint64_t*s){\n";
+	for id in g.topology(outputs)? {
+		source += &format!("float*b{id}=(float*)buffers[{id}];\n");
+	}
+	for kernel in kernels {
+		if skipped.contains(&kernel.output) {
+			continue;
+		}
+		source += replacements.get(&kernel.output).unwrap_or(&kernel.body);
+	}
+	source += "return 0;\n}\n";
+	let plan = crate::Plan::compile_source_specialized(g, outputs, source)?;
+	Ok((
+		plan,
+		format!(
+			"online attention boundaries={} pruned kernels={}",
+			replacements.len(),
+			skipped.len()
+		),
+	))
+}
+```
+
+`src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+	pub fn compile_flash(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		boundaries: &[crate::flash::Boundary],
+		requires_grad: bool,
+		local_bytes: usize,
+	) -> Result<Self> {
+		use std::collections::{HashMap, HashSet};
+		if requires_grad {
+			return Self::compile(graph, outputs, backend, 64);
+		}
+		let reachable = graph.topology(outputs)?.into_iter().collect::<HashSet<_>>();
+		let mut skipped = HashSet::new();
+		let mut replacements = HashMap::new();
+		for boundary in boundaries {
+			if [boundary.q, boundary.k, boundary.v, boundary.output]
+				.iter()
+				.any(|&id| id >= graph.nodes.len())
+			{
+				return Err("GPU attention boundary node".into());
+			}
+			if graph.shape(boundary.q)
+				!= [
+					boundary.shape.queries,
+					boundary.shape.heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.k)
+				!= [
+					boundary.shape.keys,
+					boundary.shape.kv_heads,
+					boundary.shape.dim,
+				] || graph.shape(boundary.v) != graph.shape(boundary.k)
+			{
+				return Err("GPU attention boundary shape".into());
+			}
+			if graph.shape(boundary.output) != graph.shape(boundary.q) {
+				return Err("GPU attention boundary output shape".into());
+			}
+			if !reachable.contains(&boundary.output) {
+				continue;
+			}
+			if crate::flash::select(boundary.shape, false, local_bytes, boundary.tile)
+				!= crate::flash::AttentionPath::Online
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if !matches!(graph.nodes[boundary.output].op, Op::Stage { .. }) {
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			if ![boundary.q, boundary.k, boundary.v]
+				.iter()
+				.all(|&id| matches!(graph.nodes[id].op, Op::Stage { .. } | Op::Input { .. }))
+			{
+				return Self::compile(graph, outputs, backend, 64);
+			}
+			let before = graph
+				.topology(&[boundary.q, boundary.k, boundary.v])?
+				.into_iter()
+				.collect::<HashSet<_>>();
+			let inside = graph
+				.topology(&[boundary.output])?
+				.into_iter()
+				.filter(|id| !before.contains(id))
+				.collect::<HashSet<_>>();
+			skipped.extend(crate::flash::boundary_skips(
+				graph,
+				outputs,
+				&reachable,
+				&inside,
+				boundary.output,
+			)?);
+			let kernel = crate::flash::shader(backend.dialect(), boundary.shape, boundary.tile)?;
+			replacements.insert(
+				boundary.output,
+				(
+					kernel,
+					vec![
+						boundary.q,
+						boundary.k,
+						boundary.v,
+						usize::MAX,
+						boundary.output,
+					],
+				),
+			);
+		}
+		let ordinary = lower(graph, outputs, backend.dialect(), 64)?;
+		let mut lowered = vec![];
+		for (kernel, slots) in ordinary {
+			let id = *slots.last().ok_or("attention output")?;
+			if skipped.contains(&id) {
+				continue;
+			}
+			lowered.push(replacements.remove(&id).unwrap_or((kernel, slots)));
+		}
+		Self::from_lowered(graph, outputs, backend, lowered, true)
+	}
 ```
 
 ```sh check

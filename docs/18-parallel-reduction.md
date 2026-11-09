@@ -491,6 +491,116 @@ fn todo_18_001() {
 }
 ```
 
+`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<()> {
+		if self.lanes == 0 || self.local_elements < self.lanes {
+			return Err("LOCAL allocation shorter than lane stores".into());
+		}
+		let mut written = false;
+		let mut visible = false;
+		let mut final_store = false;
+		for op in &self.ops {
+			match *op {
+				LocalOp::WritePartial => {
+					if written && !visible {
+						return Err("LOCAL reuse before barrier".into());
+					}
+					written = true;
+					visible = false;
+				}
+				LocalOp::Barrier => {
+					if !written {
+						return Err("barrier without LOCAL write".into());
+					}
+					visible = true;
+				}
+				LocalOp::Tree { stride } => {
+					if !visible
+						|| stride == 0 || stride
+						.checked_mul(2)
+						.is_none_or(|n| n > self.local_elements)
+					{
+						return Err("LOCAL tree read before barrier or outside allocation".into());
+					}
+					visible = false;
+				}
+				LocalOp::SerialFinish => {
+					if !visible {
+						return Err("serial LOCAL read before barrier".into());
+					}
+				}
+				LocalOp::StoreLaneZero => {
+					if !visible {
+						return Err("global store before LOCAL results visible".into());
+					}
+					final_store = true;
+				}
+			}
+		}
+		if !final_store {
+			return Err("missing lane0 output".into());
+		}
+		Ok(())
+	}
+```
+
+`src/collective.rs` の `pub fn linearize(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn linearize("
+	pub fn linearize(&self) -> Result<Vec<LocalOp>> {
+		self.verify()?;
+		Ok(self.ops.clone())
+	}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_001 -- --exact
 ```
@@ -507,6 +617,52 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_002() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -529,6 +685,52 @@ fn todo_18_003() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_003 -- --exact
 ```
@@ -545,6 +747,52 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_004() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -567,6 +815,74 @@ fn todo_18_005() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
+`src/gpu_kernels.rs` の `fn shared(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="fn shared("
+fn shared(d: Dialect) -> &'static str {
+	match d {
+		Dialect::Metal => "threadgroup",
+		Dialect::OpenCl => "__local",
+	}
+}
+```
+
+`src/gpu_kernels.rs` の `fn barrier(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="fn barrier("
+fn barrier(d: Dialect) -> &'static str {
+	match d {
+		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
+		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
+	}
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_005 -- --exact
 ```
@@ -583,6 +899,80 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_006() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
+		if !lanes.is_power_of_two() {
+			return Err("local must be power of two".into());
+		}
+		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
+		if tree {
+			let mut stride = lanes / 2;
+			while stride > 0 {
+				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
+				stride /= 2;
+			}
+		} else {
+			ops.push(LocalOp::SerialFinish);
+		}
+		ops.push(LocalOp::StoreLaneZero);
+		let program = Self {
+			lanes,
+			local_elements: lanes,
+			ops,
+		};
+		program.verify()?;
+		Ok(program)
+	}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -605,6 +995,52 @@ fn todo_18_007() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_007 -- --exact
 ```
@@ -621,6 +1057,80 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_008() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
+		if !lanes.is_power_of_two() {
+			return Err("local must be power of two".into());
+		}
+		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
+		if tree {
+			let mut stride = lanes / 2;
+			while stride > 0 {
+				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
+				stride /= 2;
+			}
+		} else {
+			ops.push(LocalOp::SerialFinish);
+		}
+		ops.push(LocalOp::StoreLaneZero);
+		let program = Self {
+			lanes,
+			local_elements: lanes,
+			ops,
+		};
+		program.verify()?;
+		Ok(program)
+	}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -643,6 +1153,52 @@ fn todo_18_009() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_009 -- --exact
 ```
@@ -659,6 +1215,135 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_010() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<()> {
+		if self.lanes == 0 || self.local_elements < self.lanes {
+			return Err("LOCAL allocation shorter than lane stores".into());
+		}
+		let mut written = false;
+		let mut visible = false;
+		let mut final_store = false;
+		for op in &self.ops {
+			match *op {
+				LocalOp::WritePartial => {
+					if written && !visible {
+						return Err("LOCAL reuse before barrier".into());
+					}
+					written = true;
+					visible = false;
+				}
+				LocalOp::Barrier => {
+					if !written {
+						return Err("barrier without LOCAL write".into());
+					}
+					visible = true;
+				}
+				LocalOp::Tree { stride } => {
+					if !visible
+						|| stride == 0 || stride
+						.checked_mul(2)
+						.is_none_or(|n| n > self.local_elements)
+					{
+						return Err("LOCAL tree read before barrier or outside allocation".into());
+					}
+					visible = false;
+				}
+				LocalOp::SerialFinish => {
+					if !visible {
+						return Err("serial LOCAL read before barrier".into());
+					}
+				}
+				LocalOp::StoreLaneZero => {
+					if !visible {
+						return Err("global store before LOCAL results visible".into());
+					}
+					final_store = true;
+				}
+			}
+		}
+		if !final_store {
+			return Err("missing lane0 output".into());
+		}
+		Ok(())
+	}
+```
+
+`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
+		if !lanes.is_power_of_two() {
+			return Err("local must be power of two".into());
+		}
+		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
+		if tree {
+			let mut stride = lanes / 2;
+			while stride > 0 {
+				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
+				stride /= 2;
+			}
+		} else {
+			ops.push(LocalOp::SerialFinish);
+		}
+		ops.push(LocalOp::StoreLaneZero);
+		let program = Self {
+			lanes,
+			local_elements: lanes,
+			ops,
+		};
+		program.verify()?;
+		Ok(program)
+	}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -700,6 +1385,52 @@ fn todo_18_012() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_012 -- --exact
 ```
@@ -716,6 +1447,78 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_013() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+pub fn two_stage_sum(
+	d: Dialect,
+	n: usize,
+	chunk: usize,
+	local: usize,
+) -> Result<ReductionSchedule, String> {
+	if chunk == 0 {
+		return Err("chunk=0".into());
+	}
+	let count = groups(n, chunk)?;
+	let mut first = row_sum(d, count, chunk, local, true)?;
+	first.lengths[0] = n;
+	first.source = first.source.replace(
+		&format!("acc+=b0[g*{chunk}+c];"),
+		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
+	);
+	Ok(ReductionSchedule {
+		first,
+		second: row_sum(d, 1, count, local, true)?,
+	})
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -738,6 +1541,135 @@ fn todo_18_014() {
 }
 ```
 
+`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+	pub fn verify(&self) -> Result<()> {
+		if self.lanes == 0 || self.local_elements < self.lanes {
+			return Err("LOCAL allocation shorter than lane stores".into());
+		}
+		let mut written = false;
+		let mut visible = false;
+		let mut final_store = false;
+		for op in &self.ops {
+			match *op {
+				LocalOp::WritePartial => {
+					if written && !visible {
+						return Err("LOCAL reuse before barrier".into());
+					}
+					written = true;
+					visible = false;
+				}
+				LocalOp::Barrier => {
+					if !written {
+						return Err("barrier without LOCAL write".into());
+					}
+					visible = true;
+				}
+				LocalOp::Tree { stride } => {
+					if !visible
+						|| stride == 0 || stride
+						.checked_mul(2)
+						.is_none_or(|n| n > self.local_elements)
+					{
+						return Err("LOCAL tree read before barrier or outside allocation".into());
+					}
+					visible = false;
+				}
+				LocalOp::SerialFinish => {
+					if !visible {
+						return Err("serial LOCAL read before barrier".into());
+					}
+				}
+				LocalOp::StoreLaneZero => {
+					if !visible {
+						return Err("global store before LOCAL results visible".into());
+					}
+					final_store = true;
+				}
+			}
+		}
+		if !final_store {
+			return Err("missing lane0 output".into());
+		}
+		Ok(())
+	}
+```
+
+`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
+		if !lanes.is_power_of_two() {
+			return Err("local must be power of two".into());
+		}
+		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
+		if tree {
+			let mut stride = lanes / 2;
+			while stride > 0 {
+				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
+				stride /= 2;
+			}
+		} else {
+			ops.push(LocalOp::SerialFinish);
+		}
+		ops.push(LocalOp::StoreLaneZero);
+		let program = Self {
+			lanes,
+			local_elements: lanes,
+			ops,
+		};
+		program.verify()?;
+		Ok(program)
+	}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_014 -- --exact
 ```
@@ -754,6 +1686,52 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 #[test]
 fn todo_18_015() {
 	suite0::barriers_and_shader_compile();
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
 }
 ```
 
@@ -776,6 +1754,32 @@ fn todo_18_016() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+pub fn two_stage_sum(
+	d: Dialect,
+	n: usize,
+	chunk: usize,
+	local: usize,
+) -> Result<ReductionSchedule, String> {
+	if chunk == 0 {
+		return Err("chunk=0".into());
+	}
+	let count = groups(n, chunk)?;
+	let mut first = row_sum(d, count, chunk, local, true)?;
+	first.lengths[0] = n;
+	first.source = first.source.replace(
+		&format!("acc+=b0[g*{chunk}+c];"),
+		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
+	);
+	Ok(ReductionSchedule {
+		first,
+		second: row_sum(d, 1, count, local, true)?,
+	})
+}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_016 -- --exact
 ```
@@ -793,6 +1797,117 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_18_017() {
 	suite0::barriers_and_shader_compile();
 }
+```
+
+`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+pub fn two_stage_sum(
+	d: Dialect,
+	n: usize,
+	chunk: usize,
+	local: usize,
+) -> Result<ReductionSchedule, String> {
+	if chunk == 0 {
+		return Err("chunk=0".into());
+	}
+	let count = groups(n, chunk)?;
+	let mut first = row_sum(d, count, chunk, local, true)?;
+	first.lengths[0] = n;
+	first.source = first.source.replace(
+		&format!("acc+=b0[g*{chunk}+c];"),
+		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
+	);
+	Ok(ReductionSchedule {
+		first,
+		second: row_sum(d, 1, count, local, true)?,
+	})
+}
+```
+
+`src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
+		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
+			return Err("optimized GPU plan shape mismatch".into());
+		}
+		if shapes.len() != self.graph.nodes.len() {
+			return Err("GPU shape table".into());
+		}
+		let mut graph = self.graph.clone();
+		for (node, shape) in graph.nodes.iter_mut().zip(shapes) {
+			if node.shape.len() != shape.len() {
+				return Err("GPU rank change".into());
+			}
+			elements(shape)?;
+			node.shape = shape.clone();
+		}
+		graph.verify(&self.outputs)?;
+		let mut logical_inputs = inputs.to_vec();
+		for (id, node) in graph.nodes.iter().enumerate() {
+			if let Op::Input { slot } = node.op {
+				let n = elements(graph.shape(id))?;
+				let input = inputs.get(slot).ok_or("missing GPU input")?;
+				if input.shape.len() != graph.shape(id).len() || input.data.len() < n {
+					return Err("GPU input rank/capacity".into());
+				}
+				logical_inputs[slot] =
+					Buffer::new(graph.shape(id).to_vec(), input.data[..n].to_vec())?;
+			}
+		}
+		graph.validate_inputs(&logical_inputs, &self.outputs)?;
+		graph.validate_indices(&logical_inputs, &self.outputs)?;
+		let mut values = graph
+			.nodes
+			.iter()
+			.map(|n| Buffer::zeros(n.shape.clone()))
+			.collect::<Result<Vec<_>>>()?;
+		for id in graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = graph.nodes[id].op {
+				values[id] = inputs[slot].clone();
+			}
+		}
+		for step in &self.steps {
+			let mut kernel = step.kernel.clone();
+			kernel.lengths = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						step.kernel.lengths[index]
+					} else {
+						values[id].data.len()
+					}
+				})
+				.collect();
+			if !self.specialized {
+				kernel.scalars = shapes.iter().flatten().map(|&n| n as u64).collect();
+			}
+			if !self.specialized {
+				kernel.groups = groups(kernel.lengths[kernel.output], kernel.local)?;
+			}
+			if kernel.lengths[kernel.output] == 0 {
+				continue;
+			}
+			let buffers = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						vec![1.; kernel.lengths[index]]
+					} else {
+						values[id].data.clone()
+					}
+				})
+				.collect::<Vec<_>>();
+			let run = step.program.run(&kernel, &buffers)?;
+			values[*step.slots.last().unwrap()].data = run.output;
+		}
+		Ok(self.outputs.iter().map(|&id| values[id].clone()).collect())
+	}
 ```
 
 ```sh check
@@ -814,6 +1929,95 @@ fn todo_18_018() {
 }
 ```
 
+`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+pub fn two_stage_sum(
+	d: Dialect,
+	n: usize,
+	chunk: usize,
+	local: usize,
+) -> Result<ReductionSchedule, String> {
+	if chunk == 0 {
+		return Err("chunk=0".into());
+	}
+	let count = groups(n, chunk)?;
+	let mut first = row_sum(d, count, chunk, local, true)?;
+	first.lengths[0] = n;
+	first.source = first.source.replace(
+		&format!("acc+=b0[g*{chunk}+c];"),
+		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
+	);
+	Ok(ReductionSchedule {
+		first,
+		second: row_sum(d, 1, count, local, true)?,
+	})
+}
+```
+
+`src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+	fn from_lowered(
+		graph: &Graph,
+		outputs: &[usize],
+		backend: Backend,
+		lowered: Vec<(Kernel, Vec<usize>)>,
+		specialized: bool,
+	) -> Result<Self> {
+		let mut steps: Vec<Step> = vec![];
+		let mut sources = vec![];
+		for (kernel, slots) in lowered {
+			sources.push(kernel.source.clone());
+			let program = if kernel.lengths[kernel.output] == 0 {
+				Program::Unavailable
+			} else if let Some(seed) = steps
+				.iter()
+				.find(|step| !matches!(step.program, Program::Unavailable))
+			{
+				seed.program.compile_next(&kernel)?
+			} else {
+				match backend {
+					Backend::Metal => {
+						#[cfg(all(target_os = "macos", feature = "metal"))]
+						{
+							Program::Metal(crate::backends::metal::MetalProgram::compile(&kernel)?)
+						}
+						#[cfg(not(all(target_os = "macos", feature = "metal")))]
+						{
+							return Err("Metal feature/macOS required".into());
+						}
+					}
+					Backend::OpenCl => {
+						#[cfg(feature = "opencl")]
+						{
+							Program::OpenCl(crate::backends::opencl::OpenClProgram::compile(
+								&kernel, 0, 0,
+							)?)
+						}
+						#[cfg(not(feature = "opencl"))]
+						{
+							return Err("OpenCL feature required".into());
+						}
+					}
+				}
+			};
+			steps.push(Step {
+				kernel,
+				slots,
+				program,
+			});
+		}
+		Ok(Self {
+			graph: graph.clone(),
+			outputs: outputs.to_vec(),
+			sources,
+			specialized,
+			steps,
+		})
+	}
+```
+
 ```sh check
 cargo test --test book_18 todo_18_018 -- --exact
 ```
@@ -831,6 +2035,353 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 fn todo_18_019() {
 	suite0::barriers_and_shader_compile();
 }
+```
+
+`src/backends/metal.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub fn compile_next("
+	pub fn compile_next(&self, kernel: &Kernel) -> Result<Self, String> {
+		Self::compile_on(kernel, self.device.clone(), self.queue.clone())
+	}
+```
+
+`src/backends/opencl.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
+	pub fn compile_next(&self, spec: &Spec) -> Result<Self, String> {
+		Self::compile_on(
+			spec,
+			Device::new(self.device.id()),
+			self.context.clone(),
+			self.queue.clone(),
+		)
+	}
+```
+
+`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		kernel.validate(inputs)?;
+		if self.contract
+			!= (
+				kernel.source.clone(),
+				kernel.entry.clone(),
+				kernel.lengths.len(),
+				kernel.scalars.len().max(1),
+				kernel.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if kernel.lengths[kernel.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: self.device.name().to_string(),
+				timings,
+			});
+		}
+		let (_, max_threads, max_shared) = self.limits();
+		if kernel.local > max_threads {
+			return Err(format!(
+				"Metal local {} exceeds {max_threads}",
+				kernel.local
+			));
+		}
+		if kernel.shared_bytes > max_shared
+			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
+		{
+			return Err("Metal threadgroup memory limit".into());
+		}
+		if kernel.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		autoreleasepool(|_| {
+			let allocation = Instant::now();
+			let buffers: Vec<_> = inputs
+				.iter()
+				.map(|input| {
+					let bytes = input
+						.len()
+						.checked_mul(4)
+						.ok_or("Metal byte overflow")?
+						.max(4);
+					if bytes > self.device.maxBufferLength() {
+						return Err("Metal buffer limit".to_owned());
+					}
+					self.device
+						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
+				})
+				.collect::<Result<_, _>>()?;
+			let scalar_words = if kernel.scalars.is_empty() {
+				vec![0u64]
+			} else {
+				kernel.scalars.clone()
+			};
+			let scalar_buffer = self
+				.device
+				.newBufferWithLength_options(
+					scalar_words.len() * 8,
+					MTLResourceOptions::StorageModeShared,
+				)
+				.ok_or("Metal scalar allocation")?;
+			if kernel.source.contains("device const float4")
+				&& buffers
+					.iter()
+					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
+			{
+				return Err("Metal vector buffer alignment".into());
+			}
+			timings.allocation = allocation.elapsed();
+			let transfer = Instant::now();
+			for (input, buffer) in inputs.iter().zip(&buffers) {
+				unsafe {
+					std::ptr::copy_nonoverlapping(
+						input.as_ptr(),
+						buffer.contents().as_ptr().cast::<f32>(),
+						input.len(),
+					);
+				}
+			}
+			unsafe {
+				std::ptr::copy_nonoverlapping(
+					scalar_words.as_ptr(),
+					scalar_buffer.contents().as_ptr().cast::<u64>(),
+					scalar_words.len(),
+				);
+			}
+			timings.transfer = transfer.elapsed();
+			let command = self
+				.queue
+				.commandBuffer()
+				.ok_or("Metal commandBuffer returned nil")?;
+			let encoder = command
+				.computeCommandEncoder()
+				.ok_or("Metal encoder returned nil")?;
+			encoder.setComputePipelineState(&self.pipeline);
+			for (index, buffer) in buffers.iter().enumerate() {
+				unsafe {
+					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
+				}
+			}
+			unsafe {
+				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
+			}
+			encoder.dispatchThreadgroups_threadsPerThreadgroup(
+				MTLSize {
+					width: kernel.groups,
+					height: 1,
+					depth: 1,
+				},
+				MTLSize {
+					width: kernel.local,
+					height: 1,
+					depth: 1,
+				},
+			);
+			encoder.endEncoding();
+			command.commit();
+			let synchronization = Instant::now();
+			command.waitUntilCompleted();
+			timings.synchronization = synchronization.elapsed();
+			if command.status() != MTLCommandBufferStatus::Completed {
+				return Err(format!("Metal command execution: {:?}", command.error()));
+			}
+			let elapsed = command.GPUEndTime() - command.GPUStartTime();
+			if elapsed.is_finite() && elapsed >= 0.0 {
+				timings.kernel = Some(Duration::from_secs_f64(elapsed));
+			}
+			let transfer = Instant::now();
+			let output = unsafe {
+				std::slice::from_raw_parts(
+					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
+					kernel.lengths[kernel.output],
+				)
+			}
+			.to_vec();
+			timings.transfer += transfer.elapsed();
+			timings.total = total.elapsed();
+			Ok(Run {
+				output,
+				device: self.device.name().to_string(),
+				timings,
+			})
+		})
+	}
+```
+
+`src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
+
+```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
+		spec.validate(inputs)?;
+		if self.contract
+			!= (
+				spec.source.clone(),
+				spec.entry.clone(),
+				spec.lengths.len(),
+				spec.scalars.len().max(1),
+				spec.local,
+			) {
+			return Err("compiled GPU contract mismatch".into());
+		}
+		let _execution = self
+			.execution
+			.lock()
+			.map_err(|_| "OpenCL execution mutex poisoned")?;
+		let total = Instant::now();
+		let mut timings = Timings::default();
+		if spec.lengths[spec.output] == 0 {
+			return Ok(Run {
+				output: vec![],
+				device: api("clGetDeviceInfo(name)", self.device.name())?,
+				timings,
+			});
+		}
+		let max = api(
+			"clGetDeviceInfo(workgroup)",
+			self.device.max_work_group_size(),
+		)?
+		.min(api(
+			"clGetKernelWorkGroupInfo",
+			self.kernel.get_work_group_size(self.device.id()),
+		)?);
+		let axes = api(
+			"clGetDeviceInfo(workitems)",
+			self.device.max_work_item_sizes(),
+		)?;
+		if spec.local > max || spec.local > axes[0] {
+			return Err(format!("OpenCL local {} exceeds limit {max}", spec.local));
+		}
+		let local_mem = api("clGetDeviceInfo(local)", self.device.local_mem_size())?;
+		if spec.shared_bytes as u64 > local_mem
+			|| api(
+				"clGetKernelWorkGroupInfo(local)",
+				self.kernel.get_local_mem_size(self.device.id()),
+			)? > local_mem
+		{
+			return Err("OpenCL local memory limit".into());
+		}
+		if spec.groups == 0 {
+			return Err("nonempty output with zero groups".into());
+		}
+		let allocation = Instant::now();
+		let mut buffers: Vec<_> = inputs
+			.iter()
+			.map(|b| unsafe {
+				api(
+					"clCreateBuffer",
+					Buffer::<f32>::create(
+						&self.context,
+						CL_MEM_READ_WRITE,
+						b.len().max(1),
+						ptr::null_mut(),
+					),
+				)
+			})
+			.collect::<Result<_, _>>()?;
+		let scalar_words = if spec.scalars.is_empty() {
+			vec![0u64]
+		} else {
+			spec.scalars.clone()
+		};
+		let mut scalar_buffer = unsafe {
+			api(
+				"clCreateBuffer(scalars)",
+				Buffer::<u64>::create(
+					&self.context,
+					CL_MEM_READ_WRITE,
+					scalar_words.len(),
+					ptr::null_mut(),
+				),
+			)?
+		};
+		timings.allocation = allocation.elapsed();
+		let transfer = Instant::now();
+		for (input, buffer) in inputs.iter().zip(&mut buffers) {
+			if !input.is_empty() {
+				unsafe {
+					api(
+						"clEnqueueWriteBuffer",
+						self.queue
+							.enqueue_write_buffer(buffer, CL_BLOCKING, 0, input, &[]),
+					)?;
+				}
+			}
+		}
+		unsafe {
+			api(
+				"clEnqueueWriteBuffer(scalars)",
+				self.queue.enqueue_write_buffer(
+					&mut scalar_buffer,
+					CL_BLOCKING,
+					0,
+					&scalar_words,
+					&[],
+				),
+			)?;
+			api(
+				"clSetKernelArg(scalars)",
+				self.kernel.set_arg(buffers.len() as u32, &scalar_buffer),
+			)?;
+		}
+		timings.transfer = transfer.elapsed();
+		for (index, buffer) in buffers.iter().enumerate() {
+			unsafe {
+				api("clSetKernelArg", self.kernel.set_arg(index as u32, buffer))?;
+			}
+		}
+		let global = [spec
+			.groups
+			.checked_mul(spec.local)
+			.ok_or("launch overflow")?];
+		let local = [spec.local];
+		let event = unsafe {
+			api(
+				"clEnqueueNDRangeKernel",
+				self.queue.enqueue_nd_range_kernel(
+					self.kernel.get(),
+					1,
+					ptr::null(),
+					global.as_ptr(),
+					local.as_ptr(),
+					&[],
+				),
+			)?
+		};
+		let sync = Instant::now();
+		api("clWaitForEvents", event.wait())?;
+		timings.synchronization = sync.elapsed();
+		if let (Ok(start), Ok(end)) = (
+			event.profiling_command_start(),
+			event.profiling_command_end(),
+		) {
+			timings.kernel = Some(Duration::from_nanos(end - start));
+		}
+		let transfer = Instant::now();
+		let mut output = vec![0.; spec.lengths[spec.output]];
+		unsafe {
+			api(
+				"clEnqueueReadBuffer",
+				self.queue.enqueue_read_buffer(
+					&buffers[spec.output],
+					CL_BLOCKING,
+					0,
+					&mut output,
+					&[],
+				),
+			)?;
+		}
+		timings.transfer += transfer.elapsed();
+		timings.total = total.elapsed();
+		Ok(Run {
+			output,
+			device: api("clGetDeviceInfo(name)", self.device.name())?,
+			timings,
+		})
+	}
 ```
 
 ```sh check

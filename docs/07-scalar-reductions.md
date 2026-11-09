@@ -176,6 +176,55 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn walk("
+	fn walk(
+		&self,
+		body: &[Stmt],
+		axes: &mut HashMap<usize, i32>,
+		memory: &mut [Vec<f32>],
+		initialized: &mut [Vec<bool>],
+		access: &mut Accesses,
+		budget: &mut usize,
+	) -> Result<()> {
+		for statement in body {
+			*budget = budget
+				.checked_sub(1)
+				.ok_or("verification work exceeds finite proof budget")?;
+			match statement {
+				Stmt::Store { view, index, value } => {
+					if self
+						.storage
+						.get(view.storage)
+						.ok_or("STORE unknown storage")?
+						.input
+						.is_some()
+					{
+						return Err("STORE to readonly input".into());
+					}
+					let address = self.address(*view, index, axes)?;
+					let value = self.evaluate(value, axes, memory, initialized, access)?;
+					memory[view.storage][address] = value;
+					initialized[view.storage][address] = true;
+					access.write.insert(view.storage);
+				}
+				Stmt::Range { axis, len, body } => {
+					if axes.contains_key(axis) || *len > i32::MAX as usize {
+						return Err("duplicate RANGE or i32 overflow".into());
+					}
+					for i in 0..*len {
+						axes.insert(*axis, i as i32);
+						self.walk(body, axes, memory, initialized, access, budget)?;
+					}
+					axes.remove(axis);
+				}
+			}
+		}
+		Ok(())
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -184,6 +233,55 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-003 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="fn walk("
+	fn walk(
+		&self,
+		body: &[Stmt],
+		axes: &mut HashMap<usize, i32>,
+		memory: &mut [Vec<f32>],
+		initialized: &mut [Vec<bool>],
+		access: &mut Accesses,
+		budget: &mut usize,
+	) -> Result<()> {
+		for statement in body {
+			*budget = budget
+				.checked_sub(1)
+				.ok_or("verification work exceeds finite proof budget")?;
+			match statement {
+				Stmt::Store { view, index, value } => {
+					if self
+						.storage
+						.get(view.storage)
+						.ok_or("STORE unknown storage")?
+						.input
+						.is_some()
+					{
+						return Err("STORE to readonly input".into());
+					}
+					let address = self.address(*view, index, axes)?;
+					let value = self.evaluate(value, axes, memory, initialized, access)?;
+					memory[view.storage][address] = value;
+					initialized[view.storage][address] = true;
+					access.write.insert(view.storage);
+				}
+				Stmt::Range { axis, len, body } => {
+					if axes.contains_key(axis) || *len > i32::MAX as usize {
+						return Err("duplicate RANGE or i32 overflow".into());
+					}
+					for i in 0..*len {
+						axes.insert(*axis, i as i32);
+						self.walk(body, axes, memory, initialized, access, budget)?;
+					}
+					axes.remove(axis);
+				}
+			}
+		}
+		Ok(())
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -194,6 +292,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -202,6 +342,42 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-005 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
+	let x = k.input(0, len)?;
+	let out = k.alloc(rows)?;
+	let acc = k.reg()?;
+	let index = I::Axis(0)
+		.mul(I::Const(
+			i32::try_from(cols).map_err(|_| "column overflow")?,
+		))
+		.add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		rows,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				cols,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0)).add(E::Load(x, index)),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -212,6 +388,42 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
+	let x = k.input(0, len)?;
+	let out = k.alloc(rows)?;
+	let acc = k.reg()?;
+	let index = I::Axis(0)
+		.mul(I::Const(
+			i32::try_from(cols).map_err(|_| "column overflow")?,
+		))
+		.add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		rows,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				cols,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0)).add(E::Load(x, index)),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -220,6 +432,42 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-007 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
+	let x = k.input(0, len)?;
+	let out = k.alloc(rows)?;
+	let acc = k.reg()?;
+	let index = I::Axis(0)
+		.mul(I::Const(
+			i32::try_from(cols).map_err(|_| "column overflow")?,
+		))
+		.add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		rows,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				cols,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0)).add(E::Load(x, index)),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -230,6 +478,42 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
+	let x = k.input(0, len)?;
+	let out = k.alloc(rows)?;
+	let acc = k.reg()?;
+	let index = I::Axis(0)
+		.mul(I::Const(
+			i32::try_from(cols).map_err(|_| "column overflow")?,
+		))
+		.add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		rows,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				cols,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0)).add(E::Load(x, index)),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -238,6 +522,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-009 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -248,6 +574,42 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
+	let x = k.input(0, len)?;
+	let out = k.alloc(rows)?;
+	let acc = k.reg()?;
+	let index = I::Axis(0)
+		.mul(I::Const(
+			i32::try_from(cols).map_err(|_| "column overflow")?,
+		))
+		.add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		rows,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				cols,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0)).add(E::Load(x, index)),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -256,6 +618,46 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-011 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
+	let b = k.input(1, inner.checked_mul(n).ok_or("matrix overflow")?)?;
+	let out = k.alloc(m.checked_mul(n).ok_or("matrix overflow")?)?;
+	let acc = k.reg()?;
+	let ni = i32::try_from(n).map_err(|_| "matrix dimension overflow")?;
+	let ki = i32::try_from(inner).map_err(|_| "matrix dimension overflow")?;
+	let ai = I::Axis(0).mul(I::Const(ki)).add(I::Axis(2));
+	let bi = I::Axis(2).mul(I::Const(ni)).add(I::Axis(1));
+	let oi = I::Axis(0).mul(I::Const(ni)).add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		m,
+		vec![range(
+			1,
+			n,
+			vec![
+				store(acc, I::Const(0), E::Const(0.)),
+				range(
+					2,
+					inner,
+					vec![store(
+						acc,
+						I::Const(0),
+						E::Load(acc, I::Const(0)).add(E::Load(a, ai).mul(E::Load(b, bi))),
+					)],
+				),
+				store(out, oi, E::Load(acc, I::Const(0))),
+			],
+		)],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -266,6 +668,46 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
+	let b = k.input(1, inner.checked_mul(n).ok_or("matrix overflow")?)?;
+	let out = k.alloc(m.checked_mul(n).ok_or("matrix overflow")?)?;
+	let acc = k.reg()?;
+	let ni = i32::try_from(n).map_err(|_| "matrix dimension overflow")?;
+	let ki = i32::try_from(inner).map_err(|_| "matrix dimension overflow")?;
+	let ai = I::Axis(0).mul(I::Const(ki)).add(I::Axis(2));
+	let bi = I::Axis(2).mul(I::Const(ni)).add(I::Axis(1));
+	let oi = I::Axis(0).mul(I::Const(ni)).add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		m,
+		vec![range(
+			1,
+			n,
+			vec![
+				store(acc, I::Const(0), E::Const(0.)),
+				range(
+					2,
+					inner,
+					vec![store(
+						acc,
+						I::Const(0),
+						E::Load(acc, I::Const(0)).add(E::Load(a, ai).mul(E::Load(b, bi))),
+					)],
+				),
+				store(out, oi, E::Load(acc, I::Const(0))),
+			],
+		)],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -274,6 +716,46 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-013 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
+	let mut k = Kernel::default();
+	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
+	let b = k.input(1, inner.checked_mul(n).ok_or("matrix overflow")?)?;
+	let out = k.alloc(m.checked_mul(n).ok_or("matrix overflow")?)?;
+	let acc = k.reg()?;
+	let ni = i32::try_from(n).map_err(|_| "matrix dimension overflow")?;
+	let ki = i32::try_from(inner).map_err(|_| "matrix dimension overflow")?;
+	let ai = I::Axis(0).mul(I::Const(ki)).add(I::Axis(2));
+	let bi = I::Axis(2).mul(I::Const(ni)).add(I::Axis(1));
+	let oi = I::Axis(0).mul(I::Const(ni)).add(I::Axis(1));
+	k.body = vec![range(
+		0,
+		m,
+		vec![range(
+			1,
+			n,
+			vec![
+				store(acc, I::Const(0), E::Const(0.)),
+				range(
+					2,
+					inner,
+					vec![store(
+						acc,
+						I::Const(0),
+						E::Load(acc, I::Const(0)).add(E::Load(a, ai).mul(E::Load(b, bi))),
+					)],
+				),
+				store(out, oi, E::Load(acc, I::Const(0))),
+			],
+		)],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -284,6 +766,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -292,6 +816,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-015 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -302,6 +868,45 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
+	if width == 0 {
+		return Err("empty convolution kernel".into());
+	}
+	let out_len = len
+		.checked_sub(width)
+		.and_then(|n| n.checked_add(1))
+		.ok_or("convolution kernel longer than input")?;
+	let mut k = Kernel::default();
+	let x = k.input(0, len)?;
+	let w = k.input(1, width)?;
+	let out = k.alloc(out_len)?;
+	let acc = k.reg()?;
+	k.body = vec![range(
+		0,
+		out_len,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				width,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0))
+						.add(E::Load(x, I::Axis(0).add(I::Axis(1))).mul(E::Load(w, I::Axis(1)))),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -310,6 +915,45 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-017 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
+	if width == 0 {
+		return Err("empty convolution kernel".into());
+	}
+	let out_len = len
+		.checked_sub(width)
+		.and_then(|n| n.checked_add(1))
+		.ok_or("convolution kernel longer than input")?;
+	let mut k = Kernel::default();
+	let x = k.input(0, len)?;
+	let w = k.input(1, width)?;
+	let out = k.alloc(out_len)?;
+	let acc = k.reg()?;
+	k.body = vec![range(
+		0,
+		out_len,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				width,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0))
+						.add(E::Load(x, I::Axis(0).add(I::Axis(1))).mul(E::Load(w, I::Axis(1)))),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -320,6 +964,45 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
+	if width == 0 {
+		return Err("empty convolution kernel".into());
+	}
+	let out_len = len
+		.checked_sub(width)
+		.and_then(|n| n.checked_add(1))
+		.ok_or("convolution kernel longer than input")?;
+	let mut k = Kernel::default();
+	let x = k.input(0, len)?;
+	let w = k.input(1, width)?;
+	let out = k.alloc(out_len)?;
+	let acc = k.reg()?;
+	k.body = vec![range(
+		0,
+		out_len,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				width,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0))
+						.add(E::Load(x, I::Axis(0).add(I::Axis(1))).mul(E::Load(w, I::Axis(1)))),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -328,6 +1011,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-019 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -338,6 +1063,45 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
+
+```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
+	if width == 0 {
+		return Err("empty convolution kernel".into());
+	}
+	let out_len = len
+		.checked_sub(width)
+		.and_then(|n| n.checked_add(1))
+		.ok_or("convolution kernel longer than input")?;
+	let mut k = Kernel::default();
+	let x = k.input(0, len)?;
+	let w = k.input(1, width)?;
+	let out = k.alloc(out_len)?;
+	let acc = k.reg()?;
+	k.body = vec![range(
+		0,
+		out_len,
+		vec![
+			store(acc, I::Const(0), E::Const(0.)),
+			range(
+				1,
+				width,
+				vec![store(
+					acc,
+					I::Const(0),
+					E::Load(acc, I::Const(0))
+						.add(E::Load(x, I::Axis(0).add(I::Axis(1))).mul(E::Load(w, I::Axis(1)))),
+				)],
+			),
+			store(out, I::Axis(0), E::Load(acc, I::Const(0))),
+		],
+	)];
+	k.outputs = vec![out];
+	Ok(k)
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -346,6 +1110,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-021 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -356,6 +1162,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -364,6 +1212,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-023 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -374,6 +1264,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -382,6 +1314,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-025 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
@@ -392,6 +1366,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
@@ -400,6 +1416,48 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 <!-- todo:07-027 -->
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
+
+`tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+fn scalar_reductions() -> Result<()> {
+	assert_eq!(
+		reductions::row_sum(1, 4)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.]])?,
+		vec![vec![10.]]
+	);
+	let k = reductions::row_sum(2, 3)?;
+	assert_eq!(
+		k.compile()?.run(&[vec![1., 2., 3., 4., 5., 6.]])?,
+		vec![vec![6., 15.]]
+	);
+	assert_eq!(
+		reductions::row_sum(2, 0)?.compile()?.run(&[vec![]])?,
+		vec![vec![0., 0.]]
+	);
+	let k = reductions::matmul(2, 2, 3)?;
+	let inputs = [vec![1., 2., 3., 4., 5., 6.], vec![1., 2., 3., 4., 5., 6.]];
+	assert_eq!(k.compile()?.run(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	assert_eq!(k.interpret(&inputs)?, vec![vec![22., 28., 49., 64.]]);
+	let mut reference = vec![0.0; 4];
+	for i in 0..2 {
+		for j in 0..2 {
+			for inner in 0..3 {
+				reference[i * 2 + j] += inputs[0][i * 3 + inner] * inputs[1][inner * 2 + j];
+			}
+		}
+	}
+	assert_eq!(k.compile()?.run(&inputs)?[0], reference);
+	assert_eq!(
+		reductions::conv1d(4, 2)?
+			.compile()?
+			.run(&[vec![1., 2., 3., 4.], vec![2., 1.]])?,
+		vec![vec![4., 7., 10.]]
+	);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_reductions scalar_reductions

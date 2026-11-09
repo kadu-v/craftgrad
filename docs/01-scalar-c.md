@@ -254,6 +254,16 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`src/bootstrap.rs` の `pub enum Op`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub enum Op"
+pub enum Op {
+	Const(f32),
+	Add(usize, usize),
+	Mul(usize, usize),
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -314,6 +324,35 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`src/bootstrap.rs` の `pub fn order(`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub fn order("
+	pub fn order(&self, root: usize) -> Result<Vec<usize>> {
+		fn visit(g: &Graph, id: usize, seen: &mut [bool], out: &mut Vec<usize>) -> Result<()> {
+			let node = g.nodes.get(id).ok_or("invalid root or input")?;
+			if seen[id] {
+				return Ok(());
+			}
+			match node {
+				Op::Add(a, b) | Op::Mul(a, b) => {
+					if *a >= id || *b >= id {
+						return Err("forward or cyclic dependency".into());
+					}
+					visit(g, *a, seen, out)?;
+					visit(g, *b, seen, out)?
+				}
+				_ => {}
+			}
+			seen[id] = true;
+			out.push(id);
+			Ok(())
+		}
+		let mut out = vec![];
+		visit(self, root, &mut vec![false; self.nodes.len()], &mut out)?;
+		Ok(out)
+	}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -322,6 +361,27 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-009 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`src/bootstrap.rs` の `pub fn source(`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub fn source("
+	pub fn source(&self, root: usize) -> Result<String> {
+		let (g, root) = self.rewrite(root)?;
+		let mut source="#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\nstatic float bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nint main(void){\n".to_string();
+		for id in g.order(root)? {
+			let expression = match g.nodes[id] {
+				Op::Const(value) => format!("bits({}u)", value.to_bits()),
+				Op::Add(a, b) => format!("v{a}+v{b}"),
+				Op::Mul(a, b) => format!("v{a}*v{b}"),
+			};
+			source.push_str(&format!("float v{id}={expression};\n"));
+		}
+		source.push_str(&format!(
+			"printf(\"%.9g\\n\",(double)v{root});\nreturn 0;\n}}\n"
+		));
+		Ok(source)
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c
@@ -332,6 +392,26 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -340,6 +420,26 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-011 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c
@@ -350,6 +450,26 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -358,6 +478,35 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-013 -->
 
 `tests/scalar_c.rs` の `rejects_invalid_graph_and_compiler` で、この経路の値または拒否条件を確認する。
+
+`src/bootstrap.rs` の `pub fn order(`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub fn order("
+	pub fn order(&self, root: usize) -> Result<Vec<usize>> {
+		fn visit(g: &Graph, id: usize, seen: &mut [bool], out: &mut Vec<usize>) -> Result<()> {
+			let node = g.nodes.get(id).ok_or("invalid root or input")?;
+			if seen[id] {
+				return Ok(());
+			}
+			match node {
+				Op::Add(a, b) | Op::Mul(a, b) => {
+					if *a >= id || *b >= id {
+						return Err("forward or cyclic dependency".into());
+					}
+					visit(g, *a, seen, out)?;
+					visit(g, *b, seen, out)?
+				}
+				_ => {}
+			}
+			seen[id] = true;
+			out.push(id);
+			Ok(())
+		}
+		let mut out = vec![];
+		visit(self, root, &mut vec![false; self.nodes.len()], &mut out)?;
+		Ok(out)
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
@@ -368,6 +517,61 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 
 `tests/scalar_c.rs` の `rejects_invalid_graph_and_compiler` で、この経路の値または拒否条件を確認する。
 
+`src/bootstrap.rs` の `pub fn run_source(`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub fn run_source("
+pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
+	let dir = Temporary(std::env::temp_dir().join(format!(
+		"chinigrad-exe-{}-{}",
+		std::process::id(),
+		NEXT.fetch_add(1, Ordering::Relaxed)
+	)));
+	std::fs::create_dir(&dir.0).map_err(|e| e.to_string())?;
+	let c = dir.0.join("program.c");
+	let binary = dir.0.join("program");
+	std::fs::write(&c, source).map_err(|e| e.to_string())?;
+	let mut command = Command::new(compiler.unwrap_or(if cfg!(target_os = "macos") {
+		"/usr/bin/clang"
+	} else {
+		"clang"
+	}));
+	command.args(["-std=c11", "-O2"]);
+	if cfg!(target_os = "macos") {
+		let sdk = Command::new("xcrun")
+			.args(["--sdk", "macosx", "--show-sdk-path"])
+			.output()
+			.map_err(|e| e.to_string())?;
+		if !sdk.status.success() {
+			return Err("cannot locate macOS SDK".into());
+		}
+		let sdk = String::from_utf8_lossy(&sdk.stdout);
+		command
+			.arg("-isysroot")
+			.arg(sdk.trim())
+			.arg(format!("--sysroot={}", sdk.trim()));
+	}
+	let output = command
+		.arg(&c)
+		.arg("-o")
+		.arg(&binary)
+		.output()
+		.map_err(|e| format!("cannot launch clang: {e}"))?;
+	if !output.status.success() {
+		return Err(format!(
+			"clang compilation failed: {}",
+			String::from_utf8_lossy(&output.stderr)
+		));
+	}
+	let output = Command::new(&binary)
+		.output()
+		.map_err(|e| format!("cannot launch generated executable: {e}"))?;
+	if !output.status.success() {
+		return Err(format!("generated executable failed: {}", output.status));
+	}
+	String::from_utf8(output.stdout).map_err(|e| e.to_string())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```
@@ -376,6 +580,26 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 <!-- todo:01-015 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c
@@ -386,6 +610,26 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -394,6 +638,26 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-017 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c
@@ -404,6 +668,26 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c
 ```
@@ -412,6 +696,26 @@ cargo test --quiet --test scalar_c
 <!-- todo:01-019 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+fn const_and_arithmetic() -> Result<()> {
+	let mut g = Graph::default();
+	let seven = g.node(Op::Const(7.));
+	assert_eq!(g.run(seven)?.trim(), "7");
+	let a = g.node(Op::Const(2.));
+	let b = g.node(Op::Const(3.));
+	let sum = g.node(Op::Add(a, b));
+	let c = g.node(Op::Const(4.));
+	let root = g.node(Op::Mul(sum, c));
+	assert_eq!(g.run(root)?.trim(), "20");
+	assert!(g.source(root)?.contains('+') && g.source(root)?.contains('*'));
+	assert_eq!(g.order(root)?.iter().filter(|&&id| id == sum).count(), 1);
+	assert_eq!(g.rewrite(root)?.1, root);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c
@@ -422,6 +726,30 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `rejects_invalid_graph_and_compiler` で、この経路の値または拒否条件を確認する。
 
+`tests/scalar_c.rs` の `fn rejects_invalid_graph_and_compiler(`の定義を次の全体で置き換えます。
+
+```rust file="tests/scalar_c.rs" mode="replace" item="fn rejects_invalid_graph_and_compiler("
+fn rejects_invalid_graph_and_compiler() {
+	let mut g = Graph::default();
+	assert!(g.source(0).is_err());
+	g.nodes.push(Op::Add(0, 0));
+	assert!(g.source(0).is_err());
+	assert!(
+		run_source("bad C", None)
+			.unwrap_err()
+			.contains("clang compilation failed")
+	);
+	assert!(
+		run_source(
+			"int main(void){return 0;}",
+			Some("/missing/chinigrad-clang")
+		)
+		.unwrap_err()
+		.contains("cannot launch clang")
+	);
+}
+```
+
 ```sh check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```
@@ -430,6 +758,14 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 <!-- todo:01-021 -->
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
+
+`src/bootstrap.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/bootstrap.rs" mode="replace" item="pub fn run("
+	pub fn run(&self, root: usize) -> Result<String> {
+		run_source(&self.source(root)?, None)
+	}
+```
 
 ```sh check
 cargo test --quiet --test scalar_c

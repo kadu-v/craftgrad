@@ -10,7 +10,7 @@
 ```rust file=src/native.rs mode=write
 use crate::Result;
 use std::{
-	ffi::{CStr, CString, c_void},
+	ffi::{CStr, CString, c_char, c_void},
 	path::PathBuf,
 	process::Command,
 	sync::atomic::{AtomicU64, Ordering},
@@ -24,10 +24,10 @@ pub struct NativeLibrary {
 }
 #[cfg_attr(target_os = "linux", link(name = "dl"))]
 unsafe extern "C" {
-	fn dlopen(path: *const i8, flags: i32) -> *mut c_void;
-	fn dlsym(handle: *mut c_void, name: *const i8) -> *mut c_void;
+	fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
+	fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
 	fn dlclose(handle: *mut c_void) -> i32;
-	fn dlerror() -> *const i8;
+	fn dlerror() -> *const c_char;
 }
 fn loader_error() -> String {
 	unsafe {
@@ -349,6 +349,82 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
+
+```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
+		let directory = std::env::temp_dir().join(format!(
+			"chinigrad-{}-{}",
+			std::process::id(),
+			NEXT.fetch_add(1, Ordering::Relaxed)
+		));
+		std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
+		let result = (|| {
+			let c = directory.join("kernel.c");
+			let dylib = directory.join("kernel.dylib");
+			std::fs::write(&c, source).map_err(|e| e.to_string())?;
+			let mut command = Command::new(compiler);
+			command.args(["-std=c11", "-O2", "-fno-fast-math", "-ffp-contract=off"]);
+			if cfg!(target_os = "macos") {
+				let sdk = Command::new("xcrun")
+					.args(["--sdk", "macosx", "--show-sdk-path"])
+					.output()
+					.map_err(|e| format!("cannot locate macOS SDK: {e}"))?;
+				if !sdk.status.success() {
+					return Err("xcrun failed to locate macOS SDK".into());
+				}
+				let sdk = String::from_utf8_lossy(&sdk.stdout);
+				command
+					.arg("-isysroot")
+					.arg(sdk.trim())
+					.arg(format!("--sysroot={}", sdk.trim()));
+			}
+			if cfg!(target_os = "macos") {
+				command.arg("-dynamiclib");
+			} else {
+				command.args(["-shared", "-fPIC"]);
+			}
+			let output = command
+				.arg(&c)
+				.arg("-o")
+				.arg(&dylib)
+				.arg("-lm")
+				.output()
+				.map_err(|e| format!("cannot launch clang: {e}"))?;
+			if !output.status.success() {
+				return Err(format!(
+					"clang compilation failed: {}",
+					String::from_utf8_lossy(&output.stderr)
+				));
+			}
+			let name =
+				CString::new(dylib.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+			let symbol = CString::new(entry).map_err(|e| e.to_string())?;
+			unsafe {
+				let handle = dlopen(name.as_ptr(), 2);
+				if handle.is_null() {
+					return Err(format!("dlopen {}: {}", dylib.display(), loader_error()));
+				}
+				let pointer = dlsym(handle, symbol.as_ptr());
+				if pointer.is_null() {
+					let e = format!("dlsym {} {entry}: {}", dylib.display(), loader_error());
+					dlclose(handle);
+					return Err(e);
+				}
+				Ok(Self {
+					handle,
+					entry: pointer,
+					directory: directory.clone(),
+				})
+			}
+		})();
+		if result.is_err() {
+			let _ = std::fs::remove_dir_all(directory);
+		}
+		result
+	}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -358,6 +434,17 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`src/inputs.rs` の `pub struct Compiled`の定義を次の全体で置き換えます。
+
+```rust file="src/inputs.rs" mode="replace" item="pub struct Compiled"
+pub struct Compiled {
+	pub source: String,
+	library: NativeLibrary,
+	slots: usize,
+	pub runs: usize,
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -366,6 +453,21 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-009 -->
 
 `tests/runtime_inputs.rs` の `constant_and_add` で、この経路の値または拒否条件を確認する。
+
+`tests/runtime_inputs.rs` の `fn constant_and_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
+fn constant_and_add() -> Result<()> {
+	let mut g = Graph::default();
+	let c = g.node(Op::Const(7.));
+	assert_eq!(g.compile(c)?.run(&[])?, 7.);
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let sum = g.node(Op::Add(a, b));
+	assert_eq!(g.compile(sum)?.run(&[2., 3.])?, 5.);
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs constant_and_add
@@ -431,6 +533,41 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`src/inputs.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
+
+```rust file="src/inputs.rs" mode="replace" item="pub fn compile("
+	pub fn compile(&self, root: usize) -> Result<Compiled> {
+		let order = self.order(root)?;
+		let mut source="#include <stdint.h>\n#include <string.h>\nstatic float bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nint chibi_entry(void*const* buffers,const uint64_t* scalars){\n".to_string();
+		let mut slots = HashSet::new();
+		for id in order {
+			let expression = match self.nodes[id] {
+				Op::Const(v) => format!("bits({}u)", v.to_bits()),
+				Op::Param(slot) => {
+					slots.insert(slot);
+					format!("bits((uint32_t)scalars[{slot}])")
+				}
+				Op::Add(a, b) => format!("v{a}+v{b}"),
+				Op::Mul(a, b) => format!("v{a}*v{b}"),
+			};
+			source.push_str(&format!("float v{id}={expression};\n"));
+		}
+		if (0..slots.len()).any(|s| !slots.contains(&s)) {
+			return Err("PARAM slots must be dense".into());
+		}
+		source.push_str(&format!(
+			"uint32_t output;memcpy(&output,&v{root},4);*(uint64_t*)buffers[0]=output;return 0;\n}}\n"
+		));
+		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Compiled {
+			source,
+			library,
+			slots: slots.len(),
+			runs: 0,
+		})
+	}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -439,6 +576,27 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-012 -->
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
+
+`src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
+		if inputs.len() != self.slots {
+			return Err("scalar input count mismatch".into());
+		}
+		let words = scalar_words(inputs);
+		let mut output = 0u64;
+		let buffers = [(&mut output as *mut u64).cast::<c_void>()];
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(buffers.as_ptr(), words.as_ptr()) };
+		if status != 0 {
+			return Err("scalar entry rejected inputs".into());
+		}
+		self.runs += 1;
+		Ok(f32::from_bits(output as u32))
+	}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs
@@ -449,6 +607,31 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -458,6 +641,31 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -466,6 +674,27 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-015 -->
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
+
+`src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
+		if inputs.len() != self.slots {
+			return Err("scalar input count mismatch".into());
+		}
+		let words = scalar_words(inputs);
+		let mut output = 0u64;
+		let buffers = [(&mut output as *mut u64).cast::<c_void>()];
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(buffers.as_ptr(), words.as_ptr()) };
+		if status != 0 {
+			return Err("scalar entry rejected inputs".into());
+		}
+		self.runs += 1;
+		Ok(f32::from_bits(output as u32))
+	}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs
@@ -507,6 +736,82 @@ fn native_errors() -> Result<()> {
 
 `tests/runtime_inputs.rs` の `native_errors` で、この経路の値または拒否条件を確認する。
 
+`src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
+
+```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
+		let directory = std::env::temp_dir().join(format!(
+			"chinigrad-{}-{}",
+			std::process::id(),
+			NEXT.fetch_add(1, Ordering::Relaxed)
+		));
+		std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
+		let result = (|| {
+			let c = directory.join("kernel.c");
+			let dylib = directory.join("kernel.dylib");
+			std::fs::write(&c, source).map_err(|e| e.to_string())?;
+			let mut command = Command::new(compiler);
+			command.args(["-std=c11", "-O2", "-fno-fast-math", "-ffp-contract=off"]);
+			if cfg!(target_os = "macos") {
+				let sdk = Command::new("xcrun")
+					.args(["--sdk", "macosx", "--show-sdk-path"])
+					.output()
+					.map_err(|e| format!("cannot locate macOS SDK: {e}"))?;
+				if !sdk.status.success() {
+					return Err("xcrun failed to locate macOS SDK".into());
+				}
+				let sdk = String::from_utf8_lossy(&sdk.stdout);
+				command
+					.arg("-isysroot")
+					.arg(sdk.trim())
+					.arg(format!("--sysroot={}", sdk.trim()));
+			}
+			if cfg!(target_os = "macos") {
+				command.arg("-dynamiclib");
+			} else {
+				command.args(["-shared", "-fPIC"]);
+			}
+			let output = command
+				.arg(&c)
+				.arg("-o")
+				.arg(&dylib)
+				.arg("-lm")
+				.output()
+				.map_err(|e| format!("cannot launch clang: {e}"))?;
+			if !output.status.success() {
+				return Err(format!(
+					"clang compilation failed: {}",
+					String::from_utf8_lossy(&output.stderr)
+				));
+			}
+			let name =
+				CString::new(dylib.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+			let symbol = CString::new(entry).map_err(|e| e.to_string())?;
+			unsafe {
+				let handle = dlopen(name.as_ptr(), 2);
+				if handle.is_null() {
+					return Err(format!("dlopen {}: {}", dylib.display(), loader_error()));
+				}
+				let pointer = dlsym(handle, symbol.as_ptr());
+				if pointer.is_null() {
+					let e = format!("dlsym {} {entry}: {}", dylib.display(), loader_error());
+					dlclose(handle);
+					return Err(e);
+				}
+				Ok(Self {
+					handle,
+					entry: pointer,
+					directory: directory.clone(),
+				})
+			}
+		})();
+		if result.is_err() {
+			let _ = std::fs::remove_dir_all(directory);
+		}
+		result
+	}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs native_errors
 ```
@@ -515,6 +820,27 @@ cargo test --quiet --test runtime_inputs native_errors
 <!-- todo:02-017 -->
 
 `tests/runtime_inputs.rs` の `native_errors` で、この経路の値または拒否条件を確認する。
+
+`src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
+		if inputs.len() != self.slots {
+			return Err("scalar input count mismatch".into());
+		}
+		let words = scalar_words(inputs);
+		let mut output = 0u64;
+		let buffers = [(&mut output as *mut u64).cast::<c_void>()];
+		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
+		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
+		let status = unsafe { entry(buffers.as_ptr(), words.as_ptr()) };
+		if status != 0 {
+			return Err("scalar entry rejected inputs".into());
+		}
+		self.runs += 1;
+		Ok(f32::from_bits(output as u32))
+	}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs native_errors
@@ -558,6 +884,31 @@ cargo test --quiet --test runtime_inputs native_lifetime
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -566,6 +917,31 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-020 -->
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs
@@ -576,6 +952,31 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs
 ```
@@ -584,6 +985,31 @@ cargo test --quiet --test runtime_inputs
 <!-- todo:02-022 -->
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+fn same_library_two_runs() -> Result<()> {
+	let mut g = Graph::default();
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let c = g.node(Op::Param(2));
+	let sum = g.node(Op::Add(a, b));
+	let root = g.node(Op::Mul(sum, c));
+	let mut plan = g.compile(root)?;
+	assert!(plan.source.contains("scalars[0]"));
+	assert_eq!(plan.run(&[2., 3., 4.])?, 20.);
+	assert_eq!(plan.run(&[5., 1., 2.])?, 12.);
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3.]).is_err());
+	assert_eq!(plan.runs, 2);
+	assert!(plan.run(&[2., 3., 4., 5.]).is_err());
+	let mut bad = Graph::default();
+	let missing = bad.node(Op::Param(1));
+	assert!(bad.compile(missing).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs
@@ -594,6 +1020,21 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `constant_and_add` で、この経路の値または拒否条件を確認する。
 
+`tests/runtime_inputs.rs` の `fn constant_and_add(`の定義を次の全体で置き換えます。
+
+```rust file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
+fn constant_and_add() -> Result<()> {
+	let mut g = Graph::default();
+	let c = g.node(Op::Const(7.));
+	assert_eq!(g.compile(c)?.run(&[])?, 7.);
+	let a = g.node(Op::Param(0));
+	let b = g.node(Op::Param(1));
+	let sum = g.node(Op::Add(a, b));
+	assert_eq!(g.compile(sum)?.run(&[2., 3.])?, 5.);
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test runtime_inputs constant_and_add
 ```
@@ -602,6 +1043,14 @@ cargo test --quiet --test runtime_inputs constant_and_add
 <!-- todo:02-024 -->
 
 `tests/runtime_inputs.rs` の `native_lifetime` で、この経路の値または拒否条件を確認する。
+
+`src/native.rs` の `pub unsafe fn symbol(`の定義を次の全体で置き換えます。
+
+```rust file="src/native.rs" mode="replace" item="pub unsafe fn symbol("
+	pub unsafe fn symbol(&self) -> *mut c_void {
+		self.entry
+	}
+```
 
 ```sh check
 cargo test --quiet --test runtime_inputs native_lifetime

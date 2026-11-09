@@ -47,6 +47,6 @@ GPUはGraphと同じ `KernelBody` の座標・maskを使い、出力位置をgro
 
 ## 参照と再現
 
-元の697項目は [requirements.json](requirements.json) に原文とIDを保存します。`tools/replay_docs.py` が見出し、コード配置、保存操作、確認コマンドを検査します。最終的な実装はMarkdownからのみ展開し、章順に実行できます。
+元の697項目は [requirements.json](requirements.json) に原文とIDを保存します。[入口に掲載した検証スクリプト](00-roadmap.md#写経確認用スクリプト) が見出し、コード配置、保存操作、確認コマンドを検査します。最終的な実装はMarkdownからのみ展開し、章順に実行できます。
 
 比較対象となるtinygradは隣のcheckoutへの各章のリンクから読めます。tinygradの実装をそのまま転写するのではなく、教育用に表現とbackendの責務を分けています。特に独自ELF loader、HCQ全体、任意のsymbolic方程式、可変rankは対象に含めません。

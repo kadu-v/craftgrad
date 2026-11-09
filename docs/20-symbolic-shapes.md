@@ -547,6 +547,40 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 
 直前のテストは実行前の graph の文字列表現と source を保存し、全実行後も一致することを検査しています。束縛値は `RunRecord` にだけ残ります。
 
+`src/symbolic.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn run("
+	pub fn run(
+		&self,
+		inputs: &[Buffer],
+		pairs: &[(VarId, usize)],
+	) -> Result<(Vec<Buffer>, RunRecord)> {
+		let snapshot = self.program.prepare(inputs, pairs)?;
+		let selected = self
+			.specialized
+			.as_ref()
+			.filter(|s| snapshot.bindings.0.get(&s.variable) == Some(&s.value));
+		let (plan, variant) = selected
+			.map(|s| (&s.plan, "specialized"))
+			.unwrap_or((&self.generic, "generic"));
+		let output = plan.run_with_shapes(inputs, &snapshot.node_shapes)?;
+		let scalar_dimensions = snapshot
+			.node_shapes
+			.iter()
+			.flatten()
+			.map(|&d| d as u64)
+			.collect();
+		let record = RunRecord {
+			variant,
+			bindings: snapshot.bindings.0.into_iter().collect(),
+			logical_shapes: output.iter().map(|b| b.shape.clone()).collect(),
+			capacities: inputs.iter().map(|b| b.data.len()).collect(),
+			scalar_dimensions,
+		};
+		Ok((output, record))
+	}
+```
+
 ```sh check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
@@ -600,6 +634,55 @@ fn expression_and_variable_handles_reject_foreign_and_diverged_clones() {
 }
 ```
 
+`src/symbolic.rs` の `pub fn expression(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn expression("
+	pub fn expression(&mut self, expression: DimExpr) -> Result<ExprId> {
+		match expression {
+			DimExpr::Var(id) => {
+				if !self.specs.iter().any(|s| s.id == id) {
+					return Err("unknown expression variable".into());
+				}
+			}
+			DimExpr::Add(a, b) => {
+				self.expression_at(a)?;
+				self.expression_at(b)?;
+			}
+			DimExpr::MulConst(a, c) | DimExpr::DivConst(a, c) | DimExpr::ModConst(a, c) => {
+				self.expression_at(a)?;
+				if c == 0 {
+					return Err("shape expression requires positive constant".into());
+				}
+			}
+			DimExpr::Const(_) => {}
+		}
+		if let Some(&id) = self.intern.get(&expression) {
+			return Ok(id);
+		}
+		static NEXT_EXPR: AtomicU64 = AtomicU64::new(1);
+		let id = ExprId {
+			scope: self.scope,
+			serial: NEXT_EXPR.fetch_add(1, Ordering::Relaxed),
+		};
+		self.expressions.insert(id, expression.clone());
+		self.intern.insert(expression, id);
+		Ok(id)
+	}
+```
+
+`src/symbolic.rs` の `pub enum DimExpr`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub enum DimExpr"
+pub enum DimExpr {
+	Const(usize),
+	Var(VarId),
+	Add(ExprId, ExprId),
+	MulConst(ExprId, usize),
+	DivConst(ExprId, usize),
+	ModConst(ExprId, usize),
+}
+```
+
 ```sh check
 cargo test --test symbolic dimensions_are_checked_and_expression_ids_do_not_alias_nodes
 ```
@@ -613,6 +696,61 @@ cargo test --test symbolic expression_and_variable_handles_reject_foreign_and_di
 <!-- todo:20-007 -->
 
 4節の graph は `sum(x)` も出力します。テストは長さを変えた各実行で期待総和を比較し、前回の累積値が残らないことを検査します。
+
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
 
 ```sh check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
@@ -668,6 +806,122 @@ fn dynamic_reshape_rows_and_movement_match_static_graph() {
 }
 ```
 
+`src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
+		let bindings = self.env.bind(pairs)?;
+		for constraint in &self.constraints {
+			match *constraint {
+				Constraint::Equal(a, b) => {
+					if self.env.eval(a, &bindings)? != self.env.eval(b, &bindings)? {
+						return Err("shape equality constraint".into());
+					}
+				}
+				Constraint::Divisible(a, c) => {
+					if c == 0 || self.env.eval(a, &bindings)? % c != 0 {
+						return Err("shape divisibility constraint".into());
+					}
+				}
+			}
+		}
+		let mut inferred = Graph::default();
+		let mut mapping = Vec::with_capacity(self.graph.nodes.len());
+		let mut actual = self.graph.clone();
+		let mut logical_input_shapes = BTreeMap::new();
+		for (id, node) in self.graph.nodes.iter().enumerate() {
+			let target = if let Some(dims) = self.target_dims.get(&id) {
+				self.env.dimensions(dims, &bindings)?
+			} else {
+				node.shape.clone()
+			};
+			let next = match &node.op {
+				Op::Input { slot } => {
+					let shape = if let Some(dims) = self.input_dims.get(slot) {
+						self.env.dimensions(dims, &bindings)?
+					} else {
+						node.shape.clone()
+					};
+					{
+						let buffer = inputs.get(*slot).ok_or("missing symbolic input")?;
+						if shape.len() != node.shape.len()
+							|| shape.iter().zip(&node.shape).any(|(n, max)| n > max)
+						{
+							return Err("logical shape exceeds compiled capacity".into());
+						}
+						if buffer.shape.len() != shape.len()
+							|| elements(&shape)? > buffer.data.len()
+						{
+							return Err("insufficient symbolic buffer capacity".into());
+						}
+						if let Some(old) = logical_input_shapes.insert(*slot, shape.clone()) {
+							if old != shape {
+								return Err("one slot has inconsistent logical shapes".into());
+							}
+						}
+					}
+					inferred.input(*slot, shape)?
+				}
+				Op::Const { bits } => inferred.constant(f32::from_bits(*bits), target)?,
+				Op::Unary { op, x } => inferred.unary(*op, mapping[*x])?,
+				Op::Binary { op, a, b } => inferred.binary(*op, mapping[*a], mapping[*b])?,
+				Op::Where { cond, yes, no } => {
+					inferred.where_(mapping[*cond], mapping[*yes], mapping[*no])?
+				}
+				Op::Reduce {
+					op,
+					x,
+					axes,
+					keepdim,
+				} => inferred.reduce(mapping[*x], *op, axes.clone(), *keepdim)?,
+				Op::Reshape { x } => inferred.reshape(mapping[*x], target)?,
+				Op::Permute { x, axes } => inferred.permute(mapping[*x], axes.clone())?,
+				Op::Expand { x } => inferred.expand(mapping[*x], target)?,
+				Op::Shrink { x, ranges } => inferred.shrink(mapping[*x], ranges.clone())?,
+				Op::Pad { x, pads } => inferred.pad(mapping[*x], pads.clone())?,
+				Op::Flip { x, axes } => inferred.flip(mapping[*x], axes.clone())?,
+				Op::Stack { xs, axis } => {
+					inferred.stack(xs.iter().map(|&x| mapping[x]).collect(), *axis)?
+				}
+				Op::Gather { x, indices, axis } => {
+					inferred.gather(mapping[*x], mapping[*indices], *axis)?
+				}
+				Op::ScatterAdd {
+					base,
+					indices,
+					updates,
+					axis,
+				} => inferred.scatter_add(
+					mapping[*base],
+					mapping[*indices],
+					mapping[*updates],
+					*axis,
+				)?,
+				Op::Stage { x } => inferred.stage(mapping[*x])?,
+				Op::StopGradient { x } => inferred.stop_gradient(mapping[*x])?,
+			};
+			actual.nodes[id].shape = inferred.shape(next).to_vec();
+			if actual.nodes[id].shape.len() != node.shape.len() {
+				return Err("runtime rank changed".into());
+			}
+			mapping.push(next);
+		}
+		if logical_input_shapes.len() != inputs.len()
+			|| (0..inputs.len()).any(|slot| !logical_input_shapes.contains_key(&slot))
+		{
+			return Err("symbolic input slots must be dense and exact".into());
+		}
+		actual.verify(&self.outputs)?;
+		let node_shapes = actual.nodes.iter().map(|node| node.shape.clone()).collect();
+		Ok(Snapshot {
+			bindings,
+			graph: actual,
+			node_shapes,
+			logical_input_shapes,
+		})
+	}
+```
+
 ```sh check
 cargo test --test symbolic dynamic_reshape_rows_and_movement_match_static_graph
 ```
@@ -711,6 +965,122 @@ fn broadcast_equality_constraints_fail_before_native_run() {
 }
 ```
 
+`src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
+		let bindings = self.env.bind(pairs)?;
+		for constraint in &self.constraints {
+			match *constraint {
+				Constraint::Equal(a, b) => {
+					if self.env.eval(a, &bindings)? != self.env.eval(b, &bindings)? {
+						return Err("shape equality constraint".into());
+					}
+				}
+				Constraint::Divisible(a, c) => {
+					if c == 0 || self.env.eval(a, &bindings)? % c != 0 {
+						return Err("shape divisibility constraint".into());
+					}
+				}
+			}
+		}
+		let mut inferred = Graph::default();
+		let mut mapping = Vec::with_capacity(self.graph.nodes.len());
+		let mut actual = self.graph.clone();
+		let mut logical_input_shapes = BTreeMap::new();
+		for (id, node) in self.graph.nodes.iter().enumerate() {
+			let target = if let Some(dims) = self.target_dims.get(&id) {
+				self.env.dimensions(dims, &bindings)?
+			} else {
+				node.shape.clone()
+			};
+			let next = match &node.op {
+				Op::Input { slot } => {
+					let shape = if let Some(dims) = self.input_dims.get(slot) {
+						self.env.dimensions(dims, &bindings)?
+					} else {
+						node.shape.clone()
+					};
+					{
+						let buffer = inputs.get(*slot).ok_or("missing symbolic input")?;
+						if shape.len() != node.shape.len()
+							|| shape.iter().zip(&node.shape).any(|(n, max)| n > max)
+						{
+							return Err("logical shape exceeds compiled capacity".into());
+						}
+						if buffer.shape.len() != shape.len()
+							|| elements(&shape)? > buffer.data.len()
+						{
+							return Err("insufficient symbolic buffer capacity".into());
+						}
+						if let Some(old) = logical_input_shapes.insert(*slot, shape.clone()) {
+							if old != shape {
+								return Err("one slot has inconsistent logical shapes".into());
+							}
+						}
+					}
+					inferred.input(*slot, shape)?
+				}
+				Op::Const { bits } => inferred.constant(f32::from_bits(*bits), target)?,
+				Op::Unary { op, x } => inferred.unary(*op, mapping[*x])?,
+				Op::Binary { op, a, b } => inferred.binary(*op, mapping[*a], mapping[*b])?,
+				Op::Where { cond, yes, no } => {
+					inferred.where_(mapping[*cond], mapping[*yes], mapping[*no])?
+				}
+				Op::Reduce {
+					op,
+					x,
+					axes,
+					keepdim,
+				} => inferred.reduce(mapping[*x], *op, axes.clone(), *keepdim)?,
+				Op::Reshape { x } => inferred.reshape(mapping[*x], target)?,
+				Op::Permute { x, axes } => inferred.permute(mapping[*x], axes.clone())?,
+				Op::Expand { x } => inferred.expand(mapping[*x], target)?,
+				Op::Shrink { x, ranges } => inferred.shrink(mapping[*x], ranges.clone())?,
+				Op::Pad { x, pads } => inferred.pad(mapping[*x], pads.clone())?,
+				Op::Flip { x, axes } => inferred.flip(mapping[*x], axes.clone())?,
+				Op::Stack { xs, axis } => {
+					inferred.stack(xs.iter().map(|&x| mapping[x]).collect(), *axis)?
+				}
+				Op::Gather { x, indices, axis } => {
+					inferred.gather(mapping[*x], mapping[*indices], *axis)?
+				}
+				Op::ScatterAdd {
+					base,
+					indices,
+					updates,
+					axis,
+				} => inferred.scatter_add(
+					mapping[*base],
+					mapping[*indices],
+					mapping[*updates],
+					*axis,
+				)?,
+				Op::Stage { x } => inferred.stage(mapping[*x])?,
+				Op::StopGradient { x } => inferred.stop_gradient(mapping[*x])?,
+			};
+			actual.nodes[id].shape = inferred.shape(next).to_vec();
+			if actual.nodes[id].shape.len() != node.shape.len() {
+				return Err("runtime rank changed".into());
+			}
+			mapping.push(next);
+		}
+		if logical_input_shapes.len() != inputs.len()
+			|| (0..inputs.len()).any(|slot| !logical_input_shapes.contains_key(&slot))
+		{
+			return Err("symbolic input slots must be dense and exact".into());
+		}
+		actual.verify(&self.outputs)?;
+		let node_shapes = actual.nodes.iter().map(|node| node.shape.clone()).collect();
+		Ok(Snapshot {
+			bindings,
+			graph: actual,
+			node_shapes,
+			logical_input_shapes,
+		})
+	}
+```
+
 ```sh check
 cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 ```
@@ -740,6 +1110,122 @@ fn dynamic_shrink_rejects_outside_logical_range() {
 	);
 	assert!(plan.run(&[input], &[(n, 2)]).is_err());
 }
+```
+
+`src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
+		let bindings = self.env.bind(pairs)?;
+		for constraint in &self.constraints {
+			match *constraint {
+				Constraint::Equal(a, b) => {
+					if self.env.eval(a, &bindings)? != self.env.eval(b, &bindings)? {
+						return Err("shape equality constraint".into());
+					}
+				}
+				Constraint::Divisible(a, c) => {
+					if c == 0 || self.env.eval(a, &bindings)? % c != 0 {
+						return Err("shape divisibility constraint".into());
+					}
+				}
+			}
+		}
+		let mut inferred = Graph::default();
+		let mut mapping = Vec::with_capacity(self.graph.nodes.len());
+		let mut actual = self.graph.clone();
+		let mut logical_input_shapes = BTreeMap::new();
+		for (id, node) in self.graph.nodes.iter().enumerate() {
+			let target = if let Some(dims) = self.target_dims.get(&id) {
+				self.env.dimensions(dims, &bindings)?
+			} else {
+				node.shape.clone()
+			};
+			let next = match &node.op {
+				Op::Input { slot } => {
+					let shape = if let Some(dims) = self.input_dims.get(slot) {
+						self.env.dimensions(dims, &bindings)?
+					} else {
+						node.shape.clone()
+					};
+					{
+						let buffer = inputs.get(*slot).ok_or("missing symbolic input")?;
+						if shape.len() != node.shape.len()
+							|| shape.iter().zip(&node.shape).any(|(n, max)| n > max)
+						{
+							return Err("logical shape exceeds compiled capacity".into());
+						}
+						if buffer.shape.len() != shape.len()
+							|| elements(&shape)? > buffer.data.len()
+						{
+							return Err("insufficient symbolic buffer capacity".into());
+						}
+						if let Some(old) = logical_input_shapes.insert(*slot, shape.clone()) {
+							if old != shape {
+								return Err("one slot has inconsistent logical shapes".into());
+							}
+						}
+					}
+					inferred.input(*slot, shape)?
+				}
+				Op::Const { bits } => inferred.constant(f32::from_bits(*bits), target)?,
+				Op::Unary { op, x } => inferred.unary(*op, mapping[*x])?,
+				Op::Binary { op, a, b } => inferred.binary(*op, mapping[*a], mapping[*b])?,
+				Op::Where { cond, yes, no } => {
+					inferred.where_(mapping[*cond], mapping[*yes], mapping[*no])?
+				}
+				Op::Reduce {
+					op,
+					x,
+					axes,
+					keepdim,
+				} => inferred.reduce(mapping[*x], *op, axes.clone(), *keepdim)?,
+				Op::Reshape { x } => inferred.reshape(mapping[*x], target)?,
+				Op::Permute { x, axes } => inferred.permute(mapping[*x], axes.clone())?,
+				Op::Expand { x } => inferred.expand(mapping[*x], target)?,
+				Op::Shrink { x, ranges } => inferred.shrink(mapping[*x], ranges.clone())?,
+				Op::Pad { x, pads } => inferred.pad(mapping[*x], pads.clone())?,
+				Op::Flip { x, axes } => inferred.flip(mapping[*x], axes.clone())?,
+				Op::Stack { xs, axis } => {
+					inferred.stack(xs.iter().map(|&x| mapping[x]).collect(), *axis)?
+				}
+				Op::Gather { x, indices, axis } => {
+					inferred.gather(mapping[*x], mapping[*indices], *axis)?
+				}
+				Op::ScatterAdd {
+					base,
+					indices,
+					updates,
+					axis,
+				} => inferred.scatter_add(
+					mapping[*base],
+					mapping[*indices],
+					mapping[*updates],
+					*axis,
+				)?,
+				Op::Stage { x } => inferred.stage(mapping[*x])?,
+				Op::StopGradient { x } => inferred.stop_gradient(mapping[*x])?,
+			};
+			actual.nodes[id].shape = inferred.shape(next).to_vec();
+			if actual.nodes[id].shape.len() != node.shape.len() {
+				return Err("runtime rank changed".into());
+			}
+			mapping.push(next);
+		}
+		if logical_input_shapes.len() != inputs.len()
+			|| (0..inputs.len()).any(|slot| !logical_input_shapes.contains_key(&slot))
+		{
+			return Err("symbolic input slots must be dense and exact".into());
+		}
+		actual.verify(&self.outputs)?;
+		let node_shapes = actual.nodes.iter().map(|node| node.shape.clone()).collect();
+		Ok(Snapshot {
+			bindings,
+			graph: actual,
+			node_shapes,
+			logical_input_shapes,
+		})
+	}
 ```
 
 ```sh check
@@ -774,6 +1260,122 @@ fn gather_validates_only_the_logical_index_prefix() {
 	);
 	assert!(plan.run(&input, &[(n, 3)]).is_err());
 }
+```
+
+`src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
+		let bindings = self.env.bind(pairs)?;
+		for constraint in &self.constraints {
+			match *constraint {
+				Constraint::Equal(a, b) => {
+					if self.env.eval(a, &bindings)? != self.env.eval(b, &bindings)? {
+						return Err("shape equality constraint".into());
+					}
+				}
+				Constraint::Divisible(a, c) => {
+					if c == 0 || self.env.eval(a, &bindings)? % c != 0 {
+						return Err("shape divisibility constraint".into());
+					}
+				}
+			}
+		}
+		let mut inferred = Graph::default();
+		let mut mapping = Vec::with_capacity(self.graph.nodes.len());
+		let mut actual = self.graph.clone();
+		let mut logical_input_shapes = BTreeMap::new();
+		for (id, node) in self.graph.nodes.iter().enumerate() {
+			let target = if let Some(dims) = self.target_dims.get(&id) {
+				self.env.dimensions(dims, &bindings)?
+			} else {
+				node.shape.clone()
+			};
+			let next = match &node.op {
+				Op::Input { slot } => {
+					let shape = if let Some(dims) = self.input_dims.get(slot) {
+						self.env.dimensions(dims, &bindings)?
+					} else {
+						node.shape.clone()
+					};
+					{
+						let buffer = inputs.get(*slot).ok_or("missing symbolic input")?;
+						if shape.len() != node.shape.len()
+							|| shape.iter().zip(&node.shape).any(|(n, max)| n > max)
+						{
+							return Err("logical shape exceeds compiled capacity".into());
+						}
+						if buffer.shape.len() != shape.len()
+							|| elements(&shape)? > buffer.data.len()
+						{
+							return Err("insufficient symbolic buffer capacity".into());
+						}
+						if let Some(old) = logical_input_shapes.insert(*slot, shape.clone()) {
+							if old != shape {
+								return Err("one slot has inconsistent logical shapes".into());
+							}
+						}
+					}
+					inferred.input(*slot, shape)?
+				}
+				Op::Const { bits } => inferred.constant(f32::from_bits(*bits), target)?,
+				Op::Unary { op, x } => inferred.unary(*op, mapping[*x])?,
+				Op::Binary { op, a, b } => inferred.binary(*op, mapping[*a], mapping[*b])?,
+				Op::Where { cond, yes, no } => {
+					inferred.where_(mapping[*cond], mapping[*yes], mapping[*no])?
+				}
+				Op::Reduce {
+					op,
+					x,
+					axes,
+					keepdim,
+				} => inferred.reduce(mapping[*x], *op, axes.clone(), *keepdim)?,
+				Op::Reshape { x } => inferred.reshape(mapping[*x], target)?,
+				Op::Permute { x, axes } => inferred.permute(mapping[*x], axes.clone())?,
+				Op::Expand { x } => inferred.expand(mapping[*x], target)?,
+				Op::Shrink { x, ranges } => inferred.shrink(mapping[*x], ranges.clone())?,
+				Op::Pad { x, pads } => inferred.pad(mapping[*x], pads.clone())?,
+				Op::Flip { x, axes } => inferred.flip(mapping[*x], axes.clone())?,
+				Op::Stack { xs, axis } => {
+					inferred.stack(xs.iter().map(|&x| mapping[x]).collect(), *axis)?
+				}
+				Op::Gather { x, indices, axis } => {
+					inferred.gather(mapping[*x], mapping[*indices], *axis)?
+				}
+				Op::ScatterAdd {
+					base,
+					indices,
+					updates,
+					axis,
+				} => inferred.scatter_add(
+					mapping[*base],
+					mapping[*indices],
+					mapping[*updates],
+					*axis,
+				)?,
+				Op::Stage { x } => inferred.stage(mapping[*x])?,
+				Op::StopGradient { x } => inferred.stop_gradient(mapping[*x])?,
+			};
+			actual.nodes[id].shape = inferred.shape(next).to_vec();
+			if actual.nodes[id].shape.len() != node.shape.len() {
+				return Err("runtime rank changed".into());
+			}
+			mapping.push(next);
+		}
+		if logical_input_shapes.len() != inputs.len()
+			|| (0..inputs.len()).any(|slot| !logical_input_shapes.contains_key(&slot))
+		{
+			return Err("symbolic input slots must be dense and exact".into());
+		}
+		actual.verify(&self.outputs)?;
+		let node_shapes = actual.nodes.iter().map(|node| node.shape.clone()).collect();
+		Ok(Snapshot {
+			bindings,
+			graph: actual,
+			node_shapes,
+			logical_input_shapes,
+		})
+	}
 ```
 
 ```sh check
@@ -942,15 +1544,15 @@ fn metal_local_sum_ignores_nan_tail() {
 		let kernels = dynamic_sum(Dialect::Metal, n, 17, 8).unwrap();
 		let mut input = vec![f32::NAN; 17];
 		input[..n].fill(1.);
-		let partial = first
-			.run(&kernels.first, &reduction_buffers(&kernels.first, input))
+		let partial = unsafe { first
+			.run(&kernels.first, &reduction_buffers(&kernels.first, input)) }
 			.unwrap()
 			.output;
-		let out = second
+		let out = unsafe { second
 			.run(
 				&kernels.second,
 				&reduction_buffers(&kernels.second, partial),
-			)
+			) }
 			.unwrap()
 			.output;
 		assert_eq!(out, vec![n as f32]);
@@ -969,19 +1571,134 @@ fn opencl_local_sum_ignores_nan_tail() {
 		let kernels = dynamic_sum(Dialect::OpenCl, n, 17, 8).unwrap();
 		let mut input = vec![f32::NAN; 17];
 		input[..n].fill(1.);
-		let partial = first
-			.run(&kernels.first, &reduction_buffers(&kernels.first, input))
+		let partial = unsafe { first
+			.run(&kernels.first, &reduction_buffers(&kernels.first, input)) }
 			.unwrap()
 			.output;
-		let out = second
+		let out = unsafe { second
 			.run(
 				&kernels.second,
 				&reduction_buffers(&kernels.second, partial),
-			)
+			) }
 			.unwrap()
 			.output;
 		assert_eq!(out, vec![n as f32]);
 	}
+}
+```
+
+`src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+pub fn lower(
+	graph: &Graph,
+	outputs: &[usize],
+	d: Dialect,
+	local: usize,
+) -> Result<Vec<(Kernel, Vec<usize>)>> {
+	graph.verify(outputs)?;
+	for id in graph.topology(outputs)? {
+		if let Op::Gather { x, indices, axis }
+		| Op::ScatterAdd {
+			base: x,
+			indices,
+			axis,
+			..
+		} = graph.nodes[id].op
+		{
+			if graph.shape(x)[axis] > 16_777_216 {
+				return Err("GPU f32 index extent exceeds exact integer range".into());
+			}
+			for index_node in graph.topology(&[indices])? {
+				if !matches!(
+					graph.nodes[index_node].op,
+					Op::Input { .. }
+						| Op::Const { .. } | Op::Reshape { .. }
+						| Op::Permute { .. }
+						| Op::Expand { .. }
+						| Op::Shrink { .. }
+						| Op::Pad { .. } | Op::Flip { .. }
+						| Op::Stack { .. } | Op::Stage { .. }
+						| Op::StopGradient { .. }
+				) {
+					return Err("GPU computed index arithmetic is unsupported; materialize integer indices as an input".into());
+				}
+			}
+		}
+	}
+	let kernels = kernel_bodies(graph, outputs, true)?;
+	let dims = graph
+		.nodes
+		.iter()
+		.flat_map(|n| n.shape.iter().map(|&v| v as u64))
+		.collect::<Vec<_>>();
+	let mut result = vec![];
+	for k in kernels {
+		let n = elements(graph.shape(k.output))?;
+		let start = k.body.find('{').ok_or("missing outer loop")? + 1;
+		let end = k.body.rfind('}').ok_or("missing loop end")?;
+		let mut body = k.body[start..end].to_string();
+
+		for (from, to) in [
+			("expf(", "exp("),
+			("logf(", "log("),
+			("sinf(", "sin("),
+			("cosf(", "cos("),
+			("sqrtf(", "sqrt("),
+			("exp2f(", "exp2("),
+			("log2f(", "log2("),
+			("floorf(", "floor("),
+			("(double)", "(float)"),
+			("uint32_t", "uint"),
+		] {
+			body = body.replace(from, to);
+		}
+		body = body.replace("return 2;", "return;");
+		let mut slots = graph
+			.topology(&[k.output])?
+			.into_iter()
+			.filter(|id| body.contains(&format!("b{id}[")))
+			.collect::<Vec<_>>();
+		slots.retain(|&id| id != k.output);
+		slots.push(k.output);
+		for (index, id) in slots.iter().enumerate() {
+			body = body.replace(&format!("b{id}["), &format!("slot{index}["));
+		}
+		for index in 0..slots.len() {
+			body = body.replace(&format!("slot{index}["), &format!("b{index}["));
+		}
+		let condition = k
+			.body
+			.split("i<")
+			.nth(1)
+			.and_then(|s| s.split("; ++i)").next())
+			.ok_or("outer loop condition")?;
+		let body = format!("size_t i=g*{local}+l;if(i<{condition}){{{body}}}");
+		let mut source = header(d, slots.len(), &body);
+		let helper = helpers(d);
+		source = match d {
+			Dialect::Metal => source.replacen("kernel void", &(helper + "kernel void"), 1),
+			Dialect::OpenCl => helper + &source,
+		};
+		let lengths = slots
+			.iter()
+			.map(|&id| elements(graph.shape(id)))
+			.collect::<Result<Vec<_>>>()?;
+		result.push((
+			Kernel {
+				scalars: dims.clone(),
+				source,
+				entry: "chibi".into(),
+				output: slots.len() - 1,
+				lengths,
+				groups: groups(n, local)?,
+				local,
+				shared_bytes: 0,
+			},
+			slots,
+		));
+	}
+	Ok(result)
 }
 ```
 
@@ -995,6 +1712,86 @@ cargo test --test symbolic_gpu dynamic_reduction_source_guards_before_load_and_s
 
 18章の `dynamic_sum` は無効 lane の `acc=0` を local 領域に書き、全 lane で barrier を通ります。Metal のテストは2段の program を一度 compile して、N=1、3、17を再実行します。
 
+`src/gpu_kernels.rs` の `pub fn dynamic_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn dynamic_sum("
+pub fn dynamic_sum(
+	d: Dialect,
+	n: usize,
+	capacity: usize,
+	local: usize,
+) -> Result<ReductionSchedule, String> {
+	if n > capacity {
+		return Err("logical reduction length exceeds capacity".into());
+	}
+	if !local.is_power_of_two() {
+		return Err("reduction local must be power of two".into());
+	}
+	let chunk = local.checked_mul(4).ok_or("chunk overflow")?;
+	let count = groups(n, chunk)?;
+	let mut first = row_sum(d, count, chunk, local, true)?;
+	first.lengths[0] = capacity;
+	first.scalars = vec![n as u64];
+	first.source = first.source.replace(
+		&format!("acc+=b0[g*{chunk}+c];"),
+		&format!("if(g*{chunk}+c<s[0]){{acc+=b0[g*{chunk}+c];}}"),
+	);
+	let mut second = row_sum(d, 1, count, local, true)?;
+	second.scalars = vec![count as u64];
+	second.source = second
+		.source
+		.replace(&format!("c<{count};"), "c<s[0];")
+		.replace(&format!("g*{count}+c"), "g*s[0]+c");
+	Ok(ReductionSchedule { first, second })
+}
+```
+
+`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+pub fn row_sum(
+	d: Dialect,
+	rows: usize,
+	cols: usize,
+	local: usize,
+	tree: bool,
+) -> Result<Kernel, String> {
+	if !local.is_power_of_two() {
+		return Err("reduction local must be a power of two".into());
+	}
+	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
+	let program = crate::collective::Collective::row_sum(local, tree)?;
+	let mut body = format!("{} float tmp[{local}];", shared(d));
+	for op in program.linearize()? {
+		match op {
+			crate::collective::LocalOp::WritePartial => {
+				body += &format!(
+					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
+				)
+			}
+			crate::collective::LocalOp::Barrier => body += barrier(d),
+			crate::collective::LocalOp::Tree { stride } => {
+				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
+			}
+			crate::collective::LocalOp::SerialFinish => {
+				body += &format!(
+					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
+				)
+			}
+			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
+		}
+	}
+	spec(
+		d,
+		vec![len, rows],
+		body,
+		rows,
+		local,
+		local.checked_mul(4).ok_or("local byte overflow")?,
+	)
+}
+```
+
 ```sh check requires=metal
 cargo test --features metal --test symbolic_gpu metal_local_sum_ignores_nan_tail -- --ignored
 ```
@@ -1004,6 +1801,91 @@ cargo test --features metal --test symbolic_gpu metal_local_sum_ignores_nan_tail
 <!-- todo:20-015 -->
 
 OpenCL は同じ snapshot の scalar words を `__constant ulong *s` に束縛します。NDRange も同じ論理 shape から計算します。
+
+`src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
+		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
+			return Err("optimized GPU plan shape mismatch".into());
+		}
+		if shapes.len() != self.graph.nodes.len() {
+			return Err("GPU shape table".into());
+		}
+		let mut graph = self.graph.clone();
+		for (node, shape) in graph.nodes.iter_mut().zip(shapes) {
+			if node.shape.len() != shape.len() {
+				return Err("GPU rank change".into());
+			}
+			elements(shape)?;
+			node.shape = shape.clone();
+		}
+		graph.verify(&self.outputs)?;
+		let mut logical_inputs = inputs.to_vec();
+		for (id, node) in graph.nodes.iter().enumerate() {
+			if let Op::Input { slot } = node.op {
+				let n = elements(graph.shape(id))?;
+				let input = inputs.get(slot).ok_or("missing GPU input")?;
+				if input.shape.len() != graph.shape(id).len() || input.data.len() < n {
+					return Err("GPU input rank/capacity".into());
+				}
+				logical_inputs[slot] =
+					Buffer::new(graph.shape(id).to_vec(), input.data[..n].to_vec())?;
+			}
+		}
+		graph.validate_inputs(&logical_inputs, &self.outputs)?;
+		graph.validate_indices(&logical_inputs, &self.outputs)?;
+		let mut values = graph
+			.nodes
+			.iter()
+			.map(|n| Buffer::zeros(n.shape.clone()))
+			.collect::<Result<Vec<_>>>()?;
+		for id in graph.topology(&self.outputs)? {
+			if let Op::Input { slot } = graph.nodes[id].op {
+				values[id] = inputs[slot].clone();
+			}
+		}
+		for step in &self.steps {
+			let mut kernel = step.kernel.clone();
+			kernel.lengths = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						step.kernel.lengths[index]
+					} else {
+						values[id].data.len()
+					}
+				})
+				.collect();
+			if !self.specialized {
+				kernel.scalars = shapes.iter().flatten().map(|&n| n as u64).collect();
+			}
+			if !self.specialized {
+				kernel.groups = groups(kernel.lengths[kernel.output], kernel.local)?;
+			}
+			if kernel.lengths[kernel.output] == 0 {
+				continue;
+			}
+			let buffers = step
+				.slots
+				.iter()
+				.enumerate()
+				.map(|(index, &id)| {
+					if id == usize::MAX {
+						vec![1.; kernel.lengths[index]]
+					} else {
+						values[id].data.clone()
+					}
+				})
+				.collect::<Vec<_>>();
+			let run = step.program.run(&kernel, &buffers)?;
+			values[*step.slots.last().unwrap()].data = run.output;
+		}
+		Ok(self.outputs.iter().map(|&id| values[id].clone()).collect())
+	}
+```
 
 ```sh check requires=opencl
 cargo test --features opencl --test symbolic_gpu opencl_uses_one_compilation_for_three_shapes -- --ignored
@@ -1033,6 +1915,32 @@ fn scalar_slots_and_metadata_use_the_same_validated_value() {
 	assert_eq!(record.logical_shapes[0], vec![3]);
 	assert_eq!(record.capacities, vec![17]);
 }
+```
+
+`src/symbolic_gpu.rs` の `pub fn run(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic_gpu.rs" mode="replace" item="pub fn run("
+	pub fn run(
+		&self,
+		inputs: &[Buffer],
+		pairs: &[(VarId, usize)],
+	) -> Result<(Vec<Buffer>, RunRecord)> {
+		let snapshot = self.program.prepare(inputs, pairs)?;
+		let output = self.gpu.run_with_shapes(inputs, &snapshot.node_shapes)?;
+		let record = RunRecord {
+			variant: "generic",
+			bindings: pairs.to_vec(),
+			logical_shapes: output.iter().map(|buffer| buffer.shape.clone()).collect(),
+			capacities: inputs.iter().map(|buffer| buffer.data.len()).collect(),
+			scalar_dimensions: snapshot
+				.node_shapes
+				.iter()
+				.flatten()
+				.map(|&n| n as u64)
+				.collect(),
+		};
+		Ok((output, record))
+	}
 ```
 
 ```sh check
@@ -1144,6 +2052,74 @@ cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 <!-- todo:20-018 -->
 
 `generic_key` と source は Plan の作成時に固定されます。各実行では同じ library のまま shape word を変更します。
+
+`src/symbolic.rs` の `pub fn generic_key(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn generic_key("
+	pub fn generic_key(&self, backend: &str, options: &str) -> Result<Vec<u8>> {
+		let mut ids = BTreeMap::new();
+		let mut signature = format!("abi=2;dtype=f32;backend={backend:?};options={options:?};");
+		fn variable(env: &ShapeEnv, id: VarId, ids: &mut BTreeMap<VarId, usize>) -> Result<String> {
+			let spec = env
+				.specs
+				.iter()
+				.find(|spec| spec.id == id)
+				.ok_or("unknown key variable")?;
+			let next = ids.len();
+			let normalized = *ids.entry(id).or_insert(next);
+			Ok(format!("v{normalized}[{},{}]", spec.min, spec.max))
+		}
+		fn dim(env: &ShapeEnv, d: Dim, ids: &mut BTreeMap<VarId, usize>) -> Result<String> {
+			Ok(match d {
+				Dim::Static(n) => format!("{n}"),
+				Dim::Var(id) => variable(env, id, ids)?,
+				Dim::Expr(id) => match *env.expression_at(id)? {
+					DimExpr::Const(n) => format!("{n}"),
+					DimExpr::Var(id) => variable(env, id, ids)?,
+					DimExpr::Add(a, b) => format!(
+						"({}+{})",
+						dim(env, Dim::Expr(a), ids)?,
+						dim(env, Dim::Expr(b), ids)?
+					),
+					DimExpr::MulConst(a, c) => format!("({}*{c})", dim(env, Dim::Expr(a), ids)?),
+					DimExpr::DivConst(a, c) => format!("({}/{c})", dim(env, Dim::Expr(a), ids)?),
+					DimExpr::ModConst(a, c) => format!("({}%{c})", dim(env, Dim::Expr(a), ids)?),
+				},
+			})
+		}
+		for (slot, dims) in &self.input_dims {
+			signature.push_str(&format!("input{slot}="));
+			for &d in dims {
+				signature.push_str(&dim(&self.env, d, &mut ids)?);
+				signature.push(',');
+			}
+		}
+		for (node, dims) in &self.target_dims {
+			signature.push_str(&format!("target{node}="));
+			for &d in dims {
+				signature.push_str(&dim(&self.env, d, &mut ids)?);
+				signature.push(',');
+			}
+		}
+		for constraint in &self.constraints {
+			signature.push_str(&match *constraint {
+				Constraint::Equal(a, b) => format!(
+					"eq({},{})",
+					dim(&self.env, a, &mut ids)?,
+					dim(&self.env, b, &mut ids)?
+				),
+				Constraint::Divisible(a, c) => {
+					format!("divisible({},{c})", dim(&self.env, a, &mut ids)?)
+				}
+			});
+		}
+		signature.push_str(&format!(
+			"graph={:?};outputs={:?}",
+			self.graph.nodes, self.outputs
+		));
+		Ok(signature.into_bytes())
+	}
+```
 
 ```sh check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
@@ -1278,6 +2254,23 @@ fn main() -> Result<(), String> {
 }
 ```
 
+`src/symbolic.rs` の `pub fn specialization_key(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn specialization_key("
+	pub fn specialization_key(&self, backend: &str, options: &str) -> Result<Option<Vec<u8>>> {
+		self.specialized
+			.as_ref()
+			.map(|s| {
+				let mut key = self.program.generic_key(backend, options)?;
+				key.extend_from_slice(
+					format!(";specialized={};tile={}", s.value, s.tile).as_bytes(),
+				);
+				Ok(key)
+			})
+			.transpose()
+	}
+```
+
 ```sh check
 cargo run --example symbolic_dispatch
 ```
@@ -1307,6 +2300,258 @@ fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 	);
 	assert_eq!(plan.run(&[data], &[(n, 1)]).unwrap().0[0].data, vec![2.]);
 }
+```
+
+`src/graph.rs` の `fn expr(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr("
+	fn expr(&mut self, id: usize, index: &str, code: &mut String) -> Result<String> {
+		if id != self.current && self.material.contains(&id)
+			|| matches!(self.g.nodes[id].op, Op::Input { .. })
+		{
+			return Ok(format!("b{id}[{index}]"));
+		}
+		let index_name = self.name();
+		code.push_str(&format!("size_t {index_name}={index};\n"));
+		let index = index_name.as_str();
+		let op = self.g.nodes[id].op.clone();
+		let value = match op {
+			Op::Input { .. } => unreachable!(),
+			Op::Const { bits } => format!("chibi_bits({bits}u)"),
+			Op::Unary { op, x } => {
+				let a = self.expr(x, index, code)?;
+				match op {
+					Unary::Neg => format!("(-({a}))"),
+					Unary::Recip => format!("(1.0f / ({a}))"),
+					other => format!(
+						"{}({a})",
+						match other {
+							Unary::Exp => "expf",
+							Unary::Log => "logf",
+							Unary::Sin => "sinf",
+							Unary::Cos => "cosf",
+							Unary::Sqrt => "sqrtf",
+							Unary::Exp2 => "exp2f",
+							Unary::Log2 => "log2f",
+							_ => unreachable!(),
+						}
+					),
+				}
+			}
+			Op::Binary { op, a, b } => {
+				let ai = self.broadcast_index(a, id, index);
+				let bi = self.broadcast_index(b, id, index);
+				let av = self.expr(a, &ai, code)?;
+				let bv = self.expr(b, &bi, code)?;
+				match op {
+					Binary::Max => format!("chibi_max({av},{bv})"),
+					_ => format!(
+						"(({av}) {} ({bv}))",
+						match op {
+							Binary::Add => "+",
+							Binary::Sub => "-",
+							Binary::Mul => "*",
+							Binary::Div => "/",
+							Binary::Lt => "<",
+							Binary::Eq => "==",
+							_ => unreachable!(),
+						}
+					),
+				}
+			}
+			Op::Where { cond, yes, no } => {
+				let ci = self.broadcast_index(cond, id, index);
+				let yi = self.broadcast_index(yes, id, index);
+				let ni = self.broadcast_index(no, id, index);
+				let cv = self.expr(cond, &ci, code)?;
+				let target = self.name();
+				code.push_str(&format!("float {target};\nif ({cv} != 0.0f) {{\n"));
+				let y = self.expr(yes, &yi, code)?;
+				code.push_str(&format!("{target} = {y};\n}} else {{\n"));
+				let n = self.expr(no, &ni, code)?;
+				code.push_str(&format!("{target} = {n};\n}}\n"));
+				return Ok(target);
+			}
+			Op::Reshape { x } | Op::Stage { x } | Op::StopGradient { x } => {
+				return self.expr(x, index, code);
+			}
+			Op::Expand { x } => {
+				let xi = self.broadcast_index(x, id, index);
+				return self.expr(x, &xi, code);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+			Op::Permute { x, axes } => {
+				let mut c = vec![String::new(); axes.len()];
+				for (a, &old) in axes.iter().enumerate() {
+					c[old] = self.coord(id, index, a)
+				}
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+			Op::Shrink { x, ranges } => {
+				let c = ranges
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| format!("({}+{lo})", self.coord(id, index, a)))
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+			Op::Pad { x, pads } => {
+				let c = (0..pads.len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				let checks = pads
+					.iter()
+					.enumerate()
+					.map(|(a, &(lo, _))| {
+						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
+					})
+					.collect::<Vec<_>>();
+				let target = self.name();
+				code.push_str(&format!(
+					"float {target}=0.0f;\nif ({}) {{\n",
+					if checks.is_empty() {
+						"1".into()
+					} else {
+						checks.join(" && ")
+					}
+				));
+				let xi = self.flatten(
+					x,
+					&c.iter()
+						.zip(&pads)
+						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
+						.collect::<Vec<_>>(),
+				);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!("{target}={value};\n}}\n"));
+				return Ok(target);
+			}
+			Op::Flip { x, axes } => {
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						let c = self.coord(id, index, a);
+						if axes.contains(&a) {
+							format!("({}-1-{c})", self.dim(x, a))
+						} else {
+							c
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+			Op::Stack { xs, axis } => {
+				let target = self.name();
+				code.push_str(&format!("float {target}=0.0f;\n"));
+				let select = self.coord(id, index, axis);
+				for (j, x) in xs.into_iter().enumerate() {
+					code.push_str(&format!(
+						"{}if ({select} == {j}) {{\n",
+						if j == 0 { "" } else { "else " }
+					));
+					let c = (0..self.g.shape(id).len())
+						.filter(|&a| a != axis)
+						.map(|a| self.coord(id, index, a))
+						.collect::<Vec<_>>();
+					let xi = self.flatten(x, &c);
+					let value = self.expr(x, &xi, code)?;
+					code.push_str(&format!("{target}={value};\n}}\n"));
+				}
+				return Ok(target);
+			}
+			Op::Gather { x, indices, axis } => {
+				let ii = self.coord(id, index, axis);
+				let iv = self.expr(indices, &ii, code)?;
+				let ivar = self.name();
+				code.push_str(&format!("float {ivar}={iv};\nif (!isfinite({ivar}) || {ivar}<0.0f || floorf({ivar})!={ivar} || (double){ivar}>=(double){}) return 2;\n",self.dim(x,axis)));
+				let mut c = (0..self.g.shape(x).len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				c[axis] = format!("(size_t){ivar}");
+				let xi = self.flatten(x, &c);
+				return self.expr(x, &xi, code);
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				let bv = self.expr(base, index, code)?;
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target}={bv};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					self.count(indices)
+				));
+				let iv = self.expr(indices, &k, code)?;
+				let ivar = self.name();
+				code.push_str(&format!("float {ivar}={iv};\nif (!isfinite({ivar}) || {ivar}<0.0f || floorf({ivar})!={ivar} || (double){ivar}>=(double){}) return 2;\nif ((size_t){ivar} == {}) {{\n",self.dim(id,axis),self.coord(id,index,axis)));
+				let mut c = (0..self.g.shape(id).len())
+					.map(|a| self.coord(id, index, a))
+					.collect::<Vec<_>>();
+				c[axis] = k;
+				let ui = self.flatten(updates, &c);
+				let uv = self.expr(updates, &ui, code)?;
+				code.push_str(&format!("{target}+={uv};\n}}\n}}\n"));
+				return Ok(target);
+			}
+		};
+		let variable = self.name();
+		code.push_str(&format!("float {variable} = {value};\n"));
+		Ok(variable)
+	}
 ```
 
 ```sh check
@@ -1352,6 +2597,23 @@ cargo test --test symbolic bindings_reject_missing_duplicate_unknown_and_outside
 <!-- todo:20-023 -->
 
 shape 式の整数演算は checked 演算です。整数で正確に表せる vector と総和も `assert_eq!` で照合します。
+
+`tests/symbolic.rs` の `fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes(`の定義を次の全体で置き換えます。
+
+```rust file="tests/symbolic.rs" mode="replace" item="fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes("
+fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes() {
+	let mut env = ShapeEnv::default();
+	let n = env.variable("N", 1, 17).unwrap();
+	let var = env.expression(DimExpr::Var(n)).unwrap();
+	let twice = env.expression(DimExpr::MulConst(var, 2)).unwrap();
+	assert_eq!(twice, env.expression(DimExpr::MulConst(var, 2)).unwrap());
+	let b = env.bind(&[(n, 3)]).unwrap();
+	assert_eq!(env.eval(Dim::Expr(twice), &b).unwrap(), 6);
+	assert!(env.expression(DimExpr::DivConst(var, 0)).is_err());
+	let huge = env.expression(DimExpr::MulConst(var, usize::MAX)).unwrap();
+	assert!(env.eval(Dim::Expr(huge), &b).is_err());
+}
+```
 
 ```sh check
 cargo test --test symbolic dimensions_are_checked_and_expression_ids_do_not_alias_nodes
@@ -1555,6 +2817,122 @@ fn symbolic_gemm_k_is_an_explicit_prelaunch_equality() {
 }
 ```
 
+`src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
+
+```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
+		let bindings = self.env.bind(pairs)?;
+		for constraint in &self.constraints {
+			match *constraint {
+				Constraint::Equal(a, b) => {
+					if self.env.eval(a, &bindings)? != self.env.eval(b, &bindings)? {
+						return Err("shape equality constraint".into());
+					}
+				}
+				Constraint::Divisible(a, c) => {
+					if c == 0 || self.env.eval(a, &bindings)? % c != 0 {
+						return Err("shape divisibility constraint".into());
+					}
+				}
+			}
+		}
+		let mut inferred = Graph::default();
+		let mut mapping = Vec::with_capacity(self.graph.nodes.len());
+		let mut actual = self.graph.clone();
+		let mut logical_input_shapes = BTreeMap::new();
+		for (id, node) in self.graph.nodes.iter().enumerate() {
+			let target = if let Some(dims) = self.target_dims.get(&id) {
+				self.env.dimensions(dims, &bindings)?
+			} else {
+				node.shape.clone()
+			};
+			let next = match &node.op {
+				Op::Input { slot } => {
+					let shape = if let Some(dims) = self.input_dims.get(slot) {
+						self.env.dimensions(dims, &bindings)?
+					} else {
+						node.shape.clone()
+					};
+					{
+						let buffer = inputs.get(*slot).ok_or("missing symbolic input")?;
+						if shape.len() != node.shape.len()
+							|| shape.iter().zip(&node.shape).any(|(n, max)| n > max)
+						{
+							return Err("logical shape exceeds compiled capacity".into());
+						}
+						if buffer.shape.len() != shape.len()
+							|| elements(&shape)? > buffer.data.len()
+						{
+							return Err("insufficient symbolic buffer capacity".into());
+						}
+						if let Some(old) = logical_input_shapes.insert(*slot, shape.clone()) {
+							if old != shape {
+								return Err("one slot has inconsistent logical shapes".into());
+							}
+						}
+					}
+					inferred.input(*slot, shape)?
+				}
+				Op::Const { bits } => inferred.constant(f32::from_bits(*bits), target)?,
+				Op::Unary { op, x } => inferred.unary(*op, mapping[*x])?,
+				Op::Binary { op, a, b } => inferred.binary(*op, mapping[*a], mapping[*b])?,
+				Op::Where { cond, yes, no } => {
+					inferred.where_(mapping[*cond], mapping[*yes], mapping[*no])?
+				}
+				Op::Reduce {
+					op,
+					x,
+					axes,
+					keepdim,
+				} => inferred.reduce(mapping[*x], *op, axes.clone(), *keepdim)?,
+				Op::Reshape { x } => inferred.reshape(mapping[*x], target)?,
+				Op::Permute { x, axes } => inferred.permute(mapping[*x], axes.clone())?,
+				Op::Expand { x } => inferred.expand(mapping[*x], target)?,
+				Op::Shrink { x, ranges } => inferred.shrink(mapping[*x], ranges.clone())?,
+				Op::Pad { x, pads } => inferred.pad(mapping[*x], pads.clone())?,
+				Op::Flip { x, axes } => inferred.flip(mapping[*x], axes.clone())?,
+				Op::Stack { xs, axis } => {
+					inferred.stack(xs.iter().map(|&x| mapping[x]).collect(), *axis)?
+				}
+				Op::Gather { x, indices, axis } => {
+					inferred.gather(mapping[*x], mapping[*indices], *axis)?
+				}
+				Op::ScatterAdd {
+					base,
+					indices,
+					updates,
+					axis,
+				} => inferred.scatter_add(
+					mapping[*base],
+					mapping[*indices],
+					mapping[*updates],
+					*axis,
+				)?,
+				Op::Stage { x } => inferred.stage(mapping[*x])?,
+				Op::StopGradient { x } => inferred.stop_gradient(mapping[*x])?,
+			};
+			actual.nodes[id].shape = inferred.shape(next).to_vec();
+			if actual.nodes[id].shape.len() != node.shape.len() {
+				return Err("runtime rank changed".into());
+			}
+			mapping.push(next);
+		}
+		if logical_input_shapes.len() != inputs.len()
+			|| (0..inputs.len()).any(|slot| !logical_input_shapes.contains_key(&slot))
+		{
+			return Err("symbolic input slots must be dense and exact".into());
+		}
+		actual.verify(&self.outputs)?;
+		let node_shapes = actual.nodes.iter().map(|node| node.shape.clone()).collect();
+		Ok(Snapshot {
+			bindings,
+			graph: actual,
+			node_shapes,
+			logical_input_shapes,
+		})
+	}
+```
+
 ```sh check
 cargo test --test symbolic symbolic_gemm_k_is_an_explicit_prelaunch_equality
 ```
@@ -1573,6 +2951,35 @@ cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 
 同じ Plan の再実行を繰り返し、論理長と縮約の初期値が戻ることを確認します。
 
+`tests/symbolic.rs` の `fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail(`の定義を次の全体で置き換えます。
+
+```rust file="tests/symbolic.rs" mode="replace" item="fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail("
+fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail() {
+	let (plan, n) = vector();
+	let source = plan.generic().source.clone();
+	let original = format!("{:?}", plan.program().graph);
+	for len in [3, 1, 17, 3] {
+		let mut data = vec![f32::NAN; 17];
+		for (i, x) in data[..len].iter_mut().enumerate() {
+			*x = (i + 1) as f32;
+		}
+		let input = Buffer::new(vec![17], data).unwrap();
+		let (out, record) = plan.run(&[input], &[(n, len)]).unwrap();
+		assert_eq!(out[0].shape, vec![len]);
+		assert_eq!(
+			out[0].data,
+			(1..=len).map(|x| (2 * x + 1) as f32).collect::<Vec<_>>()
+		);
+		assert_eq!(out[1].data, vec![(len * (len + 1) / 2) as f32]);
+		assert_eq!(record.capacities, vec![17]);
+		assert_eq!(record.variant, "generic");
+		assert_eq!(plan.generic().source, source);
+		assert_eq!(format!("{:?}", plan.program().graph), original);
+	}
+	assert!(source.contains("s["));
+}
+```
+
 ```sh check
 cargo test --test symbolic
 ```
@@ -1583,6 +2990,28 @@ cargo test --test symbolic
 
 共有した入力を転置前後で使うテストを再実行します。shape の変化と座標の変化を同時に含めます。
 
+`tests/symbolic.rs` の `fn shared_node_before_and_after_transpose_keeps_coordinates_separate(`の定義を次の全体で置き換えます。
+
+```rust file="tests/symbolic.rs" mode="replace" item="fn shared_node_before_and_after_transpose_keeps_coordinates_separate("
+fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
+	let mut env = ShapeEnv::default();
+	let n = env.variable("N", 1, 2).unwrap();
+	let mut graph = Graph::default();
+	let x = graph.input(0, vec![2, 2]).unwrap();
+	let t = graph.permute(x, vec![1, 0]).unwrap();
+	let y = graph.binary(Binary::Add, x, t).unwrap();
+	let mut program = ShapeProgram::new(graph, vec![y], env).unwrap();
+	program.input(0, vec![Dim::Var(n), Dim::Var(n)]).unwrap();
+	let plan = program.compile().unwrap();
+	let data = Buffer::new(vec![2, 2], vec![1., 2., 3., 4.]).unwrap();
+	assert_eq!(
+		plan.run(&[data.clone()], &[(n, 2)]).unwrap().0[0].data,
+		vec![2., 5., 5., 8.]
+	);
+	assert_eq!(plan.run(&[data], &[(n, 1)]).unwrap().0[0].data, vec![2.]);
+}
+```
+
 ```sh check
 cargo test --test symbolic shared_node_before_and_after_transpose_keeps_coordinates_separate
 ```
@@ -1592,6 +3021,14 @@ cargo test --test symbolic shared_node_before_and_after_transpose_keeps_coordina
 <!-- todo:20-029 -->
 
 CPU の結果とは別に各 backend のテストを実行します。デバイスがない環境では、この二つを未実行として記録します。
+
+`tests/symbolic_gpu.rs` の `fn metal_uses_one_compilation_for_three_shapes(`の定義を次の全体で置き換えます。
+
+```rust file="tests/symbolic_gpu.rs" mode="replace" item="fn metal_uses_one_compilation_for_three_shapes("
+fn metal_uses_one_compilation_for_three_shapes() {
+	verify_graph(Backend::Metal);
+}
+```
 
 ```sh check requires=metal
 cargo test --features metal --test symbolic_gpu metal_uses_one_compilation_for_three_shapes -- --ignored

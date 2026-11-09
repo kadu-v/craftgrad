@@ -299,6 +299,205 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
@@ -309,6 +508,205 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 
 実装箇所は `autodiff::gradient` の Binary::Add/Mul である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff scalar_graph -- --exact
@@ -347,6 +745,205 @@ fn signs_and_reciprocal() {
 
 実装箇所は `autodiff::gradient` の Binary::Sub と Unary::Neg である。この要件に対する実行可能な確認は `autodiff::signs_and_reciprocal` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 ```
@@ -358,6 +955,16 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 
 実装箇所は `autodiff::gradient` の Unary::Recip である。この要件に対する実行可能な確認は `autodiff::signs_and_reciprocal` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(` の `Unary::Recip` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+```
+
 ```sh check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 ```
@@ -368,6 +975,29 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
+
+`src/runtime.rs` の `pub fn compile(`（`impl Plan` 内）の定義を次の全体で置き換えます。
+
+```rust file="src/runtime.rs" mode="replace" item="pub fn compile(" within="impl Plan"
+	pub fn compile(graph: &crate::Graph, outputs: &[usize]) -> Result<Self> {
+		let (source, abi, kernel_count) = crate::graph::render(graph, outputs, true)?;
+		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
+		Ok(Self {
+			sealed: (graph.nodes.clone(), outputs.to_vec(), abi.clone()),
+			source,
+			abi,
+			graph: graph.clone(),
+			outputs: outputs.to_vec(),
+			kernel_count,
+			library,
+			specialized: false,
+			allocations: crate::graph::kernel_bodies(graph, outputs, true)?
+				.iter()
+				.map(|k| k.output)
+				.collect(),
+		})
+	}
+```
 
 ```sh check
 cargo test --offline --test autodiff scalar_graph -- --exact
@@ -404,6 +1034,205 @@ fn shared_and_detach() {
 
 実装箇所は `autodiff::gradient` の grads.get(&input) の ADD 蓄積 である。この要件に対する実行可能な確認は `autodiff::shared_and_detach` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```
@@ -415,6 +1244,205 @@ cargo test --offline --test autodiff shared_and_detach -- --exact
 
 実装箇所は `autodiff::gradient` の Graph::topology の逆順 である。この要件に対する実行可能な確認は `autodiff::shared_and_detach` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```
@@ -425,6 +1453,205 @@ cargo test --offline --test autodiff shared_and_detach -- --exact
 
 
 実装箇所は `autodiff::gradient` の Op::StopGradient である。この要件に対する実行可能な確認は `autodiff::shared_and_detach` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff shared_and_detach -- --exact
@@ -464,6 +1691,205 @@ fn seeds_and_unreachable() {
 
 実装箇所は `autodiff::gradient` の seed の shape 検証 である。この要件に対する実行可能な確認は `autodiff::seeds_and_unreachable` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff seeds_and_unreachable -- --exact
 ```
@@ -488,6 +1914,205 @@ fn unsupported_comparison() {
 ```
 
 実装箇所は `autodiff::gradient` の Binary::Lt/Eq のエラーと非到達 target である。この要件に対する実行可能な確認は `autodiff::unsupported_comparison` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff unsupported_comparison -- --exact
@@ -520,6 +2145,39 @@ fn reduce_seed_broadcast() {
 ```
 
 実装箇所は `autodiff::gradient` の Op::Reduce である。この要件に対する実行可能な確認は `autodiff::reduce_seed_broadcast` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+```
 
 ```sh check
 cargo test --offline --test autodiff reduce_seed_broadcast -- --exact
@@ -559,6 +2217,27 @@ fn bias_unbroadcast() {
 
 実装箇所は `autodiff::unbroadcast` である。この要件に対する実行可能な確認は `autodiff::bias_unbroadcast` に置く。
 
+`src/autodiff.rs` の `pub fn unbroadcast(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn unbroadcast("
+pub fn unbroadcast(g: &mut Graph, value: NodeId, shape: &[usize]) -> Result<NodeId> {
+	let out = g.shape(value).to_vec();
+	if out.len() < shape.len() {
+		return Err("gradient rank is smaller than target".into());
+	}
+	let shift = out.len() - shape.len();
+	let axes = (0..out.len())
+		.filter(|&i| i < shift || shape[i - shift] == 1 && out[i] != 1)
+		.collect::<Vec<_>>();
+	let reduced = if axes.is_empty() {
+		value
+	} else {
+		g.reduce(value, Reduce::Sum, axes, true)?
+	};
+	g.reshape(reduced, shape.to_vec())
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff bias_unbroadcast -- --exact
 ```
@@ -595,6 +2274,205 @@ fn movement_inverse() {
 
 実装箇所は `autodiff::gradient` の Op::Reshape/Permute である。この要件に対する実行可能な確認は `autodiff::movement_inverse` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff movement_inverse -- --exact
 ```
@@ -605,6 +2483,205 @@ cargo test --offline --test autodiff movement_inverse -- --exact
 
 
 実装箇所は `autodiff::gradient` の Op::Shrink/Pad である。この要件に対する実行可能な確認は `autodiff::movement_inverse` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff movement_inverse -- --exact
@@ -638,6 +2715,205 @@ fn stack_inverse() {
 
 実装箇所は `autodiff::gradient` の Op::Flip/Stack である。この要件に対する実行可能な確認は `autodiff::stack_inverse` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+pub fn gradient(
+	g: &mut Graph,
+	loss: NodeId,
+	targets: &[NodeId],
+	seed: Option<NodeId>,
+) -> Result<Vec<NodeId>> {
+	let order = g.topology(&[loss])?;
+	for &target in targets {
+		if target >= g.nodes.len() {
+			return Err(format!("invalid gradient target {target}"));
+		}
+	}
+	let seed = match seed {
+		Some(s) if g.shape(s) == g.shape(loss) => s,
+		Some(_) => return Err("gradient seed shape mismatch".into()),
+		None if g.shape(loss).is_empty() => g.constant(1., vec![])?,
+		None => return Err("non-scalar loss requires an explicit seed".into()),
+	};
+	let mut grads = HashMap::from([(loss, seed)]);
+	for id in order.into_iter().rev() {
+		let Some(&up) = grads.get(&id) else { continue };
+		let node = g.nodes[id].clone();
+		let mut contributions = Vec::new();
+		match node.op {
+			Op::Input { .. } | Op::Const { .. } | Op::StopGradient { .. } => {}
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Binary { op, a, b } => match op {
+				Binary::Add => contributions.extend([(a, up), (b, up)]),
+				Binary::Sub => contributions.extend([(a, up), (b, neg(g, up)?)]),
+				Binary::Mul => contributions.extend([(a, mul(g, up, b)?), (b, mul(g, up, a)?)]),
+				Binary::Div => {
+					let da = g.binary(Binary::Div, up, b)?;
+					let square = mul(g, b, b)?;
+					let numerator = mul(g, up, a)?;
+					let db = g.binary(Binary::Div, numerator, square)?;
+					let db = neg(g, db)?;
+					contributions.extend([(a, da), (b, db)]);
+				}
+				Binary::Max => {
+					let mask = g.binary(Binary::Eq, a, id)?;
+					let other = g.binary(Binary::Eq, b, id)?;
+					let count = add(g, mask, other)?;
+					let weight = g.binary(Binary::Div, up, count)?;
+					contributions.extend([(a, mul(g, weight, mask)?), (b, mul(g, weight, other)?)]);
+				}
+				Binary::Lt | Binary::Eq => {
+					return Err(format!(
+						"unsupported gradient at node {id}: {op:?}; detach comparisons"
+					));
+				}
+			},
+			Op::Where { cond, yes, no } => {
+				let zero = g.constant(0., vec![])?;
+				contributions.extend([
+					(yes, g.where_(cond, up, zero)?),
+					(no, g.where_(cond, zero, up)?),
+				]);
+			}
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let mut shape = g.shape(x).to_vec();
+				for &axis in &axes {
+					shape[axis] = 1;
+				}
+				let up = if keepdim {
+					up
+				} else {
+					g.reshape(up, shape.clone())?
+				};
+				let expanded = g.expand(up, g.shape(x).to_vec())?;
+				let dx = match op {
+					Reduce::Sum => expanded,
+					Reduce::Max => {
+						let maximum = if keepdim { id } else { g.reshape(id, shape)? };
+						let mask = g.binary(Binary::Eq, x, maximum)?;
+						let count = g.reduce(mask, Reduce::Sum, axes, true)?;
+						let weighted = g.binary(Binary::Div, expanded, count)?;
+						mul(g, weighted, mask)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+			Op::Reshape { x } => contributions.push((x, g.reshape(up, g.shape(x).to_vec())?)),
+			Op::Expand { x } => contributions.push((x, up)),
+			Op::Permute { x, axes } => {
+				let mut inverse = vec![0; axes.len()];
+				for (i, &a) in axes.iter().enumerate() {
+					inverse[a] = i;
+				}
+				contributions.push((x, g.permute(up, inverse)?));
+			}
+			Op::Shrink { x, ranges } => {
+				let pads = ranges
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, e))| (s, g.shape(x)[i] - e))
+					.collect();
+				contributions.push((x, g.pad(up, pads)?));
+			}
+			Op::Pad { x, pads } => {
+				let ranges = pads
+					.iter()
+					.enumerate()
+					.map(|(i, &(s, _))| (s, s + g.shape(x)[i]))
+					.collect();
+				contributions.push((x, g.shrink(up, ranges)?));
+			}
+			Op::Flip { x, axes } => contributions.push((x, g.flip(up, axes)?)),
+			Op::Stack { xs, axis } => {
+				for (i, x) in xs.into_iter().enumerate() {
+					let ranges = g
+						.shape(up)
+						.iter()
+						.enumerate()
+						.map(|(a, &n)| if a == axis { (i, i + 1) } else { (0, n) })
+						.collect();
+					let selected = g.shrink(up, ranges)?;
+					contributions.push((x, g.reshape(selected, g.shape(x).to_vec())?));
+				}
+			}
+			Op::Gather { x, indices, axis } => {
+				let zeros = g.constant(0., g.shape(x).to_vec())?;
+				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
+			}
+			Op::ScatterAdd {
+				base,
+				indices,
+				updates,
+				axis,
+			} => {
+				contributions.push((base, up));
+				contributions.push((updates, g.gather(up, indices, axis)?));
+			}
+			Op::Stage { x } => contributions.push((x, up)),
+		}
+		for (input, value) in contributions {
+			let value = unbroadcast(g, value, &g.shape(input).to_vec())?;
+			let total = match grads.get(&input) {
+				Some(&old) => add(g, old, value)?,
+				None => value,
+			};
+			grads.insert(input, total);
+		}
+	}
+	targets
+		.iter()
+		.map(|target| match grads.get(target) {
+			Some(&value) => Ok(value),
+			None => g.constant(0., g.shape(*target).to_vec()),
+		})
+		.collect()
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff stack_inverse -- --exact
 ```
@@ -648,6 +2924,16 @@ cargo test --offline --test autodiff stack_inverse -- --exact
 
 
 実装箇所は `autodiff::gradient` の Unary::Recip である。この要件に対する実行可能な確認は `autodiff::signs_and_reciprocal` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(` の `Unary::Recip` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+```
 
 ```sh check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
@@ -691,6 +2977,15 @@ fn mathematical_rules() {
 
 実装箇所は `autodiff::gradient` の Unary::Sqrt である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(` の `Unary::Sqrt` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sqrt"
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+```
+
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
@@ -701,6 +2996,17 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 
 実装箇所は `autodiff::gradient` の Unary::Sin である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(` の `Unary::Sin` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sin"
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+```
 
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
@@ -713,6 +3019,50 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 実装箇所は `autodiff::gradient` の Unary::Log2/Exp2 である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
 
+`src/autodiff.rs` の `pub fn gradient(` の `Op::Unary` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+```
+
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
@@ -723,6 +3073,50 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
+
+`src/autodiff.rs` の `pub fn gradient(` の `Op::Unary` 分岐を次の全体で置き換えます。
+
+```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
+			Op::Unary { op, x } => {
+				let dx = match op {
+					Unary::Neg => neg(g, up)?,
+					Unary::Recip => {
+						let square = mul(g, id, id)?;
+						let v = mul(g, up, square)?;
+						neg(g, v)?
+					}
+					Unary::Exp => mul(g, up, id)?,
+					Unary::Log => {
+						let reciprocal = g.unary(Unary::Recip, x)?;
+						mul(g, up, reciprocal)?
+					}
+					Unary::Sin => {
+						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
+						let phase = g.binary(Binary::Sub, halfpi, x)?;
+						let cos = g.unary(Unary::Sin, phase)?;
+						mul(g, up, cos)?
+					}
+					Unary::Cos => {
+						let sin = g.unary(Unary::Sin, x)?;
+						let v = mul(g, up, sin)?;
+						neg(g, v)?
+					}
+					Unary::Sqrt => {
+						let denom = scale(g, id, 2.)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+					Unary::Exp2 => {
+						let v = mul(g, up, id)?;
+						scale(g, v, std::f32::consts::LN_2)?
+					}
+					Unary::Log2 => {
+						let denom = scale(g, x, std::f32::consts::LN_2)?;
+						g.binary(Binary::Div, up, denom)?
+					}
+				};
+				contributions.push((x, dx));
+			}
+```
 
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
@@ -735,6 +3129,36 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
 
+`tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+fn mathematical_rules() {
+	for (op, x, derivative) in [
+		(Unary::Recip, 2., -0.25),
+		(Unary::Sqrt, 4., 0.25),
+		(Unary::Sin, 0.7, 0.7f32.cos()),
+		(Unary::Log2, 2., 1. / (2. * std::f32::consts::LN_2)),
+		(Unary::Exp2, 0.7, 0.7f32.exp2() * std::f32::consts::LN_2),
+		(Unary::Exp, 0.7, 0.7f32.exp()),
+		(Unary::Log, 2., 0.5),
+		(Unary::Cos, 0.7, -0.7f32.sin()),
+	] {
+		let mut g = Graph::default();
+		let p = g.input(0, vec![]).unwrap();
+		let y = g.unary(op, p).unwrap();
+		let dx = gradient(&mut g, y, &[p], None).unwrap()[0];
+		let plan = g.compile(&[y, dx]).unwrap();
+		let out = plan.run(&[buffer(&[], &[x])]).unwrap();
+		check(&out[1].data, &[derivative]);
+		for h in [1e-3, 5e-4] {
+			let plus = plan.run(&[buffer(&[], &[x + h])]).unwrap()[0].data[0];
+			let minus = plan.run(&[buffer(&[], &[x - h])]).unwrap()[0].data[0];
+			check(&out[1].data, &[(plus - minus) / (2. * h)]);
+		}
+	}
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
@@ -745,6 +3169,36 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
+
+`tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+fn mathematical_rules() {
+	for (op, x, derivative) in [
+		(Unary::Recip, 2., -0.25),
+		(Unary::Sqrt, 4., 0.25),
+		(Unary::Sin, 0.7, 0.7f32.cos()),
+		(Unary::Log2, 2., 1. / (2. * std::f32::consts::LN_2)),
+		(Unary::Exp2, 0.7, 0.7f32.exp2() * std::f32::consts::LN_2),
+		(Unary::Exp, 0.7, 0.7f32.exp()),
+		(Unary::Log, 2., 0.5),
+		(Unary::Cos, 0.7, -0.7f32.sin()),
+	] {
+		let mut g = Graph::default();
+		let p = g.input(0, vec![]).unwrap();
+		let y = g.unary(op, p).unwrap();
+		let dx = gradient(&mut g, y, &[p], None).unwrap()[0];
+		let plan = g.compile(&[y, dx]).unwrap();
+		let out = plan.run(&[buffer(&[], &[x])]).unwrap();
+		check(&out[1].data, &[derivative]);
+		for h in [1e-3, 5e-4] {
+			let plus = plan.run(&[buffer(&[], &[x + h])]).unwrap()[0].data[0];
+			let minus = plan.run(&[buffer(&[], &[x - h])]).unwrap()[0].data[0];
+			check(&out[1].data, &[(plus - minus) / (2. * h)]);
+		}
+	}
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
@@ -798,6 +3252,36 @@ cargo test --offline --test autodiff matmul_central_difference -- --exact
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::mathematical_rules` に置く。
 
+`tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+fn mathematical_rules() {
+	for (op, x, derivative) in [
+		(Unary::Recip, 2., -0.25),
+		(Unary::Sqrt, 4., 0.25),
+		(Unary::Sin, 0.7, 0.7f32.cos()),
+		(Unary::Log2, 2., 1. / (2. * std::f32::consts::LN_2)),
+		(Unary::Exp2, 0.7, 0.7f32.exp2() * std::f32::consts::LN_2),
+		(Unary::Exp, 0.7, 0.7f32.exp()),
+		(Unary::Log, 2., 0.5),
+		(Unary::Cos, 0.7, -0.7f32.sin()),
+	] {
+		let mut g = Graph::default();
+		let p = g.input(0, vec![]).unwrap();
+		let y = g.unary(op, p).unwrap();
+		let dx = gradient(&mut g, y, &[p], None).unwrap()[0];
+		let plan = g.compile(&[y, dx]).unwrap();
+		let out = plan.run(&[buffer(&[], &[x])]).unwrap();
+		check(&out[1].data, &[derivative]);
+		for h in [1e-3, 5e-4] {
+			let plus = plan.run(&[buffer(&[], &[x + h])]).unwrap()[0].data[0];
+			let minus = plan.run(&[buffer(&[], &[x - h])]).unwrap()[0].data[0];
+			check(&out[1].data, &[(plus - minus) / (2. * h)]);
+		}
+	}
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
@@ -808,6 +3292,32 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::bias_unbroadcast` に置く。
+
+`tests/autodiff.rs` の `fn bias_unbroadcast(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn bias_unbroadcast("
+fn bias_unbroadcast() {
+	for bias_shape in [vec![3], vec![1, 3]] {
+		let mut g = Graph::default();
+		let x = g.input(0, vec![2, 3]).unwrap();
+		let b = g.input(1, bias_shape.clone()).unwrap();
+		let z = g.binary(Binary::Add, x, b).unwrap();
+		let square = g.binary(Binary::Mul, z, z).unwrap();
+		let loss = g.reduce(square, Reduce::Sum, vec![0, 1], false).unwrap();
+		let db = gradient(&mut g, loss, &[b], None).unwrap();
+		assert_eq!(g.shape(db[0]), bias_shape);
+		let values = g
+			.compile(&db)
+			.unwrap()
+			.run(&[
+				buffer(&[2, 3], &[1., 2., 3., 4., 5., 6.]),
+				buffer(&bias_shape, &[10., 20., 30.]),
+			])
+			.unwrap();
+		check(&values[0].data, &[50., 94., 138.]);
+	}
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff bias_unbroadcast -- --exact
@@ -820,6 +3330,29 @@ cargo test --offline --test autodiff bias_unbroadcast -- --exact
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
 
+`tests/autodiff.rs` の `fn scalar_graph(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
+fn scalar_graph() {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![]).unwrap();
+	let xx = g.binary(Binary::Mul, x, x).unwrap();
+	let three = g.constant(3., vec![]).unwrap();
+	let three_x = g.binary(Binary::Mul, three, x).unwrap();
+	let y = g.binary(Binary::Add, xx, three_x).unwrap();
+	let original = format!("{:?}", g.nodes);
+	let dx = gradient(&mut g, y, &[x], None).unwrap()[0];
+	let values = g
+		.compile(&[y, dx])
+		.unwrap()
+		.run(&[buffer(&[], &[2.])])
+		.unwrap();
+	check(&values[0].data, &[10.]);
+	check(&values[1].data, &[7.]);
+	assert!(format!("{:?}", g.nodes).starts_with(original.trim_end_matches(']')));
+}
+```
+
 ```sh check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
@@ -830,6 +3363,29 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
+
+`tests/autodiff.rs` の `fn scalar_graph(`の定義を次の全体で置き換えます。
+
+```rust file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
+fn scalar_graph() {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![]).unwrap();
+	let xx = g.binary(Binary::Mul, x, x).unwrap();
+	let three = g.constant(3., vec![]).unwrap();
+	let three_x = g.binary(Binary::Mul, three, x).unwrap();
+	let y = g.binary(Binary::Add, xx, three_x).unwrap();
+	let original = format!("{:?}", g.nodes);
+	let dx = gradient(&mut g, y, &[x], None).unwrap()[0];
+	let values = g
+		.compile(&[y, dx])
+		.unwrap()
+		.run(&[buffer(&[], &[2.])])
+		.unwrap();
+	check(&values[0].data, &[10.]);
+	check(&values[1].data, &[7.]);
+	assert!(format!("{:?}", g.nodes).starts_with(original.trim_end_matches(']')));
+}
+```
 
 ```sh check
 cargo test --offline --test autodiff scalar_graph -- --exact

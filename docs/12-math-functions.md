@@ -275,6 +275,27 @@ cargo test --quiet --test math_functions empty_and_math
 
 `tests/math_functions.rs` の `empty_and_math` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn interpret_node(` の `Op::Unary` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn interpret_node(" arm="Op::Unary"
+			Op::Unary { op, x } => {
+				for (i, v) in data.iter_mut().enumerate() {
+					let a = get(*x, i);
+					*v = match op {
+						Unary::Neg => -a,
+						Unary::Recip => a.recip(),
+						Unary::Exp => a.exp(),
+						Unary::Log => a.ln(),
+						Unary::Sin => a.sin(),
+						Unary::Cos => a.cos(),
+						Unary::Sqrt => a.sqrt(),
+						Unary::Exp2 => a.exp2(),
+						Unary::Log2 => a.log2(),
+					}
+				}
+			}
+```
+
 ```sh check
 cargo test --quiet --test math_functions empty_and_math
 ```
@@ -283,6 +304,82 @@ cargo test --quiet --test math_functions empty_and_math
 <!-- todo:12-003 -->
 
 `tests/math_functions.rs` の `empty_and_math` で、この経路の値または拒否条件を確認する。
+
+`src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
+
+```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
+		let directory = std::env::temp_dir().join(format!(
+			"chinigrad-{}-{}",
+			std::process::id(),
+			NEXT.fetch_add(1, Ordering::Relaxed)
+		));
+		std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
+		let result = (|| {
+			let c = directory.join("kernel.c");
+			let dylib = directory.join("kernel.dylib");
+			std::fs::write(&c, source).map_err(|e| e.to_string())?;
+			let mut command = Command::new(compiler);
+			command.args(["-std=c11", "-O2", "-fno-fast-math", "-ffp-contract=off"]);
+			if cfg!(target_os = "macos") {
+				let sdk = Command::new("xcrun")
+					.args(["--sdk", "macosx", "--show-sdk-path"])
+					.output()
+					.map_err(|e| format!("cannot locate macOS SDK: {e}"))?;
+				if !sdk.status.success() {
+					return Err("xcrun failed to locate macOS SDK".into());
+				}
+				let sdk = String::from_utf8_lossy(&sdk.stdout);
+				command
+					.arg("-isysroot")
+					.arg(sdk.trim())
+					.arg(format!("--sysroot={}", sdk.trim()));
+			}
+			if cfg!(target_os = "macos") {
+				command.arg("-dynamiclib");
+			} else {
+				command.args(["-shared", "-fPIC"]);
+			}
+			let output = command
+				.arg(&c)
+				.arg("-o")
+				.arg(&dylib)
+				.arg("-lm")
+				.output()
+				.map_err(|e| format!("cannot launch clang: {e}"))?;
+			if !output.status.success() {
+				return Err(format!(
+					"clang compilation failed: {}",
+					String::from_utf8_lossy(&output.stderr)
+				));
+			}
+			let name =
+				CString::new(dylib.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+			let symbol = CString::new(entry).map_err(|e| e.to_string())?;
+			unsafe {
+				let handle = dlopen(name.as_ptr(), 2);
+				if handle.is_null() {
+					return Err(format!("dlopen {}: {}", dylib.display(), loader_error()));
+				}
+				let pointer = dlsym(handle, symbol.as_ptr());
+				if pointer.is_null() {
+					let e = format!("dlsym {} {entry}: {}", dylib.display(), loader_error());
+					dlclose(handle);
+					return Err(e);
+				}
+				Ok(Self {
+					handle,
+					entry: pointer,
+					directory: directory.clone(),
+				})
+			}
+		})();
+		if result.is_err() {
+			let _ = std::fs::remove_dir_all(directory);
+		}
+		result
+	}
+```
 
 ```sh check
 cargo test --quiet --test math_functions empty_and_math
@@ -293,6 +390,31 @@ cargo test --quiet --test math_functions empty_and_math
 
 `tests/math_functions.rs` の `empty_and_math` で、この経路の値または拒否条件を確認する。
 
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions empty_and_math
 ```
@@ -301,6 +423,31 @@ cargo test --quiet --test math_functions empty_and_math
 <!-- todo:12-005 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`src/graph.rs` の `fn expr(` の `Op::Unary` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
+			Op::Unary { op, x } => {
+				let a = self.expr(x, index, code)?;
+				match op {
+					Unary::Neg => format!("(-({a}))"),
+					Unary::Recip => format!("(1.0f / ({a}))"),
+					other => format!(
+						"{}({a})",
+						match other {
+							Unary::Exp => "expf",
+							Unary::Log => "logf",
+							Unary::Sin => "sinf",
+							Unary::Cos => "cosf",
+							Unary::Sqrt => "sqrtf",
+							Unary::Exp2 => "exp2f",
+							Unary::Log2 => "log2f",
+							_ => unreachable!(),
+						}
+					),
+				}
+			}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -311,6 +458,31 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/graph.rs` の `fn expr(` の `Op::Unary` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
+			Op::Unary { op, x } => {
+				let a = self.expr(x, index, code)?;
+				match op {
+					Unary::Neg => format!("(-({a}))"),
+					Unary::Recip => format!("(1.0f / ({a}))"),
+					other => format!(
+						"{}({a})",
+						match other {
+							Unary::Exp => "expf",
+							Unary::Log => "logf",
+							Unary::Sin => "sinf",
+							Unary::Cos => "cosf",
+							Unary::Sqrt => "sqrtf",
+							Unary::Exp2 => "exp2f",
+							Unary::Log2 => "log2f",
+							_ => unreachable!(),
+						}
+					),
+				}
+			}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -319,6 +491,26 @@ cargo test --quiet --test math_functions
 <!-- todo:12-007 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`src/math.rs` の `pub fn exp(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn exp("
+pub fn exp(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let scale = scalar(g, std::f32::consts::LOG2_E)?;
+	let y = mul(g, x, scale)?;
+	g.unary(U::Exp2, y)
+}
+```
+
+`src/math.rs` の `pub fn log(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn log("
+pub fn log(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let y = g.unary(U::Log2, x)?;
+	let scale = scalar(g, std::f32::consts::LN_2)?;
+	mul(g, y, scale)
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -329,6 +521,31 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -337,6 +554,31 @@ cargo test --quiet --test math_functions
 <!-- todo:12-009 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -347,6 +589,35 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let two = scalar(g, 2.)?;
+	let mut q = scalar(g, -16.)?;
+	let mut scale = scalar(g, 2.0f32.powi(-16))?;
+	for n in -15..=16 {
+		let threshold = scalar(g, n as f32 - 0.5)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+		let factor = g.where_(above, two, one)?;
+		scale = mul(g, scale, factor)?;
+	}
+	let r = sub(g, x, q)?;
+	let l = std::f32::consts::LN_2;
+	let coefficients = (0..=7)
+		.map(|n| l.powi(n) / (1..=n).product::<i32>() as f32)
+		.collect::<Vec<_>>();
+	let p = horner(g, r, &coefficients)?;
+	let approx = mul(g, p, scale)?;
+	let valid = bounded(g, x, -16., 16.)?;
+	let fallback = g.unary(U::Exp2, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -355,6 +626,35 @@ cargo test --quiet --test math_functions
 <!-- todo:12-011 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let two = scalar(g, 2.)?;
+	let mut q = scalar(g, -16.)?;
+	let mut scale = scalar(g, 2.0f32.powi(-16))?;
+	for n in -15..=16 {
+		let threshold = scalar(g, n as f32 - 0.5)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+		let factor = g.where_(above, two, one)?;
+		scale = mul(g, scale, factor)?;
+	}
+	let r = sub(g, x, q)?;
+	let l = std::f32::consts::LN_2;
+	let coefficients = (0..=7)
+		.map(|n| l.powi(n) / (1..=n).product::<i32>() as f32)
+		.collect::<Vec<_>>();
+	let p = horner(g, r, &coefficients)?;
+	let approx = mul(g, p, scale)?;
+	let valid = bounded(g, x, -16., 16.)?;
+	let fallback = g.unary(U::Exp2, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -365,6 +665,37 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/math.rs` の `pub fn approximate_log2(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_log2("
+pub fn approximate_log2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let mut e = scalar(g, -16.)?;
+	let mut scale = scalar(g, 2.0f32.powi(-16))?;
+	for n in -15..=16 {
+		let threshold = scalar(g, 2.0f32.powi(n))?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		e = add(g, e, above)?;
+		scale = g.where_(above, threshold, scale)?;
+	}
+	let m = g.binary(B::Div, x, scale)?;
+	let numerator = sub(g, m, one)?;
+	let denominator = add(g, m, one)?;
+	let t = g.binary(B::Div, numerator, denominator)?;
+	let t2 = mul(g, t, t)?;
+	let coefficients = (0..6)
+		.map(|n| 2.0 * std::f32::consts::LOG2_E / (2 * n + 1) as f32)
+		.collect::<Vec<_>>();
+	let p = horner(g, t2, &coefficients)?;
+	let p = mul(g, t, p)?;
+	let approx = add(g, e, p)?;
+	let valid = bounded(g, x, 2.0f32.powi(-16), 2.0f32.powi(16))?;
+	let fallback = g.unary(U::Log2, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -373,6 +704,35 @@ cargo test --quiet --test math_functions
 <!-- todo:12-013 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let two = scalar(g, 2.)?;
+	let mut q = scalar(g, -16.)?;
+	let mut scale = scalar(g, 2.0f32.powi(-16))?;
+	for n in -15..=16 {
+		let threshold = scalar(g, n as f32 - 0.5)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+		let factor = g.where_(above, two, one)?;
+		scale = mul(g, scale, factor)?;
+	}
+	let r = sub(g, x, q)?;
+	let l = std::f32::consts::LN_2;
+	let coefficients = (0..=7)
+		.map(|n| l.powi(n) / (1..=n).product::<i32>() as f32)
+		.collect::<Vec<_>>();
+	let p = horner(g, r, &coefficients)?;
+	let approx = mul(g, p, scale)?;
+	let valid = bounded(g, x, -16., 16.)?;
+	let fallback = g.unary(U::Exp2, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -383,6 +743,35 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let two = scalar(g, 2.)?;
+	let mut q = scalar(g, -16.)?;
+	let mut scale = scalar(g, 2.0f32.powi(-16))?;
+	for n in -15..=16 {
+		let threshold = scalar(g, n as f32 - 0.5)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+		let factor = g.where_(above, two, one)?;
+		scale = mul(g, scale, factor)?;
+	}
+	let r = sub(g, x, q)?;
+	let l = std::f32::consts::LN_2;
+	let coefficients = (0..=7)
+		.map(|n| l.powi(n) / (1..=n).product::<i32>() as f32)
+		.collect::<Vec<_>>();
+	let p = horner(g, r, &coefficients)?;
+	let approx = mul(g, p, scale)?;
+	let valid = bounded(g, x, -16., 16.)?;
+	let fallback = g.unary(U::Exp2, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -391,6 +780,49 @@ cargo test --quiet --test math_functions
 <!-- todo:12-015 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let mut q = scalar(g, -5.)?;
+	for n in -4..=5 {
+		let threshold = scalar(g, (n as f32 - 0.5) * std::f32::consts::TAU)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+	}
+	let tau = scalar(g, std::f32::consts::TAU)?;
+	let multiple = mul(g, q, tau)?;
+	let mut r = sub(g, x, multiple)?;
+	let pi = scalar(g, std::f32::consts::PI)?;
+	let half = scalar(g, std::f32::consts::FRAC_PI_2)?;
+	let above = g.binary(B::Lt, half, r)?;
+	let reflected = sub(g, pi, r)?;
+	r = g.where_(above, reflected, r)?;
+	let negative_half = scalar(g, -std::f32::consts::FRAC_PI_2)?;
+	let negative_pi = scalar(g, -std::f32::consts::PI)?;
+	let below = g.binary(B::Lt, r, negative_half)?;
+	let reflected = sub(g, negative_pi, r)?;
+	r = g.where_(below, reflected, r)?;
+	let squared = mul(g, r, r)?;
+	let coefficients = [
+		1.,
+		-1. / 6.,
+		1. / 120.,
+		-1. / 5040.,
+		1. / 362880.,
+		-1. / 39916800.,
+		1. / 6227020800.,
+	];
+	let p = horner(g, squared, &coefficients)?;
+	let approx = mul(g, r, p)?;
+	let valid = bounded(g, x, -32.000004, 32.000004)?;
+	let fallback = g.unary(U::Sin, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -401,6 +833,49 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let mut q = scalar(g, -5.)?;
+	for n in -4..=5 {
+		let threshold = scalar(g, (n as f32 - 0.5) * std::f32::consts::TAU)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+	}
+	let tau = scalar(g, std::f32::consts::TAU)?;
+	let multiple = mul(g, q, tau)?;
+	let mut r = sub(g, x, multiple)?;
+	let pi = scalar(g, std::f32::consts::PI)?;
+	let half = scalar(g, std::f32::consts::FRAC_PI_2)?;
+	let above = g.binary(B::Lt, half, r)?;
+	let reflected = sub(g, pi, r)?;
+	r = g.where_(above, reflected, r)?;
+	let negative_half = scalar(g, -std::f32::consts::FRAC_PI_2)?;
+	let negative_pi = scalar(g, -std::f32::consts::PI)?;
+	let below = g.binary(B::Lt, r, negative_half)?;
+	let reflected = sub(g, negative_pi, r)?;
+	r = g.where_(below, reflected, r)?;
+	let squared = mul(g, r, r)?;
+	let coefficients = [
+		1.,
+		-1. / 6.,
+		1. / 120.,
+		-1. / 5040.,
+		1. / 362880.,
+		-1. / 39916800.,
+		1. / 6227020800.,
+	];
+	let p = horner(g, squared, &coefficients)?;
+	let approx = mul(g, r, p)?;
+	let valid = bounded(g, x, -32.000004, 32.000004)?;
+	let fallback = g.unary(U::Sin, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -409,6 +884,31 @@ cargo test --quiet --test math_functions
 <!-- todo:12-017 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -419,6 +919,49 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
+
+```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
+	let one = scalar(g, 1.)?;
+	let mut q = scalar(g, -5.)?;
+	for n in -4..=5 {
+		let threshold = scalar(g, (n as f32 - 0.5) * std::f32::consts::TAU)?;
+		let below = g.binary(B::Lt, x, threshold)?;
+		let above = sub(g, one, below)?;
+		q = add(g, q, above)?;
+	}
+	let tau = scalar(g, std::f32::consts::TAU)?;
+	let multiple = mul(g, q, tau)?;
+	let mut r = sub(g, x, multiple)?;
+	let pi = scalar(g, std::f32::consts::PI)?;
+	let half = scalar(g, std::f32::consts::FRAC_PI_2)?;
+	let above = g.binary(B::Lt, half, r)?;
+	let reflected = sub(g, pi, r)?;
+	r = g.where_(above, reflected, r)?;
+	let negative_half = scalar(g, -std::f32::consts::FRAC_PI_2)?;
+	let negative_pi = scalar(g, -std::f32::consts::PI)?;
+	let below = g.binary(B::Lt, r, negative_half)?;
+	let reflected = sub(g, negative_pi, r)?;
+	r = g.where_(below, reflected, r)?;
+	let squared = mul(g, r, r)?;
+	let coefficients = [
+		1.,
+		-1. / 6.,
+		1. / 120.,
+		-1. / 5040.,
+		1. / 362880.,
+		-1. / 39916800.,
+		1. / 6227020800.,
+	];
+	let p = horner(g, squared, &coefficients)?;
+	let approx = mul(g, r, p)?;
+	let valid = bounded(g, x, -32.000004, 32.000004)?;
+	let fallback = g.unary(U::Sin, x)?;
+	g.where_(valid, approx, fallback)
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -427,6 +970,31 @@ cargo test --quiet --test math_functions
 <!-- todo:12-019 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions
@@ -437,6 +1005,31 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -445,6 +1038,31 @@ cargo test --quiet --test math_functions
 <!-- todo:12-021 -->
 
 `tests/math_functions.rs` の `empty_and_math` で、この経路の値または拒否条件を確認する。
+
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions empty_and_math
@@ -455,6 +1073,31 @@ cargo test --quiet --test math_functions empty_and_math
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -464,6 +1107,31 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test math_functions
 ```
@@ -472,6 +1140,31 @@ cargo test --quiet --test math_functions
 <!-- todo:12-024 -->
 
 `tests/math_functions.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
+
+```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+fn empty_and_math() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![2, 0])?;
+	let y = g.reduce(x, Reduce::Sum, vec![1], false)?;
+	assert_eq!(
+		g.compile(&[y])?.run(&[buffer(&[2, 0], &[])])?[0].data,
+		[0., 0.]
+	);
+	let mut g = Graph::default();
+	let x = g.input(0, vec![4])?;
+	let y = g.unary(Unary::Sqrt, x)?;
+	let out = g
+		.compile(&[y])?
+		.run(&[buffer(&[4], &[-0., 4., -1., f32::INFINITY])])?;
+	assert_eq!(out[0].data[0].to_bits(), (-0.0f32).to_bits());
+	assert_eq!(out[0].data[1], 2.);
+	assert!(out[0].data[2].is_nan());
+	assert!(out[0].data[3].is_infinite());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test math_functions

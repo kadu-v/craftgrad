@@ -376,6 +376,44 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`src/scalar.rs` の `pub fn scoped_param(`の定義を次の全体で置き換えます。
+
+```rust file="src/scalar.rs" mode="replace" item="pub fn scoped_param("
+	pub fn scoped_param(
+		&mut self,
+		scope: usize,
+		slot: usize,
+		dtype: DType,
+		bounds: Option<Bounds>,
+	) -> Result<usize> {
+		if dtype == DType::Void {
+			return Err("void PARAM".into());
+		}
+		if let Some(b) = bounds {
+			if b.lo > b.hi
+				|| dtype == DType::I32 && (b.lo < i32::MIN as i64 || b.hi > i32::MAX as i64)
+			{
+				return Err("invalid parameter bounds".into());
+			}
+		}
+		Ok(self.push(SNode {
+			op: SOp::Param {
+				slot,
+				scope,
+				dtype,
+				bounds,
+			},
+			inputs: vec![],
+			dtype,
+			bounds: bounds.or(if dtype == DType::I32 {
+				Some(Bounds::I32)
+			} else {
+				None
+			}),
+		}))
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -384,6 +422,20 @@ cargo test --quiet --test function_stack
 <!-- todo:04-003 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`src/functions.rs` の `pub fn evaluate(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn evaluate("
+	pub fn evaluate(&self, args: &[Value]) -> Result<Vec<Value>> {
+		if args.len() != self.parameters.len() {
+			return Err("CALL argument count".into());
+		}
+		self.outputs
+			.iter()
+			.map(|&id| self.graph.evaluate_scoped(id, args, self.scope))
+			.collect()
+	}
+```
 
 ```sh check
 cargo test --quiet --test function_stack
@@ -394,6 +446,50 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn call("
+	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
+		if args.len() != self.parameters.len() {
+			return Err("CALL argument count".into());
+		}
+		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
+			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
+			if n.dtype != dtype {
+				return Err("CALL argument dtype".into());
+			}
+			if let Some(expected) = bounds {
+				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
+				if actual.lo < expected.lo || actual.hi > expected.hi {
+					return Err("CALL argument exceeds declared bounds".into());
+				}
+			}
+		}
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for &root in &self.outputs {
+			self.graph.verify(root, self.scope)?;
+			for id in self.graph.order(root)? {
+				if map.contains_key(&id) {
+					continue;
+				}
+				let node = &self.graph.nodes[id];
+				let value = match node.op {
+					SOp::Const(v) => caller.constant(v),
+					SOp::Param { slot, scope, .. } => {
+						if scope != self.scope {
+							return Err("capture from another scope".into());
+						}
+						*args.get(slot).ok_or("unbound function parameter")?
+					}
+					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
+				};
+				map.insert(id, value);
+			}
+		}
+		Ok(self.outputs.iter().map(|id| map[id]).collect())
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -402,6 +498,31 @@ cargo test --quiet --test function_stack
 <!-- todo:04-005 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack
@@ -412,6 +533,45 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn build("
+	pub fn build(
+		name: &str,
+		parameters: Vec<(DType, Option<Bounds>)>,
+		body: impl FnOnce(&mut ScalarGraph, &[usize]) -> Result<Vec<usize>>,
+	) -> Result<Self> {
+		if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+			return Err("invalid function name".into());
+		}
+		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
+		let mut graph = ScalarGraph::default();
+		let args = parameters
+			.iter()
+			.enumerate()
+			.map(|(slot, &(dtype, bounds))| graph.scoped_param(scope, slot, dtype, bounds))
+			.collect::<Result<Vec<_>>>()?;
+		let outputs = body(&mut graph, &args)?;
+		if outputs.is_empty() {
+			return Err("empty function result".into());
+		}
+		for &root in &outputs {
+			graph.verify(root, scope)?;
+		}
+		let dtype = graph.nodes[outputs[0]].dtype;
+		if outputs.iter().any(|&id| graph.nodes[id].dtype != dtype) {
+			return Err("STACK requires homogeneous scalar results".into());
+		}
+		Ok(Self {
+			name: name.into(),
+			scope,
+			graph,
+			parameters,
+			outputs,
+		})
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -420,6 +580,17 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-007 -->
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
+
+`src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn index("
+	pub fn index(results: &[usize], index: isize) -> Result<usize> {
+		usize::try_from(index)
+			.ok()
+			.and_then(|i| results.get(i).copied())
+			.ok_or("STACK INDEX out of bounds".into())
+	}
+```
 
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
@@ -430,6 +601,50 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn call("
+	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
+		if args.len() != self.parameters.len() {
+			return Err("CALL argument count".into());
+		}
+		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
+			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
+			if n.dtype != dtype {
+				return Err("CALL argument dtype".into());
+			}
+			if let Some(expected) = bounds {
+				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
+				if actual.lo < expected.lo || actual.hi > expected.hi {
+					return Err("CALL argument exceeds declared bounds".into());
+				}
+			}
+		}
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for &root in &self.outputs {
+			self.graph.verify(root, self.scope)?;
+			for id in self.graph.order(root)? {
+				if map.contains_key(&id) {
+					continue;
+				}
+				let node = &self.graph.nodes[id];
+				let value = match node.op {
+					SOp::Const(v) => caller.constant(v),
+					SOp::Param { slot, scope, .. } => {
+						if scope != self.scope {
+							return Err("capture from another scope".into());
+						}
+						*args.get(slot).ok_or("unbound function parameter")?
+					}
+					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
+				};
+				map.insert(id, value);
+			}
+		}
+		Ok(self.outputs.iter().map(|id| map[id]).collect())
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -438,6 +653,31 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-009 -->
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
@@ -448,6 +688,146 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+	pub fn from_uir(text: &str) -> Result<Self> {
+		let mut lines = text.lines();
+		let header = lines
+			.next()
+			.ok_or("missing function header")?
+			.split_whitespace()
+			.collect::<Vec<_>>();
+		if header.len() != 2 || header[0] != "function" {
+			return Err("invalid function header".into());
+		}
+		let name = header[1].to_string();
+		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
+		let mut graph = ScalarGraph::default();
+		let mut parameters = vec![];
+		let mut outputs = None;
+		for line in lines {
+			if outputs.is_some() {
+				return Err("tokens after return".into());
+			}
+			let fields = line.split_whitespace().collect::<Vec<_>>();
+			if fields.is_empty() {
+				continue;
+			}
+			let parse = |s: &str| {
+				s.parse::<usize>()
+					.map_err(|_| "invalid node number".to_string())
+			};
+			match fields[0] {
+				"const" if fields.len() == 3 => {
+					let t = parse_dtype(fields[1])?;
+					let bits = fields[2]
+						.parse::<u64>()
+						.map_err(|_| "invalid constant bits")?;
+					graph.constant(Value::unpack(t, bits)?);
+				}
+				"param" if fields.len() == 5 => {
+					let slot = parse(fields[1])?;
+					if slot != parameters.len() {
+						return Err("non-dense function parameter".into());
+					}
+					let t = parse_dtype(fields[2])?;
+					let bounds = if fields[3] == "none" && fields[4] == "none" {
+						None
+					} else {
+						Some(Bounds::new(
+							fields[3].parse().map_err(|_| "invalid bound")?,
+							fields[4].parse().map_err(|_| "invalid bound")?,
+						)?)
+					};
+					graph.scoped_param(scope, slot, t, bounds)?;
+					parameters.push((t, bounds));
+				}
+				"alu" if fields.len() >= 3 => {
+					graph.alu(
+						parse_alu(fields[1])?,
+						fields[2..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<_>>()?,
+					)?;
+				}
+				"return" if fields.len() >= 2 => {
+					outputs = Some(
+						fields[1..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<Vec<_>>>()?,
+					);
+				}
+				_ => return Err(format!("invalid UIR instruction {line}")),
+			}
+		}
+		let outputs = outputs.ok_or("missing return")?;
+		for &id in &outputs {
+			graph.verify(id, scope)?;
+		}
+		if outputs
+			.iter()
+			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
+		{
+			return Err("heterogeneous STACK".into());
+		}
+		Ok(Self {
+			name,
+			scope,
+			graph,
+			parameters,
+			outputs,
+		})
+	}
+```
+
+`src/functions.rs` の `pub fn to_uir(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn to_uir("
+	pub fn to_uir(&self) -> String {
+		let mut text = format!("function {}\n", self.name);
+		for node in &self.graph.nodes {
+			let line = match node.op {
+				SOp::Const(v) => format!("const {} {}", dtype_name(v.dtype()), v.pack()),
+				SOp::Param {
+					slot,
+					dtype,
+					bounds,
+					..
+				} => format!(
+					"param {slot} {} {}",
+					dtype_name(dtype),
+					bounds
+						.map(|b| format!("{} {}", b.lo, b.hi))
+						.unwrap_or("none none".into())
+				),
+				SOp::Alu(op) => format!(
+					"alu {} {}",
+					alu_name(op),
+					node.inputs
+						.iter()
+						.map(|i| i.to_string())
+						.collect::<Vec<_>>()
+						.join(" ")
+				),
+			};
+			text.push_str(&line);
+			text.push('\n');
+		}
+		text.push_str(&format!(
+			"return {}\n",
+			self.outputs
+				.iter()
+				.map(|i| i.to_string())
+				.collect::<Vec<_>>()
+				.join(" ")
+		));
+		text
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -456,6 +836,101 @@ cargo test --quiet --test function_stack
 <!-- todo:04-011 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+	pub fn from_uir(text: &str) -> Result<Self> {
+		let mut lines = text.lines();
+		let header = lines
+			.next()
+			.ok_or("missing function header")?
+			.split_whitespace()
+			.collect::<Vec<_>>();
+		if header.len() != 2 || header[0] != "function" {
+			return Err("invalid function header".into());
+		}
+		let name = header[1].to_string();
+		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
+		let mut graph = ScalarGraph::default();
+		let mut parameters = vec![];
+		let mut outputs = None;
+		for line in lines {
+			if outputs.is_some() {
+				return Err("tokens after return".into());
+			}
+			let fields = line.split_whitespace().collect::<Vec<_>>();
+			if fields.is_empty() {
+				continue;
+			}
+			let parse = |s: &str| {
+				s.parse::<usize>()
+					.map_err(|_| "invalid node number".to_string())
+			};
+			match fields[0] {
+				"const" if fields.len() == 3 => {
+					let t = parse_dtype(fields[1])?;
+					let bits = fields[2]
+						.parse::<u64>()
+						.map_err(|_| "invalid constant bits")?;
+					graph.constant(Value::unpack(t, bits)?);
+				}
+				"param" if fields.len() == 5 => {
+					let slot = parse(fields[1])?;
+					if slot != parameters.len() {
+						return Err("non-dense function parameter".into());
+					}
+					let t = parse_dtype(fields[2])?;
+					let bounds = if fields[3] == "none" && fields[4] == "none" {
+						None
+					} else {
+						Some(Bounds::new(
+							fields[3].parse().map_err(|_| "invalid bound")?,
+							fields[4].parse().map_err(|_| "invalid bound")?,
+						)?)
+					};
+					graph.scoped_param(scope, slot, t, bounds)?;
+					parameters.push((t, bounds));
+				}
+				"alu" if fields.len() >= 3 => {
+					graph.alu(
+						parse_alu(fields[1])?,
+						fields[2..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<_>>()?,
+					)?;
+				}
+				"return" if fields.len() >= 2 => {
+					outputs = Some(
+						fields[1..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<Vec<_>>>()?,
+					);
+				}
+				_ => return Err(format!("invalid UIR instruction {line}")),
+			}
+		}
+		let outputs = outputs.ok_or("missing return")?;
+		for &id in &outputs {
+			graph.verify(id, scope)?;
+		}
+		if outputs
+			.iter()
+			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
+		{
+			return Err("heterogeneous STACK".into());
+		}
+		Ok(Self {
+			name,
+			scope,
+			graph,
+			parameters,
+			outputs,
+		})
+	}
+```
 
 ```sh check
 cargo test --quiet --test function_stack
@@ -466,6 +941,101 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+	pub fn from_uir(text: &str) -> Result<Self> {
+		let mut lines = text.lines();
+		let header = lines
+			.next()
+			.ok_or("missing function header")?
+			.split_whitespace()
+			.collect::<Vec<_>>();
+		if header.len() != 2 || header[0] != "function" {
+			return Err("invalid function header".into());
+		}
+		let name = header[1].to_string();
+		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
+		let mut graph = ScalarGraph::default();
+		let mut parameters = vec![];
+		let mut outputs = None;
+		for line in lines {
+			if outputs.is_some() {
+				return Err("tokens after return".into());
+			}
+			let fields = line.split_whitespace().collect::<Vec<_>>();
+			if fields.is_empty() {
+				continue;
+			}
+			let parse = |s: &str| {
+				s.parse::<usize>()
+					.map_err(|_| "invalid node number".to_string())
+			};
+			match fields[0] {
+				"const" if fields.len() == 3 => {
+					let t = parse_dtype(fields[1])?;
+					let bits = fields[2]
+						.parse::<u64>()
+						.map_err(|_| "invalid constant bits")?;
+					graph.constant(Value::unpack(t, bits)?);
+				}
+				"param" if fields.len() == 5 => {
+					let slot = parse(fields[1])?;
+					if slot != parameters.len() {
+						return Err("non-dense function parameter".into());
+					}
+					let t = parse_dtype(fields[2])?;
+					let bounds = if fields[3] == "none" && fields[4] == "none" {
+						None
+					} else {
+						Some(Bounds::new(
+							fields[3].parse().map_err(|_| "invalid bound")?,
+							fields[4].parse().map_err(|_| "invalid bound")?,
+						)?)
+					};
+					graph.scoped_param(scope, slot, t, bounds)?;
+					parameters.push((t, bounds));
+				}
+				"alu" if fields.len() >= 3 => {
+					graph.alu(
+						parse_alu(fields[1])?,
+						fields[2..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<_>>()?,
+					)?;
+				}
+				"return" if fields.len() >= 2 => {
+					outputs = Some(
+						fields[1..]
+							.iter()
+							.map(|s| parse(s))
+							.collect::<Result<Vec<_>>>()?,
+					);
+				}
+				_ => return Err(format!("invalid UIR instruction {line}")),
+			}
+		}
+		let outputs = outputs.ok_or("missing return")?;
+		for &id in &outputs {
+			graph.verify(id, scope)?;
+		}
+		if outputs
+			.iter()
+			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
+		{
+			return Err("heterogeneous STACK".into());
+		}
+		Ok(Self {
+			name,
+			scope,
+			graph,
+			parameters,
+			outputs,
+		})
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -474,6 +1044,31 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-013 -->
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
@@ -484,6 +1079,31 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -492,6 +1112,45 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-015 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn build("
+	pub fn build(
+		name: &str,
+		parameters: Vec<(DType, Option<Bounds>)>,
+		body: impl FnOnce(&mut ScalarGraph, &[usize]) -> Result<Vec<usize>>,
+	) -> Result<Self> {
+		if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+			return Err("invalid function name".into());
+		}
+		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
+		let mut graph = ScalarGraph::default();
+		let args = parameters
+			.iter()
+			.enumerate()
+			.map(|(slot, &(dtype, bounds))| graph.scoped_param(scope, slot, dtype, bounds))
+			.collect::<Result<Vec<_>>>()?;
+		let outputs = body(&mut graph, &args)?;
+		if outputs.is_empty() {
+			return Err("empty function result".into());
+		}
+		for &root in &outputs {
+			graph.verify(root, scope)?;
+		}
+		let dtype = graph.nodes[outputs[0]].dtype;
+		if outputs.iter().any(|&id| graph.nodes[id].dtype != dtype) {
+			return Err("STACK requires homogeneous scalar results".into());
+		}
+		Ok(Self {
+			name: name.into(),
+			scope,
+			graph,
+			parameters,
+			outputs,
+		})
+	}
+```
 
 ```sh check
 cargo test --quiet --test function_stack
@@ -502,6 +1161,50 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn call("
+	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
+		if args.len() != self.parameters.len() {
+			return Err("CALL argument count".into());
+		}
+		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
+			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
+			if n.dtype != dtype {
+				return Err("CALL argument dtype".into());
+			}
+			if let Some(expected) = bounds {
+				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
+				if actual.lo < expected.lo || actual.hi > expected.hi {
+					return Err("CALL argument exceeds declared bounds".into());
+				}
+			}
+		}
+		let mut map: HashMap<usize, usize> = HashMap::new();
+		for &root in &self.outputs {
+			self.graph.verify(root, self.scope)?;
+			for id in self.graph.order(root)? {
+				if map.contains_key(&id) {
+					continue;
+				}
+				let node = &self.graph.nodes[id];
+				let value = match node.op {
+					SOp::Const(v) => caller.constant(v),
+					SOp::Param { slot, scope, .. } => {
+						if scope != self.scope {
+							return Err("capture from another scope".into());
+						}
+						*args.get(slot).ok_or("unbound function parameter")?
+					}
+					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
+				};
+				map.insert(id, value);
+			}
+		}
+		Ok(self.outputs.iter().map(|id| map[id]).collect())
+	}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -510,6 +1213,17 @@ cargo test --quiet --test function_stack
 <!-- todo:04-017 -->
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
+
+`src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
+
+```rust file="src/functions.rs" mode="replace" item="pub fn index("
+	pub fn index(results: &[usize], index: isize) -> Result<usize> {
+		usize::try_from(index)
+			.ok()
+			.and_then(|i| results.get(i).copied())
+			.ok_or("STACK INDEX out of bounds".into())
+	}
+```
 
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
@@ -520,6 +1234,31 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -528,6 +1267,31 @@ cargo test --quiet --test function_stack
 <!-- todo:04-019 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack
@@ -538,6 +1302,31 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -546,6 +1335,31 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-021 -->
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
@@ -556,6 +1370,31 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test function_stack
 ```
@@ -565,6 +1404,31 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
 
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test function_stack function_stack_uir
 ```
@@ -573,6 +1437,31 @@ cargo test --quiet --test function_stack function_stack_uir
 <!-- todo:04-024 -->
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
+
+`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
+
+```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+fn function_stack_uir() -> Result<()> {
+	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
+		Ok(vec![
+			g.alu(Alu::Add, args.to_vec())?,
+			g.alu(Alu::Sub, args.to_vec())?,
+		])
+	})?;
+	let restored = Function::from_uir(&f.to_uir())?;
+	let mut g = ScalarGraph::default();
+	let a = g.constant(Value::f32(2.));
+	let b = g.constant(Value::f32(3.));
+	for f in [&f, &restored] {
+		let results = f.call(&mut g, &[a, b])?;
+		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
+		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
+		assert!(Function::index(&results, -1).is_err());
+	}
+	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test function_stack

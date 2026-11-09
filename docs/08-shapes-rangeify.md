@@ -1021,9 +1021,11 @@ impl Emitter<'_> {
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
-	let material: HashSet<_> = order.iter().copied()
-        .filter(|&id| outputs.contains(&id) || !matches!(graph.nodes[id].op, Op::Const { .. }))
-        .collect();
+	let material: HashSet<_> = order
+		.iter()
+		.copied()
+		.filter(|&id| outputs.contains(&id) || !matches!(graph.nodes[id].op, Op::Const { .. }))
+		.collect();
 	let mut offsets = vec![];
 	let mut offset = 0;
 	for node in &graph.nodes {
@@ -1433,6 +1435,54 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
+	graph.verify(outputs)?;
+	let order = graph.topology(outputs)?;
+	let material: HashSet<_> = order
+		.iter()
+		.copied()
+		.filter(|&id| outputs.contains(&id) || !matches!(graph.nodes[id].op, Op::Const { .. }))
+		.collect();
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for node in &graph.nodes {
+		offsets.push(offset);
+		offset += node.shape.len()
+	}
+	let mut emitter = Emitter {
+		g: graph,
+		offsets,
+		material,
+		current: 0,
+		serial: 0,
+	};
+	let mut kernels = vec![];
+	for id in order {
+		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		emitter.current = id;
+		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
+		let value = emitter.expr(id, "i", &mut body)?;
+		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
+		let dependencies = graph
+			.topology(&[id])?
+			.into_iter()
+			.filter(|&x| x != id && emitter.material.contains(&x))
+			.collect();
+		kernels.push(KernelBody {
+			output: id,
+			body,
+			dependencies,
+		});
+	}
+	Ok(kernels)
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1441,6 +1491,32 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-003 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `fn expr(` の `Op::Binary` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
+			Op::Binary { op, a, b } => {
+				let ai = self.broadcast_index(a, id, index);
+				let bi = self.broadcast_index(b, id, index);
+				let av = self.expr(a, &ai, code)?;
+				let bv = self.expr(b, &bi, code)?;
+				match op {
+					Binary::Max => format!("chibi_max({av},{bv})"),
+					_ => format!(
+						"(({av}) {} ({bv}))",
+						match op {
+							Binary::Add => "+",
+							Binary::Sub => "-",
+							Binary::Mul => "*",
+							Binary::Div => "/",
+							Binary::Lt => "<",
+							Binary::Eq => "==",
+							_ => unreachable!(),
+						}
+					),
+				}
+			}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1451,6 +1527,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1459,6 +1574,30 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-005 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `pub fn broadcast(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn broadcast("
+pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
+	let rank = a.len().max(b.len());
+	let mut out = vec![1; rank];
+	for k in 0..rank {
+		let x = a.len().checked_sub(k + 1).map(|i| a[i]).unwrap_or(1);
+		let y = b.len().checked_sub(k + 1).map(|i| b[i]).unwrap_or(1);
+		out[rank - k - 1] = if x == y {
+			x
+		} else if x == 1 {
+			y
+		} else if y == 1 {
+			x
+		} else {
+			return Err("incompatible broadcast shapes".into());
+		};
+	}
+	elements(&out)?;
+	Ok(out)
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1469,6 +1608,15 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn expr(` の `Op::Expand` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
+			Op::Expand { x } => {
+				let xi = self.broadcast_index(x, id, index);
+				return self.expr(x, &xi, code);
+			}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1477,6 +1625,27 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-007 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `fn broadcast_index(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn broadcast_index("
+	fn broadcast_index(&self, input: usize, output: usize, index: &str) -> String {
+		let rank = self.g.shape(input).len();
+		let outer = self.g.shape(output).len();
+		self.flatten(
+			input,
+			&(0..rank)
+				.map(|a| {
+					format!(
+						"({} == 1 ? 0 : {})",
+						self.dim(input, a),
+						self.coord(output, index, outer - rank + a)
+					)
+				})
+				.collect::<Vec<_>>(),
+		)
+	}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1487,6 +1656,54 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
+	graph.verify(outputs)?;
+	let order = graph.topology(outputs)?;
+	let material: HashSet<_> = order
+		.iter()
+		.copied()
+		.filter(|&id| outputs.contains(&id) || !matches!(graph.nodes[id].op, Op::Const { .. }))
+		.collect();
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for node in &graph.nodes {
+		offsets.push(offset);
+		offset += node.shape.len()
+	}
+	let mut emitter = Emitter {
+		g: graph,
+		offsets,
+		material,
+		current: 0,
+		serial: 0,
+	};
+	let mut kernels = vec![];
+	for id in order {
+		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		emitter.current = id;
+		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
+		let value = emitter.expr(id, "i", &mut body)?;
+		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
+		let dependencies = graph
+			.topology(&[id])?
+			.into_iter()
+			.filter(|&x| x != id && emitter.material.contains(&x))
+			.collect();
+		kernels.push(KernelBody {
+			output: id,
+			body,
+			dependencies,
+		});
+	}
+	Ok(kernels)
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1495,6 +1712,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-009 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1505,6 +1761,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1513,6 +1808,41 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-011 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `pub fn reduce(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn reduce("
+	pub fn reduce(
+		&mut self,
+		x: NodeId,
+		op: Reduce,
+		axes: Vec<usize>,
+		keepdim: bool,
+	) -> Result<NodeId> {
+		let input = &self.get(x)?.shape;
+		axes_valid(&axes, input.len())?;
+		let shape = input
+			.iter()
+			.enumerate()
+			.filter_map(|(i, &d)| {
+				if axes.contains(&i) {
+					if keepdim { Some(1) } else { None }
+				} else {
+					Some(d)
+				}
+			})
+			.collect();
+		self.insert(
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			},
+			shape,
+		)
+	}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1523,12 +1853,201 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
 ## 13. 前章の逐次累積と同じ低水準 IR へ変換する。
 <!-- todo:08-013 -->
+
+07章までの `Kernel::lower` と今回の `graph::kernel_bodies` は、どちらも `native::KernelBody` を返します。`Stmt` と `Expr` はメモリ・ループfrontendの表現として残し、TensorのGraphをそのASTへ変換したとは扱いません。共通の低水準表現とentry生成を、型とnative実行で照合します。
+
+```rust file=tests/shared_kernel_ir.rs mode=write
+use chinigrad::{
+	Graph, Result,
+	kernel::{Expr, Index, Kernel, store},
+	native::KernelBody,
+};
+#[test]
+fn frontends_lower_to_the_same_kernel_body() -> Result<()> {
+	let mut low = Kernel::default();
+	let output = low.alloc(1)?;
+	low.body = vec![store(output, Index::Const(0), Expr::Const(7.))];
+	low.outputs = vec![output];
+	let body: KernelBody = low.lower()?;
+	assert_eq!(body.output, output.storage);
+	assert!(body.dependencies.is_empty());
+	let mut high = Graph::default();
+	let root = high.constant(7., vec![])?;
+	let bodies: Vec<KernelBody> = chinigrad::graph::kernel_bodies(&high, &[root], false)?;
+	assert_eq!(bodies.len(), 1);
+	assert_eq!(low.compile()?.run(&[])?, vec![vec![7.]]);
+	assert_eq!(high.compile(&[root])?.run(&[])?[0].data, vec![7.]);
+	Ok(())
+}
+```
+
+`src/kernel.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
+
+```rust file="src/kernel.rs" mode="replace" item="pub fn lower("
+	pub fn lower(&self) -> Result<crate::native::KernelBody> {
+		self.verify()?;
+		fn emit(body: &[Stmt], out: &mut String) {
+			for s in body {
+				match s {
+					Stmt::Store { view, index, value } => out.push_str(&format!(
+						"b{}[{}+({})]={};\n",
+						view.storage,
+						view.offset,
+						index.source(),
+						value.source()
+					)),
+					Stmt::Range { axis, len, body } => {
+						out.push_str(&format!(
+							"for(int32_t i{axis}=0;i{axis}<{len};++i{axis}){{\n"
+						));
+						emit(body, out);
+						out.push_str("}\n");
+					}
+				}
+			}
+		}
+		let mut body = String::new();
+		emit(&self.body, &mut body);
+		let accesses = self.verify()?;
+		let kernel = crate::native::KernelBody {
+			output: self.outputs.first().map(|v| v.storage).unwrap_or(0),
+			body,
+			dependencies: accesses.read.into_iter().collect(),
+		};
+		Ok(kernel)
+	}
+```
+
+`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
+	graph.verify(outputs)?;
+	let order = graph.topology(outputs)?;
+	let material: HashSet<_> = order
+		.iter()
+		.copied()
+		.filter(|&id| outputs.contains(&id) || !matches!(graph.nodes[id].op, Op::Const { .. }))
+		.collect();
+	let mut offsets = vec![];
+	let mut offset = 0;
+	for node in &graph.nodes {
+		offsets.push(offset);
+		offset += node.shape.len()
+	}
+	let mut emitter = Emitter {
+		g: graph,
+		offsets,
+		material,
+		current: 0,
+		serial: 0,
+	};
+	let mut kernels = vec![];
+	for id in order {
+		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
+			continue;
+		}
+		emitter.current = id;
+		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
+		let value = emitter.expr(id, "i", &mut body)?;
+		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
+		let dependencies = graph
+			.topology(&[id])?
+			.into_iter()
+			.filter(|&x| x != id && emitter.material.contains(&x))
+			.collect();
+		kernels.push(KernelBody {
+			output: id,
+			body,
+			dependencies,
+		});
+	}
+	Ok(kernels)
+}
+```
+
+`src/native.rs` の `pub fn render_entry(`の定義を次の全体で置き換えます。
+
+```rust file="src/native.rs" mode="replace" item="pub fn render_entry("
+pub fn render_entry(helpers: &str, slots: &[usize], kernels: &[KernelBody]) -> String {
+	let mut source = helpers.to_string();
+	source.push_str("int chibi_entry(void*const* buffers,const uint64_t* s){\n");
+	for id in slots {
+		source.push_str(&format!("float *b{id}=(float*)buffers[{id}];\n"));
+	}
+	for kernel in kernels {
+		source.push_str(&kernel.body)
+	}
+	source.push_str("return 0;\n}\n");
+	source
+}
+```
+
+```sh check
+cargo test --test shared_kernel_ir
+```
+
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
@@ -1541,6 +2060,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1549,6 +2107,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-015 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1559,6 +2156,61 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+			Op::Reduce {
+				op,
+				x,
+				axes,
+				keepdim,
+			} => {
+				let target = self.name();
+				let k = self.name();
+				code.push_str(&format!(
+					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
+					if op == Reduce::Sum {
+						"0.0f"
+					} else {
+						"-INFINITY"
+					},
+					self.product(x, axes.iter().copied())
+				));
+				let mut out_axis = 0;
+				let c = (0..self.g.shape(x).len())
+					.map(|a| {
+						if let Some(ra) = axes.iter().position(|&v| v == a) {
+							format!(
+								"(({k} / {}) % {})",
+								self.product(x, axes[ra + 1..].iter().copied()),
+								self.dim(x, a)
+							)
+						} else {
+							let oa = if keepdim {
+								a
+							} else {
+								let v = out_axis;
+								out_axis += 1;
+								v
+							};
+							self.coord(id, index, oa)
+						}
+					})
+					.collect::<Vec<_>>();
+				let xi = self.flatten(x, &c);
+				let value = self.expr(x, &xi, code)?;
+				code.push_str(&format!(
+					"{target} = {};\n}}\n",
+					if op == Reduce::Sum {
+						format!("{target} + ({value})")
+					} else {
+						format!("chibi_max({target},{value})")
+					}
+				));
+				return Ok(target);
+			}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1567,6 +2219,26 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-017 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`src/graph.rs` の `pub fn max_value(`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub fn max_value("
+pub fn max_value(a: f32, b: f32) -> f32 {
+	if a.is_nan() || b.is_nan() {
+		f32::NAN
+	} else if a == 0.0 && b == 0.0 {
+		0.0
+	} else {
+		a.max(b)
+	}
+}
+```
+
+`src/graph.rs` の `pub const C_HELPERS`の定義を次の全体で置き換えます。
+
+```rust file="src/graph.rs" mode="replace" item="pub const C_HELPERS"
+pub const C_HELPERS: &str = "#include <stdint.h>\n#include <stddef.h>\n#include <math.h>\n#include <string.h>\nstatic float chibi_bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nstatic float chibi_max(float a,float b){if(isnan(a)||isnan(b))return NAN;if(a==0.0f&&b==0.0f)return 0.0f;return a>b?a:b;}\n";
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1577,6 +2249,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1585,6 +2296,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-019 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1595,6 +2345,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1603,6 +2392,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-021 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1613,6 +2441,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1621,6 +2488,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-023 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1631,6 +2537,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1639,6 +2584,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-025 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
@@ -1649,6 +2633,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
+
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
@@ -1657,6 +2680,45 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 <!-- todo:08-027 -->
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
+
+`tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
+
+```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+fn unfused_affine_and_reduce_max() -> Result<()> {
+	let mut g = Graph::default();
+	let x = g.input(0, vec![3])?;
+	let two = g.constant(2., vec![])?;
+	let one = g.constant(1., vec![])?;
+	let mul = g.binary(Binary::Mul, x, two)?;
+	let affine = g.binary(Binary::Add, mul, one)?;
+	let p = chinigrad::Plan::compile_unfused(&g, &[affine])?;
+	assert_eq!(p.kernel_count, 2);
+	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [3., 5., 7.]);
+	let sum = g.reduce(x, Reduce::Sum, vec![0], false)?;
+	let scaled = g.reduce(mul, Reduce::Sum, vec![0], false)?;
+	let max = g.reduce(x, Reduce::Max, vec![0], false)?;
+	assert_eq!(
+		g.compile(&[sum, scaled])?
+			.run(&[buffer(&[3], &[1., 2., 3.])])?
+			.iter()
+			.map(|b| b.data[0])
+			.collect::<Vec<_>>(),
+		[6., 12.]
+	);
+	assert_eq!(
+		g.compile(&[max])?.run(&[buffer(&[3], &[-5., -2., -7.])])?[0].data,
+		[-2.]
+	);
+	let bias = g.constant(10., vec![1])?;
+	let biased = g.binary(Binary::Add, x, bias)?;
+	assert_eq!(
+		g.compile(&[biased])?.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data,
+		[11., 12., 13.]
+	);
+	assert!(g.expand(x, vec![4]).is_err());
+	Ok(())
+}
+```
 
 ```sh check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
