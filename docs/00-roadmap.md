@@ -6,17 +6,17 @@
 
 ## 保存先と操作を読む
 
-コードブロックの `file=` が写経先プロジェクトからの相対パスです。親ディレクトリがなければ作ります。
+コードフェンスには言語名だけを書き、先頭行のコメントに保存先と操作を指定します。`// file=src/lib.rs mode=write` の `file=` が写経先プロジェクトからの相対パスです。RustとJSONは `//`、TOML・Python・text・shは `#` を使います。親ディレクトリがなければ作ります。JSONのブロックはコメントを表示するため `jsonc` としています。JSONファイルへ保存するときは、先頭のメタデータ行を除いてください。下の再生スクリプトもこの行を除きます。
 
 | 指定 | 操作 |
 |---|---|
-| `mode=write` | 指定ファイル全体をコードで置き換える |
-| `mode=append` | 指定ファイルの末尾へコードを追加する |
-| `mode=replace item="fn name("` | 指定した関数・型・定数の定義全体を置き換える。直前の属性は残す |
-| `within="impl Type"` | 指定したimpl内で置換対象を探す |
-| `arm="Op::Reduce"` | 指定した関数内のmatch分岐を、パターンとbodyごと置き換える |
-| `sh check` | 直前までの保存を終えてから、写経先プロジェクトのrootで実行する |
-| `sh check requires=metal` | Metalの実機がある場合に実行する |
+| `// file=src/lib.rs mode=write` | 指定ファイル全体をコードで置き換える |
+| `// file=src/lib.rs mode=append` | 指定ファイルの末尾へコードを追加する |
+| `// file=src/lib.rs mode=replace item="fn name("` | 指定した関数・型・定数の定義全体を置き換える。直前の属性は残す |
+| 上のコメントに `within="impl Type"` を追加 | 指定したimpl内で置換対象を探す |
+| 上のコメントに `arm="Op::Reduce"` を追加 | 指定した関数内のmatch分岐を、パターンとbodyごと置き換える |
+| `# check` | 直前までの保存を終えてから、写経先プロジェクトのrootで実行する |
+| `# check requires=metal` | Metalの実機がある場合に実行する |
 
 置換対象の `item` は一箇所だけに一致します。同じ関数名がある場合は、掲載した宣言の先頭全体で対象を特定します。生成C、IR、図、期待出力のブロックはRustファイルへ保存しません。`file=` のないコマンドや確認出力もソースへ貼りません。
 
@@ -173,7 +173,7 @@ uv run python /tmp/chibigrad_replay.py --output /tmp/chibigrad-final-check --che
 
 ## 写経確認用スクリプト
 
-次のコードを `/tmp/chibigrad_replay.py` に保存します。Python標準ライブラリだけを使います。`--self-test` は曖昧な置換、文字列内の波括弧、出力先の逸脱、存在しない追記先、テスト0件を検査します。`--check` のsource操作は01〜25章だけへ適用し、この入口の案内コードをプロジェクトへ書き込みません。
+次のコードを `/tmp/chibigrad_replay.py` に保存します。Python標準ライブラリだけを使います。`--self-test` は曖昧な置換、文字列内の波括弧、出力先の逸脱、存在しない追記先、テスト0件、各言語のメタデータ除去、通常コメントの保持を検査します。`--check` のsource操作は01〜25章だけへ適用し、この入口の案内コードをプロジェクトへ書き込みません。
 
 ```python
 """Replay the printed chibigrad tutorial into a separate empty project."""
@@ -318,7 +318,7 @@ def blocks(path):
 		if not match:
 			index += 1
 			continue
-		start, info = index + 1, shlex.split(match[1])
+		start, language = index + 1, match[1].strip()
 		body = []
 		index += 1
 		while index < len(lines) and lines[index].strip() != "```":
@@ -327,11 +327,15 @@ def blocks(path):
 		if index == len(lines):
 			raise ValueError(f"{path}:{start}: unclosed fence")
 		index += 1
-		pairs = [part.split("=", 1) for part in info[1:] if "=" in part]
+		metadata = re.fullmatch(r"(?://|#) (file=.*|check(?:\s+.*)?)\n?", body[0]) if body else None
+		info = shlex.split(metadata[1]) if metadata else []
+		if metadata:
+			body.pop(0)
+		pairs = [part.split("=", 1) for part in info if "=" in part]
 		options = dict(pairs)
 		if len(pairs) != len(options):
 			raise ValueError(f"{path}:{start}: duplicate attribute")
-		yield start, info[0] if info else "", options, "".join(body), "check" in info[1:]
+		yield start, language, options, "".join(body), bool(info and info[0] == "check")
 
 
 def destination(project, name):
@@ -423,13 +427,13 @@ def lint(chapters):
 			if identity in found:
 				errors.append(f"duplicate {identity}")
 			found[identity] = chapter
-			end = re.search(r"^#{1,6} ", source[match.end():], re.M)
+			end = re.search(r"^#{1,6} (?!file=|check(?:\s|$))", source[match.end():], re.M)
 			section = source[match.end():match.end()+end.start()] if end else source[match.end():]
 			headings = list(re.finditer(r"^#{2,6} (.+)$", source[:match.start()], re.M))
 			title = headings[-1][1] if headings else ""
 			if identity in expected and expected[identity]["todo"].rstrip("。") not in title:
 				errors.append(f"{identity}: original heading missing")
-			pattern = r"^```(?:rust|toml)\b[^\n]*\bfile=" if not identity.startswith("00-") else r"^```(?:rust|toml|sh)\b"
+			pattern = r"^```(?:rust|toml)\n(?://|#) file=" if not identity.startswith("00-") else r"^```(?:rust|toml|sh)\b"
 			if not re.search(pattern, section, re.M):
 				errors.append(f"{identity}: no source operation")
 		for line, language, options, body, check in blocks(chapter):
@@ -467,9 +471,33 @@ def self_test():
 	with tempfile.TemporaryDirectory() as folder:
 		base = Path(folder)
 		chapter = base / "01.md"
-		chapter.write_text('```text file=x mode=write\na\n```\n```text file=x mode=append\nb\n```\n```sh check\ntest -s x\n```\n')
+		chapter.write_text('```text\n# file=x mode=write\na\n```\n```text\n# file=x mode=append\nb\n```\n```sh\n# check\ntest -s x\n```\n')
 		replay([chapter], base / "output", True)
 		assert (base / "output/x").read_text() == "a\nb\n"
+		cases = [
+			("rust", "//", "src/lib.rs", "pub fn f() {}\n"),
+			("toml", "#", "Cargo.toml", '[package]\nname = "sample"\n'),
+			("jsonc", "//", "config.json", '{"value": 1}\n'),
+			("python", "#", "main.py", "print(1)\n"),
+			("text", "#", "notes.txt", "notes\n"),
+		]
+		chapter.write_text("".join(
+			f"```{language}\n{prefix} file={name} mode=write\n{body}```\n"
+			for language, prefix, name, body in cases
+		) + "```sh\n# check requires=metal\necho metal\n```\n")
+		parsed = list(blocks(chapter))
+		for (_, language, options, body, check), expected in zip(parsed, cases):
+			assert (language, options, body, check) == (
+				expected[0], dict(file=expected[2], mode="write"), expected[3], False)
+		assert parsed[-1][1:] == ("sh", dict(requires="metal"), "echo metal\n", True)
+		replay([chapter], base / "formats", False)
+		for _, _, name, body in cases:
+			assert (base / "formats" / name).read_text() == body
+		assert json.loads((base / "formats/config.json").read_text()) == {"value": 1}
+		for language, comment in [("rust", "// normal comment"), ("python", "# normal comment"),
+				("rust", "// checkmate"), ("text", "# filename=x")]:
+			chapter.write_text(f"```{language}\n{comment}\nbody\n```\n")
+			assert list(blocks(chapter))[0][1:] == (language, {}, comment + "\nbody\n", False)
 		for options in [dict(file="../escape", mode="write"), dict(file="missing", mode="append")]:
 			try:
 				apply_source(base, "text", options, "x")

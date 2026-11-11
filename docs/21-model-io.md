@@ -10,13 +10,15 @@
 
 まず、この章が追加するモジュールと共有テスト補助を保存する。後続の各節は、ここに掲載した `state::Registry::{validate,adopt,bind}`、`safetensor::read`、`fetch::{verified_read,fetch,load_shards}` の規則を、焦点を絞ったテストで確認する。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod fetch;
 pub mod safetensor;
 pub mod state;
 ```
 
-```toml file=Cargo.toml mode=append
+```toml
+# file=Cargo.toml mode=append
 [dependencies.serde]
 version = "=1.0.228"
 features = ["derive"]
@@ -28,7 +30,8 @@ version = "=1.0.149"
 version = "=0.10.9"
 ```
 
-```rust file=src/state.rs mode=write
+```rust
+// file=src/state.rs mode=write
 use crate::{Buffer, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -295,7 +298,8 @@ impl BufferData {
 }
 ```
 
-```rust file=src/safetensor.rs mode=write
+```rust
+// file=src/safetensor.rs mode=write
 use crate::{
 	Result,
 	state::{DType, TensorRecord},
@@ -432,7 +436,8 @@ pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 }
 ```
 
-```rust file=src/fetch.rs mode=write
+```rust
+// file=src/fetch.rs mode=write
 use crate::{Result, state::TensorRecord};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -592,7 +597,8 @@ pub fn load_shards(
 }
 ```
 
-```rust file=tests/model_io.rs mode=write
+```rust
+// file=tests/model_io.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph,
 	fetch::{Asset, Manifest, fetch, load_shards, sha256, verified_read},
@@ -623,7 +629,8 @@ fn encoded(header: &str, payload: &[u8]) -> Vec<u8> {
 
 `tests/model_io.rs::roundtrip_and_plan_binding` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
@@ -700,7 +707,8 @@ fn roundtrip_and_plan_binding() {
 
 実装箇所は `state::Registry::register` と `state::Registry::parameters` である。この要件に対する実行可能な確認は `model_io::roundtrip_and_plan_binding` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -713,7 +721,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `src/state.rs` の `pub fn save_state(`の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn save_state("
+```rust
+// file="src/state.rs" mode="replace" item="pub fn save_state("
 pub fn save_state(directory: &Path, state: &BTreeMap<String, TensorRecord>) -> Result<()> {
 	fs::create_dir_all(directory).map_err(|e| e.to_string())?;
 	let mut payload = Vec::new();
@@ -741,7 +750,8 @@ pub fn save_state(directory: &Path, state: &BTreeMap<String, TensorRecord>) -> R
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -754,7 +764,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `src/state.rs` の `pub fn to_buffer(`（`impl TensorRecord` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
 	pub fn to_buffer(&self) -> Result<Buffer> {
 		self.validate()?;
 		let data = match self.dtype {
@@ -778,7 +789,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -791,7 +803,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `src/state.rs` の `pub fn adopt(`（`impl Registry` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn adopt(" within="impl Registry"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn adopt(" within="impl Registry"
 	pub fn adopt(
 		&self,
 		live: &mut TensorSet,
@@ -806,7 +819,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -819,7 +833,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
 	let mut registry = Registry::default();
@@ -893,7 +908,8 @@ fn roundtrip_and_plan_binding() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -904,7 +920,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `tests/model_io.rs::safetensors_layout_and_corruption` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn safetensors_layout_and_corruption() {
 	let payload = tensor().payload;
@@ -937,7 +954,8 @@ fn safetensors_layout_and_corruption() {
 
 `src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
 
-```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+```rust
+// file="src/safetensor.rs" mode="replace" item="pub fn read("
 pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 	let len = u64::from_le_bytes(
 		bytes
@@ -993,7 +1011,8 @@ pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -1006,7 +1025,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
 
-```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+```rust
+// file="src/safetensor.rs" mode="replace" item="pub fn read("
 pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 	let len = u64::from_le_bytes(
 		bytes
@@ -1062,7 +1082,8 @@ pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -1075,7 +1096,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
 
-```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+```rust
+// file="src/safetensor.rs" mode="replace" item="pub fn read("
 pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 	let len = u64::from_le_bytes(
 		bytes
@@ -1131,7 +1153,8 @@ pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -1144,7 +1167,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `src/safetensor.rs` の `pub fn read(`の定義を次の全体で置き換えます。
 
-```rust file="src/safetensor.rs" mode="replace" item="pub fn read("
+```rust
+// file="src/safetensor.rs" mode="replace" item="pub fn read("
 pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 	let len = u64::from_le_bytes(
 		bytes
@@ -1200,7 +1224,8 @@ pub fn read(bytes: &[u8]) -> Result<BTreeMap<String, TensorRecord>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -1213,7 +1238,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `tests/model_io.rs` の `fn safetensors_layout_and_corruption(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
 fn safetensors_layout_and_corruption() {
 	let payload = tensor().payload;
 	let good = encoded(
@@ -1241,7 +1267,8 @@ fn safetensors_layout_and_corruption() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -1252,7 +1279,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `tests/model_io.rs::strict_atomic_load` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn strict_atomic_load() {
 	let mut registry = Registry::default();
@@ -1314,7 +1342,8 @@ fn strict_atomic_load() {
 
 `src/state.rs` の `pub fn validate(`（`impl Registry` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
 	pub fn validate(
 		&self,
 		loaded: &BTreeMap<String, TensorRecord>,
@@ -1357,7 +1386,8 @@ fn strict_atomic_load() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1370,7 +1400,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `src/state.rs` の `pub fn validate(`（`impl Registry` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn validate(" within="impl Registry"
 	pub fn validate(
 		&self,
 		loaded: &BTreeMap<String, TensorRecord>,
@@ -1413,7 +1444,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1426,7 +1458,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `src/state.rs` の `pub fn bind(`（`impl Registry` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn bind(" within="impl Registry"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn bind(" within="impl Registry"
 	pub fn bind(&self, state: &TensorSet) -> Result<Vec<Buffer>> {
 		let max = self.names.values().map(|s| s.slot).max().unwrap_or(0);
 		let mut buffers = vec![Buffer::new(vec![], vec![0.])?; max + 1];
@@ -1443,7 +1476,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1456,7 +1490,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `src/state.rs` の `pub fn parameters(`（`impl Registry` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn parameters(" within="impl Registry"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn parameters(" within="impl Registry"
 	pub fn parameters(&self) -> BTreeSet<u32> {
 		self.names
 			.values()
@@ -1466,7 +1501,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1479,7 +1515,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `tests/model_io.rs` の `fn strict_atomic_load(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn strict_atomic_load("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn strict_atomic_load("
 fn strict_atomic_load() {
 	let mut registry = Registry::default();
 	registry
@@ -1536,7 +1573,8 @@ fn strict_atomic_load() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1549,7 +1587,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `src/fetch.rs` の `pub fn validate(`（`impl Manifest` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn validate(" within="impl Manifest"
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn validate(" within="impl Manifest"
 	pub fn validate(&self) -> Result<()> {
 		if self.revision.len() != 40 || !self.revision.bytes().all(|c| c.is_ascii_hexdigit()) {
 			return Err("revision must be a pinned 40-digit commit".into());
@@ -1577,7 +1616,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io strict_atomic_load -- --exact
 ```
 
@@ -1588,7 +1628,8 @@ cargo test --offline --test model_io strict_atomic_load -- --exact
 
 `tests/model_io.rs::local_http_fetch` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 #[ignore]
 fn local_http_fetch() {
@@ -1648,7 +1689,8 @@ fn local_http_fetch() {
 
 実装箇所は `fetch::Manifest::validate`、`fetch::verified_read`、`fetch::fetch` である。この要件に対する実行可能な確認は `model_io::local_http_fetch` に置く。
 
-```sh check requires=loopback
+```sh
+# check requires=loopback
 cargo test --offline --test model_io local_http_fetch -- --exact --ignored
 ```
 
@@ -1659,7 +1701,8 @@ cargo test --offline --test model_io local_http_fetch -- --exact --ignored
 
 `tests/model_io.rs::digest_before_parser` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn digest_before_parser() {
 	let dir = temp("digest");
@@ -1684,7 +1727,8 @@ fn digest_before_parser() {
 
 `src/fetch.rs` の `pub fn fetch(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn fetch("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn fetch("
 pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
 	if Path::new(&asset.name).components().count() != 1
 		|| !matches!(
@@ -1747,7 +1791,8 @@ pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
 
@@ -1760,7 +1805,8 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 `src/fetch.rs` の `pub fn verified_read(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn verified_read("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn verified_read("
 pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
 	let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
 	if metadata.len() != asset.bytes {
@@ -1776,7 +1822,8 @@ pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
 
@@ -1789,7 +1836,8 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 `src/fetch.rs` の `pub fn fetch(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn fetch("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn fetch("
 pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
 	if Path::new(&asset.name).components().count() != 1
 		|| !matches!(
@@ -1852,7 +1900,8 @@ pub fn fetch(cache: &Path, asset: &Asset) -> Result<Vec<u8>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
 
@@ -1863,7 +1912,8 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 `tests/model_io.rs::half_precision_reference` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn half_precision_reference() {
 	for (bits, value) in [
@@ -1894,7 +1944,8 @@ fn half_precision_reference() {
 
 `src/state.rs` の `pub fn to_buffer(`（`impl TensorRecord` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
+```rust
+// file="src/state.rs" mode="replace" item="pub fn to_buffer(" within="impl TensorRecord"
 	pub fn to_buffer(&self) -> Result<Buffer> {
 		self.validate()?;
 		let data = match self.dtype {
@@ -1918,7 +1969,8 @@ fn half_precision_reference() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io half_precision_reference -- --exact
 ```
 
@@ -1931,7 +1983,8 @@ cargo test --offline --test model_io half_precision_reference -- --exact
 
 `tests/model_io.rs` の `fn half_precision_reference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn half_precision_reference("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn half_precision_reference("
 fn half_precision_reference() {
 	for (bits, value) in [
 		(0, 0.),
@@ -1957,7 +2010,8 @@ fn half_precision_reference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io half_precision_reference -- --exact
 ```
 
@@ -1968,7 +2022,8 @@ cargo test --offline --test model_io half_precision_reference -- --exact
 
 `tests/model_io.rs::shard_index_keys` を追加する。
 
-```rust file=tests/model_io.rs mode=append
+```rust
+// file=tests/model_io.rs mode=append
 #[test]
 fn shard_index_keys() {
 	let payload = tensor().payload;
@@ -1990,7 +2045,8 @@ fn shard_index_keys() {
 
 `src/fetch.rs` の `pub fn load_shards(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn load_shards("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn load_shards("
 pub fn load_shards(
 	index_bytes: &[u8],
 	verified: &BTreeMap<String, Vec<u8>>,
@@ -2025,7 +2081,8 @@ pub fn load_shards(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io shard_index_keys -- --exact
 ```
 
@@ -2038,7 +2095,8 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 `src/fetch.rs` の `pub fn load_shards(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn load_shards("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn load_shards("
 pub fn load_shards(
 	index_bytes: &[u8],
 	verified: &BTreeMap<String, Vec<u8>>,
@@ -2073,7 +2131,8 @@ pub fn load_shards(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io shard_index_keys -- --exact
 ```
 
@@ -2086,7 +2145,8 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 `src/fetch.rs` の `pub fn verified_read(`の定義を次の全体で置き換えます。
 
-```rust file="src/fetch.rs" mode="replace" item="pub fn verified_read("
+```rust
+// file="src/fetch.rs" mode="replace" item="pub fn verified_read("
 pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
 	let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
 	if metadata.len() != asset.bytes {
@@ -2102,7 +2162,8 @@ pub fn verified_read(path: &Path, asset: &Asset) -> Result<Vec<u8>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io shard_index_keys -- --exact
 ```
 
@@ -2115,7 +2176,8 @@ cargo test --offline --test model_io shard_index_keys -- --exact
 
 `tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
 	let mut registry = Registry::default();
@@ -2189,7 +2251,8 @@ fn roundtrip_and_plan_binding() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -2202,7 +2265,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `tests/model_io.rs` の `fn digest_before_parser(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn digest_before_parser("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn digest_before_parser("
 fn digest_before_parser() {
 	let dir = temp("digest");
 	let path = dir.join("bad");
@@ -2222,7 +2286,8 @@ fn digest_before_parser() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io digest_before_parser -- --exact
 ```
 
@@ -2235,7 +2300,8 @@ cargo test --offline --test model_io digest_before_parser -- --exact
 
 `tests/model_io.rs` の `fn safetensors_layout_and_corruption(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn safetensors_layout_and_corruption("
 fn safetensors_layout_and_corruption() {
 	let payload = tensor().payload;
 	let good = encoded(
@@ -2263,7 +2329,8 @@ fn safetensors_layout_and_corruption() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io safetensors_layout_and_corruption -- --exact
 ```
 
@@ -2276,7 +2343,8 @@ cargo test --offline --test model_io safetensors_layout_and_corruption -- --exac
 
 `tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
 	let mut registry = Registry::default();
@@ -2350,7 +2418,8 @@ fn roundtrip_and_plan_binding() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -2363,7 +2432,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
 	let mut registry = Registry::default();
@@ -2437,7 +2507,8 @@ fn roundtrip_and_plan_binding() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```
 
@@ -2450,7 +2521,8 @@ cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 
 `tests/model_io.rs` の `fn roundtrip_and_plan_binding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
+```rust
+// file="tests/model_io.rs" mode="replace" item="fn roundtrip_and_plan_binding("
 fn roundtrip_and_plan_binding() {
 	let dir = temp("state");
 	let mut registry = Registry::default();
@@ -2524,6 +2596,7 @@ fn roundtrip_and_plan_binding() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test model_io roundtrip_and_plan_binding -- --exact
 ```

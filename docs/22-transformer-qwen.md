@@ -14,18 +14,21 @@
 
 まず、この章が追加するモジュールと共有テスト補助を保存する。後続の各節は、ここに掲載した `nn::attention::{embedding,rms_norm,apply_rope,attention}` と `nn::qwen::{logits_all,parameter_registry,KvState::adopt}` の規則を、焦点を絞ったテストで確認する。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod model_assets;
 ```
 
-```toml file=Cargo.toml mode=append
+```toml
+# file=Cargo.toml mode=append
 [dependencies.tokenizers]
 version = "=0.22.2"
 default-features = false
 features = ["fancy-regex"]
 ```
 
-```rust file=src/nn/mod.rs mode=write
+```rust
+// file=src/nn/mod.rs mode=write
 pub mod attention;
 pub mod qwen;
 pub mod transformer;
@@ -132,7 +135,8 @@ pub fn cross_entropy_runtime(
 }
 ```
 
-```rust file=src/nn/attention.rs mode=write
+```rust
+// file=src/nn/attention.rs mode=write
 use crate::{Binary, Graph, NodeId, Reduce, Result, Unary};
 pub fn embedding(g: &mut Graph, weight: NodeId, tokens: NodeId) -> Result<NodeId> {
 	g.gather(weight, tokens, 0)
@@ -290,7 +294,8 @@ pub fn concatenate(g: &mut Graph, a: NodeId, b: NodeId, axis: usize) -> Result<N
 }
 ```
 
-```rust file=src/nn/qwen.rs mode=write
+```rust
+// file=src/nn/qwen.rs mode=write
 use super::{
 	attention::{apply_rope, attention, concatenate, rms_norm},
 	linear, silu,
@@ -730,13 +735,15 @@ pub fn initialize(config: &QwenConfig, seed: u64) -> Result<Vec<crate::state::Bu
 }
 ```
 
-```rust file=src/nn/transformer.rs mode=write
+```rust
+// file=src/nn/transformer.rs mode=write
 pub use super::qwen::{
 	Forward, QwenConfig as TinyConfig, logits_all, parameter_registry, register_graph,
 };
 ```
 
-```rust file=src/model_assets.rs mode=write
+```rust
+// file=src/model_assets.rs mode=write
 use crate::{
 	Result,
 	fetch::{Manifest, fetch, verified_read},
@@ -823,7 +830,8 @@ pub fn encode(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>>
 }
 ```
 
-```rust file=examples/qwen_infer.rs mode=write
+```rust
+// file=examples/qwen_infer.rs mode=write
 use chibigrad::{
 	Graph, Result, model_assets,
 	nn::qwen::{KvState, greedy, logits_all, parameter_registry, register_graph, token_buffer},
@@ -925,7 +933,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=examples/qwen_tokenize.rs mode=write
+```rust
+// file=examples/qwen_tokenize.rs mode=write
 use chibigrad::{
 	Result,
 	fetch::{Manifest, verified_read},
@@ -955,7 +964,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=examples/fetch_qwen.rs mode=write
+```rust
+// file=examples/fetch_qwen.rs mode=write
 use chibigrad::{
 	Result,
 	fetch::{Manifest, fetch},
@@ -979,7 +989,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```json file=fixtures/qwen25/config.json mode=write
+```jsonc
+// file=fixtures/qwen25/config.json mode=write
 {
   "architectures": [
     "Qwen2ForCausalLM"
@@ -1010,7 +1021,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```json file=fixtures/qwen25/manifest.json mode=write
+```jsonc
+// file=fixtures/qwen25/manifest.json mode=write
 {
   "revision": "b937cc073b55e980e6f21d5f8b7a77818efcf0eb",
   "files": [
@@ -1048,7 +1060,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```json file=fixtures/qwen25/tokenizer-fixture.json mode=write
+```jsonc
+// file=fixtures/qwen25/tokenizer-fixture.json mode=write
 [
   {
     "text": "Hello",
@@ -1085,7 +1098,8 @@ fn main() -> Result<()> {
 ]
 ```
 
-```json file=fixtures/tiny-transformer.json mode=write
+```jsonc
+// file=fixtures/tiny-transformer.json mode=write
 [
   [
     0.0671042,
@@ -1218,7 +1232,8 @@ fn main() -> Result<()> {
 ]
 ```
 
-```python file=tools/qwen_reference.py mode=write
+```python
+# file=tools/qwen_reference.py mode=write
 import argparse
 import hashlib
 import json
@@ -1271,14 +1286,16 @@ Path(args.output).write_text(json.dumps(result, ensure_ascii=False) + "\n")
 print("wrote", args.output, "boundaries", len(boundaries), "logits", list(logits.shape))
 ```
 
-```text file=tools/qwen-reference-requirements.txt mode=write
+```text
+# file=tools/qwen-reference-requirements.txt mode=write
 torch==2.5.1
 transformers==4.46.3
 safetensors==0.4.5
 tokenizers==0.20.3
 ```
 
-```rust file=tests/transformer_reference.rs mode=write
+```rust
+// file=tests/transformer_reference.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	nn::qwen::initialize,
@@ -1520,14 +1537,16 @@ fn reference(c: &QwenConfig, weights: &[BufferData], tokens: &[usize]) -> Vec<Ve
 }
 ```
 
-```rust file=tests/qwen_tokenizer.rs mode=write
+```rust
+// file=tests/qwen_tokenizer.rs mode=write
 use chibigrad::{
 	fetch::{Manifest, verified_read},
 	model_assets::encode,
 };
 ```
 
-```rust file=tests/qwen_public.rs mode=write
+```rust
+// file=tests/qwen_public.rs mode=write
 use chibigrad::{
 	Graph, model_assets,
 	nn::qwen::{logits_all, parameter_registry, register_graph, token_buffer},
@@ -1537,7 +1556,8 @@ use std::path::Path;
 
 `tests/transformer_reference.rs::causal_rope_and_softmax` を追加する。
 
-```rust file=tests/transformer_reference.rs mode=append
+```rust
+// file=tests/transformer_reference.rs mode=append
 #[test]
 fn causal_rope_and_softmax() {
 	let mut g = Graph::default();
@@ -1561,7 +1581,8 @@ fn causal_rope_and_softmax() {
 
 実装箇所は `nn::attention::embedding` である。この要件に対する実行可能な確認は `transformer_reference::causal_rope_and_softmax` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
 
@@ -1574,7 +1595,8 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 `src/nn/attention.rs` の `pub fn rms_norm(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/attention.rs" mode="replace" item="pub fn rms_norm("
+```rust
+// file="src/nn/attention.rs" mode="replace" item="pub fn rms_norm("
 pub fn rms_norm(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<NodeId> {
 	let dim = *g
 		.shape(x)
@@ -1596,7 +1618,8 @@ pub fn rms_norm(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<No
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
 
@@ -1609,7 +1632,8 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 `src/nn/mod.rs` の `pub fn log_softmax(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/mod.rs" mode="replace" item="pub fn log_softmax("
+```rust
+// file="src/nn/mod.rs" mode="replace" item="pub fn log_softmax("
 pub fn log_softmax(g: &mut Graph, x: NodeId, axis: usize) -> Result<NodeId> {
 	let m = g.reduce(x, Reduce::Max, vec![axis], true)?;
 	let m = g.stop_gradient(m)?;
@@ -1621,7 +1645,8 @@ pub fn log_softmax(g: &mut Graph, x: NodeId, axis: usize) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
 
@@ -1634,7 +1659,8 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 `src/nn/attention.rs` の `pub fn apply_rope(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/attention.rs" mode="replace" item="pub fn apply_rope("
+```rust
+// file="src/nn/attention.rs" mode="replace" item="pub fn apply_rope("
 pub fn apply_rope(g: &mut Graph, x: NodeId, start: usize, theta: f64) -> Result<NodeId> {
 	let shape = g.shape(x).to_vec();
 	if shape.len() != 3 || shape[2] % 2 != 0 || shape[2] == 0 || !theta.is_finite() || theta <= 0. {
@@ -1673,7 +1699,8 @@ pub fn apply_rope(g: &mut Graph, x: NodeId, start: usize, theta: f64) -> Result<
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
 
@@ -1686,7 +1713,8 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 `src/nn/attention.rs` の `pub fn attention(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/attention.rs" mode="replace" item="pub fn attention("
+```rust
+// file="src/nn/attention.rs" mode="replace" item="pub fn attention("
 pub fn attention(
 	g: &mut Graph,
 	q: NodeId,
@@ -1745,7 +1773,8 @@ pub fn attention(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference causal_rope_and_softmax -- --exact
 ```
 
@@ -1756,7 +1785,8 @@ cargo test --offline --test transformer_reference causal_rope_and_softmax -- --e
 
 `tests/transformer_reference.rs::zero_transformer` を追加する。
 
-```rust file=tests/transformer_reference.rs mode=append
+```rust
+// file=tests/transformer_reference.rs mode=append
 #[test]
 fn zero_transformer() {
 	let c = QwenConfig::tiny();
@@ -1774,7 +1804,8 @@ fn zero_transformer() {
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -1904,7 +1935,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
 ```
 
@@ -1917,7 +1949,8 @@ cargo test --offline --test transformer_reference zero_transformer -- --exact
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -2047,7 +2080,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
 ```
 
@@ -2060,7 +2094,8 @@ cargo test --offline --test transformer_reference zero_transformer -- --exact
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -2190,7 +2225,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference zero_transformer -- --exact
 ```
 
@@ -2201,7 +2237,8 @@ cargo test --offline --test transformer_reference zero_transformer -- --exact
 
 `tests/transformer_reference.rs::nonzero_layer_boundaries_reference` を追加する。
 
-```rust file=tests/transformer_reference.rs mode=append
+```rust
+// file=tests/transformer_reference.rs mode=append
 #[test]
 fn nonzero_layer_boundaries_reference() {
 	let c = QwenConfig::tiny();
@@ -2225,7 +2262,8 @@ fn nonzero_layer_boundaries_reference() {
 
 実装箇所は `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `transformer_reference::nonzero_layer_boundaries_reference` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
 ```
 
@@ -2238,7 +2276,8 @@ cargo test --offline --test transformer_reference nonzero_layer_boundaries_refer
 
 `tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
 fn nonzero_layer_boundaries_reference() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 11).unwrap();
@@ -2259,7 +2298,8 @@ fn nonzero_layer_boundaries_reference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
 ```
 
@@ -2270,7 +2310,8 @@ cargo test --offline --test transformer_reference nonzero_layer_boundaries_refer
 
 `tests/transformer_reference.rs::complete_public_registration` を追加する。
 
-```rust file=tests/transformer_reference.rs mode=append
+```rust
+// file=tests/transformer_reference.rs mode=append
 #[test]
 fn complete_public_registration() {
 	let c: QwenConfig =
@@ -2300,7 +2341,8 @@ fn complete_public_registration() {
 
 `src/model_assets.rs` の `pub fn verified_files(`の定義を次の全体で置き換えます。
 
-```rust file="src/model_assets.rs" mode="replace" item="pub fn verified_files("
+```rust
+// file="src/model_assets.rs" mode="replace" item="pub fn verified_files("
 pub fn verified_files(
 	manifest: &Path,
 	directory: &Path,
@@ -2323,7 +2365,8 @@ pub fn verified_files(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
 
@@ -2336,7 +2379,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 `src/nn/qwen.rs` の `pub fn validate(`（`impl QwenConfig` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn validate(" within="impl QwenConfig"
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn validate(" within="impl QwenConfig"
 	pub fn validate(&self) -> Result<()> {
 		if self.use_mrope
 			|| self.attention_dropout != 0.
@@ -2373,7 +2417,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
 
@@ -2386,7 +2431,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 `src/nn/qwen.rs` の `pub fn parameter_registry(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn parameter_registry("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn parameter_registry("
 pub fn parameter_registry(c: &QwenConfig) -> Result<Registry> {
 	c.validate()?;
 	let mut registry = Registry::default();
@@ -2438,7 +2484,8 @@ pub fn parameter_registry(c: &QwenConfig) -> Result<Registry> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
 
@@ -2451,7 +2498,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -2581,7 +2629,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
 
@@ -2594,7 +2643,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 `src/nn/qwen.rs` の `pub fn load_parameters(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn load_parameters("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn load_parameters("
 pub fn load_parameters(
 	c: &QwenConfig,
 	loaded: &BTreeMap<String, TensorRecord>,
@@ -2618,7 +2668,8 @@ pub fn load_parameters(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference complete_public_registration -- --exact
 ```
 
@@ -2629,7 +2680,8 @@ cargo test --offline --test transformer_reference complete_public_registration -
 
 `tests/qwen_tokenizer.rs::official_tokenizer_ids` を追加する。
 
-```rust file=tests/qwen_tokenizer.rs mode=append
+```rust
+// file=tests/qwen_tokenizer.rs mode=append
 #[test]
 #[ignore]
 fn official_tokenizer_ids() {
@@ -2669,7 +2721,8 @@ fn official_tokenizer_ids() {
 
 `src/model_assets.rs` の `pub fn load(`の定義を次の全体で置き換えます。
 
-```rust file="src/model_assets.rs" mode="replace" item="pub fn load("
+```rust
+// file="src/model_assets.rs" mode="replace" item="pub fn load("
 pub fn load(manifest: &Path, directory: &Path, download: bool) -> Result<ModelAssets> {
 	let (manifest, files) = verified_files(manifest, directory, download)?;
 	let required = |name: &str| {
@@ -2716,13 +2769,15 @@ pub fn load(manifest: &Path, directory: &Path, download: bool) -> Result<ModelAs
 }
 ```
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
 ```
 
 巨大な tokenizer.json は本文へ埋め込まず、掲載した固定 URL、長さ、SHA-256 で取得する。chat template は適用しない。
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo run --offline --example fetch_qwen -- --tokenizer-only
 cargo run --offline --example qwen_tokenize
 ```
@@ -2736,7 +2791,8 @@ cargo run --offline --example qwen_tokenize
 
 `tests/qwen_tokenizer.rs` の `fn official_tokenizer_ids(`の定義を次の全体で置き換えます。
 
-```rust file="tests/qwen_tokenizer.rs" mode="replace" item="fn official_tokenizer_ids("
+```rust
+// file="tests/qwen_tokenizer.rs" mode="replace" item="fn official_tokenizer_ids("
 fn official_tokenizer_ids() {
 	let manifest: Manifest =
 		serde_json::from_slice(include_bytes!("../fixtures/qwen25/manifest.json")).unwrap();
@@ -2770,7 +2826,8 @@ fn official_tokenizer_ids() {
 }
 ```
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
 ```
 
@@ -2783,7 +2840,8 @@ cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --i
 
 `src/model_assets.rs` の `pub fn encode(`の定義を次の全体で置き換えます。
 
-```rust file="src/model_assets.rs" mode="replace" item="pub fn encode("
+```rust
+// file="src/model_assets.rs" mode="replace" item="pub fn encode("
 pub fn encode(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>> {
 	tokenizer
 		.encode(text, false)
@@ -2792,7 +2850,8 @@ pub fn encode(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>>
 }
 ```
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --ignored
 ```
 
@@ -2803,7 +2862,8 @@ cargo test --offline --test qwen_tokenizer official_tokenizer_ids -- --exact --i
 
 `tests/qwen_public.rs::all_24_layers_reference` を追加する。
 
-```rust file=tests/qwen_public.rs mode=append
+```rust
+// file=tests/qwen_public.rs mode=append
 #[test]
 #[ignore]
 fn all_24_layers_reference() {
@@ -2858,13 +2918,15 @@ fn all_24_layers_reference() {
 
 実装箇所は `nn::qwen::logits_all` である。この要件に対する実行可能な確認は `qwen_public::all_24_layers_reference` に置く。
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo test --offline --test qwen_public all_24_layers_reference -- --exact --ignored
 ```
 
 全重みの取得後、固定版の公式実装で各層と logits の reference を作り、Rust の全24層と比較する。最大絶対誤差を層ごとに表示し、argmax だけを判定にしない。
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo run --offline --example fetch_qwen
 uv run --with-requirements tools/qwen-reference-requirements.txt python tools/qwen_reference.py --assets fixtures/qwen25 --text Hello
 cargo test --offline --test qwen_public all_24_layers_reference -- --exact --ignored
@@ -2880,7 +2942,8 @@ cargo run --offline --example qwen_infer -- --manifest fixtures/qwen25/manifest.
 
 `examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+```rust
+// file="examples/qwen_infer.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2977,7 +3040,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 cargo test --offline --test qwen_public all_24_layers_reference -- --exact --ignored
 ```
 
@@ -2988,7 +3052,8 @@ cargo test --offline --test qwen_public all_24_layers_reference -- --exact --ign
 
 `tests/transformer_reference.rs::immutable_cache_matches_prefix` を追加する。
 
-```rust file=tests/transformer_reference.rs mode=append
+```rust
+// file=tests/transformer_reference.rs mode=append
 #[test]
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
@@ -3013,7 +3078,8 @@ fn immutable_cache_matches_prefix() {
 
 `src/nn/qwen.rs` の `pub fn new(`（`impl KvState` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn new(" within="impl KvState"
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn new(" within="impl KvState"
 	pub fn new(c: &QwenConfig) -> Result<Self> {
 		let shape = vec![
 			c.max_position_embeddings,
@@ -3031,7 +3097,8 @@ fn immutable_cache_matches_prefix() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3044,7 +3111,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -3174,7 +3242,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3187,7 +3256,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `src/nn/qwen.rs` の `pub fn logits_all_with_attention<F>(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn logits_all_with_attention<F>("
 pub fn logits_all_with_attention<F>(
 	g: &mut Graph,
 	c: &QwenConfig,
@@ -3317,7 +3387,8 @@ where
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3330,7 +3401,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `src/nn/qwen.rs` の `pub fn adopt(`（`impl KvState` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn adopt(" within="impl KvState"
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn adopt(" within="impl KvState"
 	pub fn adopt(&mut self, outputs: &[Buffer], tokens: usize) -> Result<()> {
 		if outputs.len() != 2 * self.keys.len()
 			|| self
@@ -3355,7 +3427,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3368,7 +3441,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 7).unwrap();
@@ -3388,7 +3462,8 @@ fn immutable_cache_matches_prefix() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3401,7 +3476,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+```rust
+// file="examples/qwen_infer.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -3498,7 +3574,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3511,7 +3588,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 7).unwrap();
@@ -3531,7 +3609,8 @@ fn immutable_cache_matches_prefix() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3544,7 +3623,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
 fn nonzero_layer_boundaries_reference() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 11).unwrap();
@@ -3565,7 +3645,8 @@ fn nonzero_layer_boundaries_reference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
 ```
 
@@ -3578,7 +3659,8 @@ cargo test --offline --test transformer_reference nonzero_layer_boundaries_refer
 
 `tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 7).unwrap();
@@ -3598,7 +3680,8 @@ fn immutable_cache_matches_prefix() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3611,7 +3694,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 7).unwrap();
@@ -3631,7 +3715,8 @@ fn immutable_cache_matches_prefix() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3644,7 +3729,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn immutable_cache_matches_prefix(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn immutable_cache_matches_prefix("
 fn immutable_cache_matches_prefix() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 7).unwrap();
@@ -3664,7 +3750,8 @@ fn immutable_cache_matches_prefix() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3677,7 +3764,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `examples/qwen_infer.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/qwen_infer.rs" mode="replace" item="fn main("
+```rust
+// file="examples/qwen_infer.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -3774,7 +3862,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference immutable_cache_matches_prefix -- --exact
 ```
 
@@ -3787,7 +3876,8 @@ cargo test --offline --test transformer_reference immutable_cache_matches_prefix
 
 `tests/transformer_reference.rs` の `fn nonzero_layer_boundaries_reference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
+```rust
+// file="tests/transformer_reference.rs" mode="replace" item="fn nonzero_layer_boundaries_reference("
 fn nonzero_layer_boundaries_reference() {
 	let c = QwenConfig::tiny();
 	let weights = initialize(&c, 11).unwrap();
@@ -3808,6 +3898,7 @@ fn nonzero_layer_boundaries_reference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test transformer_reference nonzero_layer_boundaries_reference -- --exact
 ```

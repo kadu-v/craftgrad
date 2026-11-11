@@ -2,18 +2,20 @@
 
 Graph::compile が consumer 数、STAGE、reduction を見て materialize 位置を選ぶ。定数は出力以外では inline する。Plan は閉じた kernel の順序と binding 署名を持ち、入力値をキャッシュしない。実体化する kernel の出力だけを確保し、融合で消えた broadcast product をホストに確保しない。公開 dump metadata の変更は seal の検証で実行前に拒否する。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. 元グラフから consumer 数を集める。
 <!-- todo:09-001 -->
 
 この章の閉じたkernel表現を追加します。`KernelSignature` と `KernelCall` を比較し、producerの完了stateを要求します。body検査はこのcompilerの生成する構造化Cの部分言語に限定します。任意の外部Cのメモリ安全性を証明する関数ではありません。添字の範囲はGraphと実行時shapeの検証も使います。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod closure;
 ```
 
-```rust file=src/closure.rs mode=write
+```rust
+// file=src/closure.rs mode=write
 use crate::{Graph, Op, Result, native::KernelBody};
 use std::collections::HashSet;
 
@@ -324,7 +326,8 @@ pub fn verify_calls(graph: &Graph, kernels: &[KernelBody], calls: &[KernelCall])
 
 `src/graph.rs` の同名関数全体を置き換えます。08章の非融合の選択を、consumer 数、STAGE、縮約に応じた選択へ変更します。
 
-```rust file=src/graph.rs mode=replace item="pub fn kernel_bodies("
+```rust
+// file=src/graph.rs mode=replace item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -388,7 +391,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 ```
 
 
-```rust file=tests/fusion_plan.rs mode=write
+```rust
+// file=tests/fusion_plan.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
@@ -491,7 +495,8 @@ fn compiled_plan_metadata_is_sealed() -> Result<()> {
 
 `tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -502,7 +507,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -565,7 +571,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -576,7 +583,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `fn expr(` の `Op::Binary` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
 			Op::Binary { op, a, b } => {
 				let ai = self.broadcast_index(a, id, index);
 				let bi = self.broadcast_index(b, id, index);
@@ -600,7 +608,8 @@ cargo test --quiet --test fusion_plan
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -611,7 +620,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -634,7 +644,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -645,7 +656,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -668,7 +680,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -679,7 +692,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -732,7 +746,8 @@ cargo test --quiet --test fusion_plan
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -743,7 +758,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -796,7 +812,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -807,7 +824,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -860,7 +878,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -871,7 +890,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
 fn reductions_and_rebinding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![4])?;
@@ -902,7 +922,8 @@ fn reductions_and_rebinding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -913,7 +934,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
 fn reductions_and_rebinding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![4])?;
@@ -944,7 +966,8 @@ fn reductions_and_rebinding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -955,7 +978,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -1018,7 +1042,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1029,7 +1054,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -1094,7 +1120,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 
 `src/runtime.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(
 		&self,
 		inputs: &[Buffer],
@@ -1190,7 +1217,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Ve
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1201,7 +1229,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `fn expr(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr("
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr("
 	fn expr(&mut self, id: usize, index: &str, code: &mut String) -> Result<String> {
 		if id != self.current && self.material.contains(&id)
 			|| matches!(self.g.nodes[id].op, Op::Input { .. })
@@ -1451,7 +1480,8 @@ cargo test --quiet --test fusion_plan
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1462,7 +1492,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -1485,7 +1516,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1496,7 +1528,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -1519,7 +1552,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1530,7 +1564,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn render("
 pub fn render(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<(String, Abi, usize)> {
 	let kernels = kernel_bodies(graph, outputs, fuse)?;
 	let source = crate::native::render_entry(C_HELPERS, &graph.topology(outputs)?, &kernels);
@@ -1560,7 +1595,8 @@ pub fn render(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<(String, 
 
 `src/closure.rs` の `pub fn signatures(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn signatures("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn signatures("
 pub fn signatures(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelSignature>> {
 	let scalar_words = graph.nodes.iter().try_fold(0usize, |n, node| {
 		n.checked_add(node.shape.len())
@@ -1593,7 +1629,8 @@ pub fn signatures(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelSig
 
 `src/closure.rs` の `pub fn calls(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn calls("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn calls("
 pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
 	let signatures = signatures(graph, kernels)?;
 	let mut produced = std::collections::HashMap::new();
@@ -1628,7 +1665,8 @@ pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1637,7 +1675,8 @@ cargo test --quiet --test fusion_plan
 
 次のテストは署名・CALL・stateの不一致を個別に作り、生成コードの実行も確認します。
 
-```rust file=tests/closed_kernels.rs mode=write
+```rust
+// file=tests/closed_kernels.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph, Result,
 	closure::{calls, signatures, verify_body, verify_calls},
@@ -1763,7 +1802,8 @@ fn closing_checks_preserve_native_execution_and_original_graph() -> Result<()> {
 
 `src/closure.rs` の `pub fn verify_calls(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn verify_calls("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn verify_calls("
 pub fn verify_calls(graph: &Graph, kernels: &[KernelBody], calls: &[KernelCall]) -> Result<()> {
 	let signatures = signatures(graph, kernels)?;
 	if calls.len() != kernels.len() {
@@ -1811,14 +1851,16 @@ pub fn verify_calls(graph: &Graph, kernels: &[KernelBody], calls: &[KernelCall])
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test closed_kernels
 ```
 
 
 `tests/fusion_plan.rs` の `dynamic_metadata` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan dynamic_metadata
 ```
 
@@ -1829,7 +1871,8 @@ cargo test --quiet --test fusion_plan dynamic_metadata
 
 `src/graph.rs` の `pub fn topology(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn topology("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn topology("
 	pub fn topology(&self, outputs: &[NodeId]) -> Result<Vec<NodeId>> {
 		fn visit(g: &Graph, id: usize, marks: &mut [u8], order: &mut Vec<usize>) -> Result<()> {
 			g.get(id)?;
@@ -1861,7 +1904,8 @@ cargo test --quiet --test fusion_plan dynamic_metadata
 
 `src/closure.rs` の `pub fn calls(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn calls("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn calls("
 pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
 	let signatures = signatures(graph, kernels)?;
 	let mut produced = std::collections::HashMap::new();
@@ -1896,7 +1940,8 @@ pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -1907,7 +1952,8 @@ cargo test --quiet --test fusion_plan
 
 `src/runtime.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(
 		&self,
 		inputs: &[Buffer],
@@ -2003,7 +2049,8 @@ cargo test --quiet --test fusion_plan
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2014,7 +2061,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
 fn reductions_and_rebinding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![4])?;
@@ -2045,7 +2093,8 @@ fn reductions_and_rebinding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -2056,7 +2105,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `src/closure.rs` の `pub fn verify_body(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn verify_body("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn verify_body("
 pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
 	let code = tokens(body)?;
 	let mut scopes: Vec<(HashSet<String>, bool)> = vec![(HashSet::new(), false)];
@@ -2187,7 +2237,8 @@ pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
 
 `src/closure.rs` の `fn mutation(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="fn mutation("
+```rust
+// file="src/closure.rs" mode="replace" item="fn mutation("
 fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
 	let at = |i: usize| code.get(i).map(String::as_str);
 	let assignment = at(end) == Some("=") && at(end + 1) != Some("=");
@@ -2213,7 +2264,8 @@ fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2224,7 +2276,8 @@ cargo test --quiet --test fusion_plan
 
 `src/closure.rs` の `pub fn verify_body(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="pub fn verify_body("
+```rust
+// file="src/closure.rs" mode="replace" item="pub fn verify_body("
 pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
 	let code = tokens(body)?;
 	let mut scopes: Vec<(HashSet<String>, bool)> = vec![(HashSet::new(), false)];
@@ -2355,7 +2408,8 @@ pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
 
 `src/closure.rs` の `fn mutation(`の定義を次の全体で置き換えます。
 
-```rust file="src/closure.rs" mode="replace" item="fn mutation("
+```rust
+// file="src/closure.rs" mode="replace" item="fn mutation("
 fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
 	let at = |i: usize| code.get(i).map(String::as_str);
 	let assignment = at(end) == Some("=") && at(end + 1) != Some("=");
@@ -2381,7 +2435,8 @@ fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2392,7 +2447,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2415,7 +2471,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2426,7 +2483,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2449,7 +2507,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2460,7 +2519,8 @@ cargo test --quiet --test fusion_plan
 
 `src/graph.rs` の `pub fn validate_inputs(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn validate_inputs("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn validate_inputs("
 	pub fn validate_inputs(&self, inputs: &[Buffer], _outputs: &[NodeId]) -> Result<()> {
 		let mut slots = HashMap::new();
 		for id in 0..self.nodes.len() {
@@ -2483,7 +2543,8 @@ cargo test --quiet --test fusion_plan
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan dynamic_metadata
 ```
 
@@ -2494,7 +2555,8 @@ cargo test --quiet --test fusion_plan dynamic_metadata
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2517,7 +2579,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2528,7 +2591,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2551,7 +2615,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2562,7 +2627,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2585,7 +2651,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2596,7 +2663,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
 fn reductions_and_rebinding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![4])?;
@@ -2627,7 +2695,8 @@ fn reductions_and_rebinding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan reductions_and_rebinding
 ```
 
@@ -2638,7 +2707,8 @@ cargo test --quiet --test fusion_plan reductions_and_rebinding
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2661,7 +2731,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2672,7 +2743,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2695,7 +2767,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2706,7 +2779,8 @@ cargo test --quiet --test fusion_plan
 
 `tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
 
-```rust file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
+```rust
+// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
 fn arithmetic_fusion() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2729,7 +2803,8 @@ fn arithmetic_fusion() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test fusion_plan
 ```
 
@@ -2737,6 +2812,7 @@ cargo test --quiet --test fusion_plan
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

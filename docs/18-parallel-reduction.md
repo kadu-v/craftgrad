@@ -10,12 +10,14 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod collective;
 pub mod gpu_kernels;
 ```
 
-```rust file=src/collective.rs mode=write
+```rust
+// file=src/collective.rs mode=write
 use crate::Result;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalOp {
@@ -112,7 +114,8 @@ impl Collective {
 }
 ```
 
-```rust file=src/gpu_kernels.rs mode=write
+```rust
+// file=src/gpu_kernels.rs mode=write
 use crate::gpu::{Dialect, Kernel, groups, header};
 fn shared(d: Dialect) -> &'static str {
 	match d {
@@ -248,7 +251,8 @@ pub fn dynamic_sum(
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=append
+```rust
+// file=src/gpu_graph.rs mode=append
 impl GpuPlan {
 	pub fn compile_parallel(
 		graph: &Graph,
@@ -285,7 +289,8 @@ impl GpuPlan {
 }
 ```
 
-```rust file=tests/collective.rs mode=write
+```rust
+// file=tests/collective.rs mode=write
 use chibigrad::{
 	collective::{Collective, LocalOp},
 	gpu::Dialect,
@@ -344,7 +349,8 @@ fn barriers_and_shader_compile() {
 }
 ```
 
-```rust file=tests/reduction_hardware.rs mode=write
+```rust
+// file=tests/reduction_hardware.rs mode=write
 use chibigrad::{
 	gpu::{Dialect, Kernel},
 	gpu_kernels::{dynamic_sum, row_sum},
@@ -409,15 +415,18 @@ fn opencl() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test reduction_hardware --features metal metal -- --ignored --exact
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test reduction_hardware --features opencl opencl -- --ignored --exact
 ```
 
-```rust file=tests/book_18.rs mode=write
+```rust
+// file=tests/book_18.rs mode=write
 mod suite0 {
 	use chibigrad::{
 		collective::{Collective, LocalOp},
@@ -484,7 +493,8 @@ mod suite0 {
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_001() {
 	suite0::barriers_and_shader_compile();
@@ -493,7 +503,8 @@ fn todo_18_001() {
 
 `src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<()> {
 		if self.lanes == 0 || self.local_elements < self.lanes {
 			return Err("LOCAL allocation shorter than lane stores".into());
@@ -548,7 +559,8 @@ fn todo_18_001() {
 
 `src/collective.rs` の `pub fn linearize(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn linearize("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn linearize("
 	pub fn linearize(&self) -> Result<Vec<LocalOp>> {
 		self.verify()?;
 		Ok(self.ops.clone())
@@ -557,7 +569,8 @@ fn todo_18_001() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -601,7 +614,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_001 -- --exact
 ```
 
@@ -613,7 +627,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_002() {
 	suite0::barriers_and_shader_compile();
@@ -622,7 +637,8 @@ fn todo_18_002() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -666,7 +682,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_002 -- --exact
 ```
 
@@ -678,7 +695,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_003() {
 	suite0::barriers_and_shader_compile();
@@ -687,7 +705,8 @@ fn todo_18_003() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -731,7 +750,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_003 -- --exact
 ```
 
@@ -743,7 +763,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_004() {
 	suite0::barriers_and_shader_compile();
@@ -752,7 +773,8 @@ fn todo_18_004() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -796,7 +818,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_004 -- --exact
 ```
 
@@ -808,7 +831,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_005() {
 	suite0::barriers_and_shader_compile();
@@ -817,7 +841,8 @@ fn todo_18_005() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -863,7 +888,8 @@ pub fn row_sum(
 
 `src/gpu_kernels.rs` の `fn shared(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="fn shared("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="fn shared("
 fn shared(d: Dialect) -> &'static str {
 	match d {
 		Dialect::Metal => "threadgroup",
@@ -874,7 +900,8 @@ fn shared(d: Dialect) -> &'static str {
 
 `src/gpu_kernels.rs` の `fn barrier(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="fn barrier("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="fn barrier("
 fn barrier(d: Dialect) -> &'static str {
 	match d {
 		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
@@ -883,7 +910,8 @@ fn barrier(d: Dialect) -> &'static str {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_005 -- --exact
 ```
 
@@ -895,7 +923,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_006() {
 	suite0::barriers_and_shader_compile();
@@ -904,7 +933,8 @@ fn todo_18_006() {
 
 `src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn row_sum("
 	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
 		if !lanes.is_power_of_two() {
 			return Err("local must be power of two".into());
@@ -932,7 +962,8 @@ fn todo_18_006() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -976,7 +1007,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_006 -- --exact
 ```
 
@@ -988,7 +1020,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_007() {
 	suite0::barriers_and_shader_compile();
@@ -997,7 +1030,8 @@ fn todo_18_007() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1041,7 +1075,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_007 -- --exact
 ```
 
@@ -1053,7 +1088,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_008() {
 	suite0::barriers_and_shader_compile();
@@ -1062,7 +1098,8 @@ fn todo_18_008() {
 
 `src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn row_sum("
 	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
 		if !lanes.is_power_of_two() {
 			return Err("local must be power of two".into());
@@ -1090,7 +1127,8 @@ fn todo_18_008() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1134,7 +1172,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_008 -- --exact
 ```
 
@@ -1146,7 +1185,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_009() {
 	suite0::barriers_and_shader_compile();
@@ -1155,7 +1195,8 @@ fn todo_18_009() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1199,7 +1240,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_009 -- --exact
 ```
 
@@ -1211,7 +1253,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_010() {
 	suite0::barriers_and_shader_compile();
@@ -1220,7 +1263,8 @@ fn todo_18_010() {
 
 `src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<()> {
 		if self.lanes == 0 || self.local_elements < self.lanes {
 			return Err("LOCAL allocation shorter than lane stores".into());
@@ -1275,7 +1319,8 @@ fn todo_18_010() {
 
 `src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn row_sum("
 	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
 		if !lanes.is_power_of_two() {
 			return Err("local must be power of two".into());
@@ -1303,7 +1348,8 @@ fn todo_18_010() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1347,7 +1393,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_010 -- --exact
 ```
 
@@ -1359,14 +1406,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_011() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_011 -- --exact
 ```
 
@@ -1378,7 +1427,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_012() {
 	suite0::barriers_and_shader_compile();
@@ -1387,7 +1437,8 @@ fn todo_18_012() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1431,7 +1482,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_012 -- --exact
 ```
 
@@ -1443,7 +1495,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_013() {
 	suite0::barriers_and_shader_compile();
@@ -1452,7 +1505,8 @@ fn todo_18_013() {
 
 `src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
 pub fn two_stage_sum(
 	d: Dialect,
 	n: usize,
@@ -1478,7 +1532,8 @@ pub fn two_stage_sum(
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1522,7 +1577,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_013 -- --exact
 ```
 
@@ -1534,7 +1590,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_014() {
 	suite0::barriers_and_shader_compile();
@@ -1543,7 +1600,8 @@ fn todo_18_014() {
 
 `src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<()> {
 		if self.lanes == 0 || self.local_elements < self.lanes {
 			return Err("LOCAL allocation shorter than lane stores".into());
@@ -1598,7 +1656,8 @@ fn todo_18_014() {
 
 `src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/collective.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/collective.rs" mode="replace" item="pub fn row_sum("
 	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
 		if !lanes.is_power_of_two() {
 			return Err("local must be power of two".into());
@@ -1626,7 +1685,8 @@ fn todo_18_014() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1670,7 +1730,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_014 -- --exact
 ```
 
@@ -1682,7 +1743,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_015() {
 	suite0::barriers_and_shader_compile();
@@ -1691,7 +1753,8 @@ fn todo_18_015() {
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1735,7 +1798,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_015 -- --exact
 ```
 
@@ -1747,7 +1811,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_016() {
 	suite0::barriers_and_shader_compile();
@@ -1756,7 +1821,8 @@ fn todo_18_016() {
 
 `src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
 pub fn two_stage_sum(
 	d: Dialect,
 	n: usize,
@@ -1780,7 +1846,8 @@ pub fn two_stage_sum(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_016 -- --exact
 ```
 
@@ -1792,7 +1859,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_017() {
 	suite0::barriers_and_shader_compile();
@@ -1801,7 +1869,8 @@ fn todo_18_017() {
 
 `src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
 pub fn two_stage_sum(
 	d: Dialect,
 	n: usize,
@@ -1827,7 +1896,8 @@ pub fn two_stage_sum(
 
 `src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
 		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
 			return Err("optimized GPU plan shape mismatch".into());
@@ -1910,7 +1980,8 @@ pub fn two_stage_sum(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_017 -- --exact
 ```
 
@@ -1922,7 +1993,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_018() {
 	suite0::barriers_and_shader_compile();
@@ -1931,7 +2003,8 @@ fn todo_18_018() {
 
 `src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
 pub fn two_stage_sum(
 	d: Dialect,
 	n: usize,
@@ -1957,7 +2030,8 @@ pub fn two_stage_sum(
 
 `src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
 	fn from_lowered(
 		graph: &Graph,
 		outputs: &[usize],
@@ -2018,7 +2092,8 @@ pub fn two_stage_sum(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_018 -- --exact
 ```
 
@@ -2030,7 +2105,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_019() {
 	suite0::barriers_and_shader_compile();
@@ -2039,7 +2115,8 @@ fn todo_18_019() {
 
 `src/backends/metal.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub fn compile_next("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub fn compile_next("
 	pub fn compile_next(&self, kernel: &Kernel) -> Result<Self, String> {
 		Self::compile_on(kernel, self.device.clone(), self.queue.clone())
 	}
@@ -2047,7 +2124,8 @@ fn todo_18_019() {
 
 `src/backends/opencl.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
 	pub fn compile_next(&self, spec: &Spec) -> Result<Self, String> {
 		Self::compile_on(
 			spec,
@@ -2060,7 +2138,8 @@ fn todo_18_019() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -2214,7 +2293,8 @@ fn todo_18_019() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -2384,7 +2464,8 @@ fn todo_18_019() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_019 -- --exact
 ```
 
@@ -2396,14 +2477,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_020() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_020 -- --exact
 ```
 
@@ -2415,14 +2498,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_021() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_021 -- --exact
 ```
 
@@ -2434,14 +2519,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_022() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_022 -- --exact
 ```
 
@@ -2453,14 +2540,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_023() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_023 -- --exact
 ```
 
@@ -2472,14 +2561,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_024() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_024 -- --exact
 ```
 
@@ -2491,14 +2582,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_025() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_025 -- --exact
 ```
 
@@ -2510,14 +2603,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_18.rs mode=append
+```rust
+// file=tests/book_18.rs mode=append
 #[test]
 fn todo_18_026() {
 	suite0::barriers_and_shader_compile();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_18 todo_18_026 -- --exact
 ```
 
@@ -2525,7 +2620,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

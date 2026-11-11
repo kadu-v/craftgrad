@@ -10,12 +10,14 @@
 
 まず、この章が追加するモジュールと共有テスト補助を保存する。後続の各節は、ここに掲載した `nn::{linear,relu,mse,cross_entropy_runtime}`、`data::parse_idx`、`examples/mnist.rs::main` の規則を、焦点を絞ったテストで確認する。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod data;
 pub mod nn;
 ```
 
-```rust file=src/data.rs mode=write
+```rust
+// file=src/data.rs mode=write
 use crate::Result;
 #[derive(Clone, Debug)]
 pub struct Mnist {
@@ -76,7 +78,8 @@ pub fn idx_fixture() -> (Vec<u8>, Vec<u8>) {
 }
 ```
 
-```rust file=src/nn/mod.rs mode=write
+```rust
+// file=src/nn/mod.rs mode=write
 use crate::{Binary, Graph, NodeId, Reduce, Result, Unary};
 pub fn linear(g: &mut Graph, x: NodeId, weight: NodeId, bias: Option<NodeId>) -> Result<NodeId> {
 	let transposed = g.permute(weight, vec![1, 0])?;
@@ -180,7 +183,8 @@ pub fn cross_entropy_runtime(
 }
 ```
 
-```rust file=examples/mnist.rs mode=write
+```rust
+// file=examples/mnist.rs mode=write
 use chibigrad::{
 	Buffer, Graph, Result,
 	autodiff::gradient,
@@ -340,7 +344,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=tests/mnist.rs mode=write
+```rust
+// file=tests/mnist.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph,
 	autodiff::gradient,
@@ -351,7 +356,8 @@ use chibigrad::{
 
 `tests/mnist.rs::sgd_rebind_reuses_plan` を追加する。
 
-```rust file=tests/mnist.rs mode=append
+```rust
+// file=tests/mnist.rs mode=append
 #[test]
 fn sgd_rebind_reuses_plan() {
 	let mut g = Graph::default();
@@ -381,7 +387,8 @@ fn sgd_rebind_reuses_plan() {
 
 実装箇所は `examples/mnist.rs::main` の入力 slot、SGD 更新候補、再 bind と非有限値検査 である。この要件に対する実行可能な確認は `mnist::sgd_rebind_reuses_plan` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -394,7 +401,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `src/nn/mod.rs` の `pub fn mse(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/mod.rs" mode="replace" item="pub fn mse("
+```rust
+// file="src/nn/mod.rs" mode="replace" item="pub fn mse("
 pub fn mse(g: &mut Graph, prediction: NodeId, target: NodeId) -> Result<NodeId> {
 	let difference = g.binary(Binary::Sub, prediction, target)?;
 	let squared = g.binary(Binary::Mul, difference, difference)?;
@@ -406,7 +414,8 @@ pub fn mse(g: &mut Graph, prediction: NodeId, target: NodeId) -> Result<NodeId> 
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -419,7 +428,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -573,7 +583,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -586,7 +597,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -740,7 +752,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -751,7 +764,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `tests/mnist.rs::relu_where_and_mlp` を追加する。
 
-```rust file=tests/mnist.rs mode=append
+```rust
+// file=tests/mnist.rs mode=append
 #[test]
 fn relu_where_and_mlp() {
 	let mut g = Graph::default();
@@ -782,7 +796,8 @@ fn relu_where_and_mlp() {
 
 `src/autodiff.rs` の `pub fn gradient(` の `Op::Where` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Where"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Where"
 			Op::Where { cond, yes, no } => {
 				let zero = g.constant(0., vec![])?;
 				contributions.extend([
@@ -792,7 +807,8 @@ fn relu_where_and_mlp() {
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist relu_where_and_mlp -- --exact
 ```
 
@@ -805,7 +821,8 @@ cargo test --offline --test mnist relu_where_and_mlp -- --exact
 
 `src/nn/mod.rs` の `pub fn relu(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/mod.rs" mode="replace" item="pub fn relu("
+```rust
+// file="src/nn/mod.rs" mode="replace" item="pub fn relu("
 pub fn relu(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let zero = g.constant(0., vec![])?;
 	let positive = g.binary(Binary::Lt, zero, x)?;
@@ -813,7 +830,8 @@ pub fn relu(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist relu_where_and_mlp -- --exact
 ```
 
@@ -826,7 +844,8 @@ cargo test --offline --test mnist relu_where_and_mlp -- --exact
 
 `tests/mnist.rs` の `fn relu_where_and_mlp(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
 fn relu_where_and_mlp() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 2]).unwrap();
@@ -852,7 +871,8 @@ fn relu_where_and_mlp() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist relu_where_and_mlp -- --exact
 ```
 
@@ -865,7 +885,8 @@ cargo test --offline --test mnist relu_where_and_mlp -- --exact
 
 `tests/mnist.rs` の `fn relu_where_and_mlp(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
 fn relu_where_and_mlp() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 2]).unwrap();
@@ -891,7 +912,8 @@ fn relu_where_and_mlp() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist relu_where_and_mlp -- --exact
 ```
 
@@ -904,7 +926,8 @@ cargo test --offline --test mnist relu_where_and_mlp -- --exact
 
 `tests/mnist.rs` の `fn relu_where_and_mlp(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn relu_where_and_mlp("
 fn relu_where_and_mlp() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 2]).unwrap();
@@ -930,7 +953,8 @@ fn relu_where_and_mlp() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist relu_where_and_mlp -- --exact
 ```
 
@@ -943,7 +967,8 @@ cargo test --offline --test mnist relu_where_and_mlp -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -1097,7 +1122,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -1108,7 +1134,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `tests/mnist.rs::idx_fixture_validation` を追加する。
 
-```rust file=tests/mnist.rs mode=append
+```rust
+// file=tests/mnist.rs mode=append
 #[test]
 fn idx_fixture_validation() {
 	let (images, labels) = idx_fixture();
@@ -1134,7 +1161,8 @@ fn idx_fixture_validation() {
 
 `src/data.rs` の `pub fn idx_fixture(`の定義を次の全体で置き換えます。
 
-```rust file="src/data.rs" mode="replace" item="pub fn idx_fixture("
+```rust
+// file="src/data.rs" mode="replace" item="pub fn idx_fixture("
 pub fn idx_fixture() -> (Vec<u8>, Vec<u8>) {
 	let mut images = Vec::new();
 	for w in [2051u32, 2, 28, 28] {
@@ -1151,7 +1179,8 @@ pub fn idx_fixture() -> (Vec<u8>, Vec<u8>) {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -1164,7 +1193,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `src/data.rs` の `pub fn idx_fixture(`の定義を次の全体で置き換えます。
 
-```rust file="src/data.rs" mode="replace" item="pub fn idx_fixture("
+```rust
+// file="src/data.rs" mode="replace" item="pub fn idx_fixture("
 pub fn idx_fixture() -> (Vec<u8>, Vec<u8>) {
 	let mut images = Vec::new();
 	for w in [2051u32, 2, 28, 28] {
@@ -1181,7 +1211,8 @@ pub fn idx_fixture() -> (Vec<u8>, Vec<u8>) {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -1194,7 +1225,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `src/data.rs` の `pub fn parse_idx(`の定義を次の全体で置き換えます。
 
-```rust file="src/data.rs" mode="replace" item="pub fn parse_idx("
+```rust
+// file="src/data.rs" mode="replace" item="pub fn parse_idx("
 pub fn parse_idx(images: &[u8], labels: &[u8]) -> Result<Mnist> {
 	if word(images, 0)? != 2051 || word(labels, 0)? != 2049 {
 		return Err("bad IDX magic".into());
@@ -1226,7 +1258,8 @@ pub fn parse_idx(images: &[u8], labels: &[u8]) -> Result<Mnist> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -1239,7 +1272,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `src/data.rs` の `pub fn parse_idx(`の定義を次の全体で置き換えます。
 
-```rust file="src/data.rs" mode="replace" item="pub fn parse_idx("
+```rust
+// file="src/data.rs" mode="replace" item="pub fn parse_idx("
 pub fn parse_idx(images: &[u8], labels: &[u8]) -> Result<Mnist> {
 	if word(images, 0)? != 2051 || word(labels, 0)? != 2049 {
 		return Err("bad IDX magic".into());
@@ -1271,7 +1305,8 @@ pub fn parse_idx(images: &[u8], labels: &[u8]) -> Result<Mnist> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -1284,7 +1319,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -1438,7 +1474,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -1449,7 +1486,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `tests/mnist.rs::stable_uniform_cross_entropy` を追加する。
 
-```rust file=tests/mnist.rs mode=append
+```rust
+// file=tests/mnist.rs mode=append
 #[test]
 fn stable_uniform_cross_entropy() {
 	let mut g = Graph::default();
@@ -1470,7 +1508,8 @@ fn stable_uniform_cross_entropy() {
 
 `src/graph.rs` の `fn expr(`（`impl Emitter<'_>` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" within="impl Emitter<'_>"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" within="impl Emitter<'_>"
 	fn expr(&mut self, id: usize, index: &str, code: &mut String) -> Result<String> {
 		if id != self.current && self.material.contains(&id)
 			|| matches!(self.g.nodes[id].op, Op::Input { .. })
@@ -1720,7 +1759,8 @@ fn stable_uniform_cross_entropy() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
@@ -1733,7 +1773,8 @@ cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 
 `src/nn/mod.rs` の `pub fn cross_entropy_runtime(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/mod.rs" mode="replace" item="pub fn cross_entropy_runtime("
+```rust
+// file="src/nn/mod.rs" mode="replace" item="pub fn cross_entropy_runtime("
 pub fn cross_entropy_runtime(
 	g: &mut Graph,
 	logits: NodeId,
@@ -1768,7 +1809,8 @@ pub fn cross_entropy_runtime(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
@@ -1781,7 +1823,8 @@ cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 
 `tests/mnist.rs` の `fn stable_uniform_cross_entropy(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn stable_uniform_cross_entropy("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn stable_uniform_cross_entropy("
 fn stable_uniform_cross_entropy() {
 	let mut g = Graph::default();
 	let logits = g.input(0, vec![1, 2]).unwrap();
@@ -1797,7 +1840,8 @@ fn stable_uniform_cross_entropy() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
@@ -1810,7 +1854,8 @@ cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -1964,13 +2009,15 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
 実 MNIST の20更新は、別の評価 IDX を指定して実行する。これらの実データは教材へ同梱しない。
 
-```sh check requires=mnist
+```sh
+# check requires=mnist
 cargo run --offline --example mnist -- --images "$MNIST_TRAIN_IMAGES" --labels "$MNIST_TRAIN_LABELS" --test-images "$MNIST_TEST_IMAGES" --test-labels "$MNIST_TEST_LABELS" --subset 128 --test-subset 128 --batch 16 --steps 20 --seed 1 --lr 0.01
 ```
 
@@ -1983,7 +2030,8 @@ cargo run --offline --example mnist -- --images "$MNIST_TRAIN_IMAGES" --labels "
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2137,7 +2185,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
@@ -2150,7 +2199,8 @@ cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2304,7 +2354,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 ```
 
@@ -2317,7 +2368,8 @@ cargo test --offline --test mnist stable_uniform_cross_entropy -- --exact
 
 `tests/mnist.rs` の `fn idx_fixture_validation(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn idx_fixture_validation("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn idx_fixture_validation("
 fn idx_fixture_validation() {
 	let (images, labels) = idx_fixture();
 	let data = parse_idx(&images, &labels).unwrap();
@@ -2338,7 +2390,8 @@ fn idx_fixture_validation() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist idx_fixture_validation -- --exact
 ```
 
@@ -2351,7 +2404,8 @@ cargo test --offline --test mnist idx_fixture_validation -- --exact
 
 `tests/mnist.rs` の `fn sgd_rebind_reuses_plan(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
 fn sgd_rebind_reuses_plan() {
 	let mut g = Graph::default();
 	let w = g.input(0, vec![]).unwrap();
@@ -2378,7 +2432,8 @@ fn sgd_rebind_reuses_plan() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -2391,7 +2446,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `tests/mnist.rs` の `fn sgd_rebind_reuses_plan(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
 fn sgd_rebind_reuses_plan() {
 	let mut g = Graph::default();
 	let w = g.input(0, vec![]).unwrap();
@@ -2418,7 +2474,8 @@ fn sgd_rebind_reuses_plan() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -2431,7 +2488,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `tests/mnist.rs` の `fn sgd_rebind_reuses_plan(`の定義を次の全体で置き換えます。
 
-```rust file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
+```rust
+// file="tests/mnist.rs" mode="replace" item="fn sgd_rebind_reuses_plan("
 fn sgd_rebind_reuses_plan() {
 	let mut g = Graph::default();
 	let w = g.input(0, vec![]).unwrap();
@@ -2458,7 +2516,8 @@ fn sgd_rebind_reuses_plan() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```
 
@@ -2471,7 +2530,8 @@ cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 
 `examples/mnist.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/mnist.rs" mode="replace" item="fn main("
+```rust
+// file="examples/mnist.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2625,6 +2685,7 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test mnist sgd_rebind_reuses_plan -- --exact
 ```

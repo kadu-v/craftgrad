@@ -2,12 +2,13 @@
 
 movement は座標の変換として lower する。pad と stack は必要な branch の中だけで入力を読む。空 shape の出力 loop は実行されないため座標の除算も実行されない。後の embedding とその勾配に備えて gather と scatter-add も同じ座標経路に含める。indices は f32 に正確に表せる非負整数に限定し、index 部分グラフを検証してから FFI を呼ぶ。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. 出力の二次元 RANGE と row-major の平坦化を追加する。
 <!-- todo:10-001 -->
 
-```rust file=src/graph.rs mode=append
+```rust
+// file=src/graph.rs mode=append
 impl Graph {
 	pub fn reshape(&mut self, x: NodeId, shape: Vec<usize>) -> Result<NodeId> {
 		self.insert(Op::Reshape { x }, shape)
@@ -80,7 +81,8 @@ impl Graph {
 }
 ```
 
-```rust file=tests/movement.rs mode=write
+```rust
+// file=tests/movement.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
@@ -173,7 +175,8 @@ fn broadcast_empty_and_negative_shapes() -> Result<()> {
 
 `tests/movement.rs` の `broadcast_empty_and_negative_shapes` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -184,7 +187,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `src/graph.rs` の `fn broadcast_index(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn broadcast_index("
+```rust
+// file="src/graph.rs" mode="replace" item="fn broadcast_index("
 	fn broadcast_index(&self, input: usize, output: usize, index: &str) -> String {
 		let rank = self.g.shape(input).len();
 		let outer = self.g.shape(output).len();
@@ -203,7 +207,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -214,7 +219,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -235,7 +241,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -246,7 +253,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `pub fn broadcast(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn broadcast("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn broadcast("
 pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
 	let rank = a.len().max(b.len());
 	let mut out = vec![1; rank];
@@ -268,7 +276,8 @@ pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -279,7 +288,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `src/graph.rs` の `fn verify_node(` の `Op::Reshape` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Reshape"
+```rust
+// file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Reshape"
 			Op::Reshape { x } => {
 				if elements(s(*x))? != elements(out)? {
 					return Err("reshape changes element count".into());
@@ -288,7 +298,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -299,7 +310,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn verify_node(` の `Op::Permute` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Permute"
+```rust
+// file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Permute"
 			Op::Permute { x, axes } => {
 				axes_valid(axes, s(*x).len())?;
 				if axes.len() != s(*x).len() {
@@ -309,7 +321,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -320,7 +333,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `src/graph.rs` の `fn flatten(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn flatten("
+```rust
+// file="src/graph.rs" mode="replace" item="fn flatten("
 	fn flatten(&self, id: usize, c: &[String]) -> String {
 		if c.is_empty() {
 			return "0".into();
@@ -339,7 +353,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -350,7 +365,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -371,7 +387,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -382,7 +399,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn expr(` の `Op::Shrink` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
 			Op::Shrink { x, ranges } => {
 				let c = ranges
 					.iter()
@@ -394,7 +412,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -405,7 +424,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn verify_node(` の `Op::Shrink` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Shrink"
+```rust
+// file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Shrink"
 			Op::Shrink { x, ranges } => {
 				if ranges.len() != s(*x).len() {
 					return Err("shrink rank mismatch".into());
@@ -424,7 +444,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -435,7 +456,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -469,7 +491,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -480,7 +503,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -514,7 +538,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -525,7 +550,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -546,7 +572,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -557,7 +584,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn expr(` の `Op::Flip` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Flip"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Flip"
 			Op::Flip { x, axes } => {
 				let c = (0..self.g.shape(x).len())
 					.map(|a| {
@@ -574,7 +602,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -585,14 +614,16 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn verify_node(` の `Op::Flip` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Flip"
+```rust
+// file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Flip"
 			Op::Flip { x, axes } => {
 				axes_valid(axes, s(*x).len())?;
 				s(*x).to_vec()
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -603,7 +634,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `src/graph.rs` の `fn expr(` の `Op::Stack` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
 			Op::Stack { xs, axis } => {
 				let target = self.name();
 				code.push_str(&format!("float {target}=0.0f;\n"));
@@ -625,7 +657,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -636,7 +669,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn expr(` の `Op::Stack` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Stack"
 			Op::Stack { xs, axis } => {
 				let target = self.name();
 				code.push_str(&format!("float {target}=0.0f;\n"));
@@ -658,7 +692,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -669,7 +704,8 @@ cargo test --quiet --test movement
 
 `src/graph.rs` の `fn verify_node(` の `Op::Stack` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Stack"
+```rust
+// file="src/graph.rs" mode="replace" item="fn verify_node(" arm="Op::Stack"
 			Op::Stack { xs, axis } => {
 				if xs.is_empty() {
 					return Err("empty stack".into());
@@ -684,7 +720,8 @@ cargo test --quiet --test movement
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -695,7 +732,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -716,7 +754,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -727,7 +766,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -748,7 +788,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -759,7 +800,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn movement(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn movement("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn movement("
 fn movement() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 3])?;
@@ -780,7 +822,8 @@ fn movement() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement
 ```
 
@@ -791,7 +834,8 @@ cargo test --quiet --test movement
 
 `tests/movement.rs` の `fn broadcast_empty_and_negative_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
 fn broadcast_empty_and_negative_shapes() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -823,7 +867,8 @@ fn broadcast_empty_and_negative_shapes() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -834,7 +879,8 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 `tests/movement.rs` の `fn gather_scatter(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn gather_scatter("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn gather_scatter("
 fn gather_scatter() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3, 2])?;
@@ -856,7 +902,8 @@ fn gather_scatter() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement gather_scatter
 ```
 
@@ -867,7 +914,8 @@ cargo test --quiet --test movement gather_scatter
 
 `tests/movement.rs` の `fn broadcast_empty_and_negative_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
+```rust
+// file="tests/movement.rs" mode="replace" item="fn broadcast_empty_and_negative_shapes("
 fn broadcast_empty_and_negative_shapes() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -899,7 +947,8 @@ fn broadcast_empty_and_negative_shapes() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 ```
 
@@ -907,6 +956,7 @@ cargo test --quiet --test movement broadcast_empty_and_negative_shapes
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

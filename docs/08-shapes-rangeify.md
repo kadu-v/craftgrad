@@ -2,12 +2,13 @@
 
 ここから Tensor 用の純粋な shape 付き Graph を作る。scalar IR と異なり、Tensor の入力署名は到達した PARAM だけでなく Graph に宣言したすべての Input slot を保持する。勾配が定数になっても元の入力配列を再束縛できるためである。Graph の要素演算は f32 で、比較は0/1を返す。今章では非定数の演算をそれぞれ別 kernel にする。consumer 数による融合は09章で追加する。Kernel AST と Graph は二つの frontend であり、いずれも `native::KernelBody`、`render_entry`、二配列 ABI、NativeLibrary に合流する。Graph は座標付き C body を直接構築するので、Kernel AST を通過したとは主張しない。今後の movement を含む Op enum と renderer の全体をここで固定し、公開 builder を10、11章で追加する。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. shape を scalar と rank 1 に限定して導出する。
 <!-- todo:08-001 -->
 
-```rust file=src/graph.rs mode=write
+```rust
+// file=src/graph.rs mode=write
 use crate::{
 	Result,
 	runtime::{Abi, Binding, Buffer, Plan, elements},
@@ -1095,7 +1096,8 @@ impl Graph {
 }
 ```
 
-```rust file=src/runtime.rs mode=write
+```rust
+// file=src/runtime.rs mode=write
 use crate::Result;
 pub use crate::native::NativeLibrary;
 use std::ffi::c_void;
@@ -1354,20 +1356,24 @@ impl Plan {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod graph;
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod runtime;
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub use graph::{Binary, Graph, Node, NodeId, Op, Reduce, Unary};
 pub use runtime::{Abi, Binding, Buffer, Plan};
 ```
 
-```rust file=tests/shapes_rangeify.rs mode=write
+```rust
+// file=tests/shapes_rangeify.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
@@ -1426,7 +1432,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1437,7 +1444,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -1483,7 +1491,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<V
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1494,7 +1503,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `fn expr(` の `Op::Binary` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
 			Op::Binary { op, a, b } => {
 				let ai = self.broadcast_index(a, id, index);
 				let bi = self.broadcast_index(b, id, index);
@@ -1518,7 +1528,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1529,7 +1540,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -1566,7 +1578,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1577,7 +1590,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `pub fn broadcast(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn broadcast("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn broadcast("
 pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
 	let rank = a.len().max(b.len());
 	let mut out = vec![1; rank];
@@ -1599,7 +1613,8 @@ pub fn broadcast(a: &[usize], b: &[usize]) -> Result<Vec<usize>> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1610,14 +1625,16 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `fn expr(` の `Op::Expand` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
 			Op::Expand { x } => {
 				let xi = self.broadcast_index(x, id, index);
 				return self.expr(x, &xi, code);
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1628,7 +1645,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `fn broadcast_index(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn broadcast_index("
+```rust
+// file="src/graph.rs" mode="replace" item="fn broadcast_index("
 	fn broadcast_index(&self, input: usize, output: usize, index: &str) -> String {
 		let rank = self.g.shape(input).len();
 		let outer = self.g.shape(output).len();
@@ -1647,7 +1665,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1658,7 +1677,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -1704,7 +1724,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<V
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1715,7 +1736,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -1752,7 +1774,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1763,7 +1786,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -1800,7 +1824,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1811,7 +1836,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `pub fn reduce(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn reduce("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn reduce("
 	pub fn reduce(
 		&mut self,
 		x: NodeId,
@@ -1844,7 +1870,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1855,7 +1882,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -1908,7 +1936,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -1917,7 +1946,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 07章までの `Kernel::lower` と今回の `graph::kernel_bodies` は、どちらも `native::KernelBody` を返します。`Stmt` と `Expr` はメモリ・ループfrontendの表現として残し、TensorのGraphをそのASTへ変換したとは扱いません。共通の低水準表現とentry生成を、型とnative実行で照合します。
 
-```rust file=tests/shared_kernel_ir.rs mode=write
+```rust
+// file=tests/shared_kernel_ir.rs mode=write
 use chibigrad::{
 	Graph, Result,
 	kernel::{Expr, Index, Kernel, store},
@@ -1944,7 +1974,8 @@ fn frontends_lower_to_the_same_kernel_body() -> Result<()> {
 
 `src/kernel.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn lower("
 	pub fn lower(&self) -> Result<crate::native::KernelBody> {
 		self.verify()?;
 		fn emit(body: &[Stmt], out: &mut String) {
@@ -1981,7 +2012,8 @@ fn frontends_lower_to_the_same_kernel_body() -> Result<()> {
 
 `src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
 pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<Vec<KernelBody>> {
 	graph.verify(outputs)?;
 	let order = graph.topology(outputs)?;
@@ -2029,7 +2061,8 @@ pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], _fuse: bool) -> Result<V
 
 `src/native.rs` の `pub fn render_entry(`の定義を次の全体で置き換えます。
 
-```rust file="src/native.rs" mode="replace" item="pub fn render_entry("
+```rust
+// file="src/native.rs" mode="replace" item="pub fn render_entry("
 pub fn render_entry(helpers: &str, slots: &[usize], kernels: &[KernelBody]) -> String {
 	let mut source = helpers.to_string();
 	source.push_str("int chibi_entry(void*const* buffers,const uint64_t* s){\n");
@@ -2044,14 +2077,16 @@ pub fn render_entry(helpers: &str, slots: &[usize], kernels: &[KernelBody]) -> S
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test shared_kernel_ir
 ```
 
 
 `tests/shapes_rangeify.rs` の `unfused_affine_and_reduce_max` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2062,7 +2097,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2099,7 +2135,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2110,7 +2147,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2147,7 +2185,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2158,7 +2197,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2211,7 +2251,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2222,7 +2263,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `src/graph.rs` の `pub fn max_value(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn max_value("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn max_value("
 pub fn max_value(a: f32, b: f32) -> f32 {
 	if a.is_nan() || b.is_nan() {
 		f32::NAN
@@ -2236,11 +2278,13 @@ pub fn max_value(a: f32, b: f32) -> f32 {
 
 `src/graph.rs` の `pub const C_HELPERS`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub const C_HELPERS"
+```rust
+// file="src/graph.rs" mode="replace" item="pub const C_HELPERS"
 pub const C_HELPERS: &str = "#include <stdint.h>\n#include <stddef.h>\n#include <math.h>\n#include <string.h>\nstatic float chibi_bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nstatic float chibi_max(float a,float b){if(isnan(a)||isnan(b))return NAN;if(a==0.0f&&b==0.0f)return 0.0f;return a>b?a:b;}\n";
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2251,7 +2295,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2288,7 +2333,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2299,7 +2345,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2336,7 +2383,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2347,7 +2395,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2384,7 +2433,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2395,7 +2445,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2432,7 +2483,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2443,7 +2495,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2480,7 +2533,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2491,7 +2545,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2528,7 +2583,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2539,7 +2595,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2576,7 +2633,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2587,7 +2645,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2624,7 +2683,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2635,7 +2695,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2672,7 +2733,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2683,7 +2745,8 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 `tests/shapes_rangeify.rs` の `fn unfused_affine_and_reduce_max(`の定義を次の全体で置き換えます。
 
-```rust file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
+```rust
+// file="tests/shapes_rangeify.rs" mode="replace" item="fn unfused_affine_and_reduce_max("
 fn unfused_affine_and_reduce_max() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![3])?;
@@ -2720,7 +2783,8 @@ fn unfused_affine_and_reduce_max() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 ```
 
@@ -2728,6 +2792,7 @@ cargo test --quiet --test shapes_rangeify unfused_affine_and_reduce_max
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

@@ -2,12 +2,13 @@
 
 入力値は `uint64_t` の scalar 配列に f32 bits として格納する。ポインタ配列の第0要素が出力である。入口は `int chibi_entry(void*const* buffers,const uint64_t* scalars)` に統一する。元の void 入口案に対する変更は戻り値の status だけで、引数 ABI は二配列のままである。library と関数ポインタの寿命は一つの所有物に閉じる。macOS では xcrun の SDK をヘッダと linker の両方へ渡す。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. scalar `Param` を追加し、`slot` の有効性を検証する。
 <!-- todo:02-001 -->
 
-```rust file=src/native.rs mode=write
+```rust
+// file=src/native.rs mode=write
 use crate::Result;
 use std::{
 	ffi::{CStr, CString, c_char, c_void},
@@ -41,7 +42,8 @@ fn loader_error() -> String {
 }
 ```
 
-```rust file=src/inputs.rs mode=write
+```rust
+// file=src/inputs.rs mode=write
 use crate::{Result, native::NativeLibrary};
 use std::{collections::HashSet, ffi::c_void};
 #[derive(Clone, Debug)]
@@ -118,7 +120,8 @@ impl Graph {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod inputs;
 pub mod native;
 ```
@@ -126,7 +129,8 @@ pub mod native;
 ## 2. `a+b` の C 関数を生成し、example の入力を wrapper に渡す。
 <!-- todo:02-002 -->
 
-```rust file=tests/runtime_inputs.rs mode=write
+```rust
+// file=tests/runtime_inputs.rs mode=write
 use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
@@ -168,7 +172,8 @@ fn constant_and_add() -> Result<()> {
 ## 3. 入力を C の定数にせず、実行時に受け取る。
 <!-- todo:02-003 -->
 
-```rust file=src/inputs.rs mode=append
+```rust
+// file=src/inputs.rs mode=append
 pub fn scalar_words(values: &[f32]) -> Vec<u64> {
 	values.iter().map(|v| v.to_bits() as u64).collect()
 }
@@ -177,7 +182,8 @@ pub fn scalar_words(values: &[f32]) -> Vec<u64> {
 ## 4. 前章の定数実行例も同じ renderer で通す。
 <!-- todo:02-004 -->
 
-```rust file=examples/scalar_const.rs mode=write
+```rust
+// file=examples/scalar_const.rs mode=write
 use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
@@ -206,7 +212,8 @@ fn main() -> Result<()> {
 ## 5. 固定 ABI の `chibi_entry` と wrapper を生成する。
 <!-- todo:02-005 -->
 
-```rust file=src/inputs.rs mode=append
+```rust
+// file=src/inputs.rs mode=append
 pub struct Compiled {
 	pub source: String,
 	library: NativeLibrary,
@@ -236,7 +243,8 @@ impl Compiled {
 ## 6. macOS は clang の `-dynamiclib`、対応する Linux は `-shared -fPIC` を使う。
 <!-- todo:02-006 -->
 
-```rust file=src/native.rs mode=append
+```rust
+// file=src/native.rs mode=append
 impl NativeLibrary {
 	pub fn directory(&self) -> &std::path::Path {
 		&self.directory
@@ -340,7 +348,8 @@ impl NativeLibrary {
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -351,7 +360,8 @@ cargo test --quiet --test runtime_inputs
 
 `src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
 
-```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+```rust
+// file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
 			"chibigrad-{}-{}",
@@ -425,7 +435,8 @@ cargo test --quiet --test runtime_inputs
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -436,7 +447,8 @@ cargo test --quiet --test runtime_inputs
 
 `src/inputs.rs` の `pub struct Compiled`の定義を次の全体で置き換えます。
 
-```rust file="src/inputs.rs" mode="replace" item="pub struct Compiled"
+```rust
+// file="src/inputs.rs" mode="replace" item="pub struct Compiled"
 pub struct Compiled {
 	pub source: String,
 	library: NativeLibrary,
@@ -445,7 +457,8 @@ pub struct Compiled {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -456,7 +469,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn constant_and_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
 fn constant_and_add() -> Result<()> {
 	let mut g = Graph::default();
 	let c = g.node(Op::Const(7.));
@@ -469,14 +483,16 @@ fn constant_and_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs constant_and_add
 ```
 
 ## 10. PARAM 三つで式を作る `scalar_inputs` example を追加する。
 <!-- todo:02-010 -->
 
-```rust file=examples/scalar_inputs.rs mode=write
+```rust
+// file=examples/scalar_inputs.rs mode=write
 use chibigrad::{
 	Result,
 	inputs::{Graph, Op},
@@ -524,7 +540,8 @@ fn main() -> Result<()> {
 
 `tests/runtime_inputs.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -535,7 +552,8 @@ cargo test --quiet --test runtime_inputs
 
 `src/inputs.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/inputs.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/inputs.rs" mode="replace" item="pub fn compile("
 	pub fn compile(&self, root: usize) -> Result<Compiled> {
 		let order = self.order(root)?;
 		let mut source="#include <stdint.h>\n#include <string.h>\nstatic float bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nint chibi_entry(void*const* buffers,const uint64_t* scalars){\n".to_string();
@@ -568,7 +586,8 @@ cargo test --quiet --test runtime_inputs
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -579,7 +598,8 @@ cargo test --quiet --test runtime_inputs
 
 `src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/inputs.rs" mode="replace" item="pub fn run("
 	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
 		if inputs.len() != self.slots {
 			return Err("scalar input count mismatch".into());
@@ -598,7 +618,8 @@ cargo test --quiet --test runtime_inputs
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -609,7 +630,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -632,7 +654,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -643,7 +666,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -666,7 +690,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -677,7 +702,8 @@ cargo test --quiet --test runtime_inputs
 
 `src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/inputs.rs" mode="replace" item="pub fn run("
 	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
 		if inputs.len() != self.slots {
 			return Err("scalar input count mismatch".into());
@@ -696,14 +722,16 @@ cargo test --quiet --test runtime_inputs
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
 ## 16. symbol 不在は library path と入口名を含むエラーにする。
 <!-- todo:02-016 -->
 
-```rust file=tests/runtime_inputs.rs mode=append
+```rust
+// file=tests/runtime_inputs.rs mode=append
 use chibigrad::native::NativeLibrary;
 #[test]
 fn native_errors() -> Result<()> {
@@ -738,7 +766,8 @@ fn native_errors() -> Result<()> {
 
 `src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
 
-```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+```rust
+// file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
 			"chibigrad-{}-{}",
@@ -812,7 +841,8 @@ fn native_errors() -> Result<()> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs native_errors
 ```
 
@@ -823,7 +853,8 @@ cargo test --quiet --test runtime_inputs native_errors
 
 `src/inputs.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/inputs.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/inputs.rs" mode="replace" item="pub fn run("
 	pub fn run(&mut self, inputs: &[f32]) -> Result<f32> {
 		if inputs.len() != self.slots {
 			return Err("scalar input count mismatch".into());
@@ -842,14 +873,16 @@ cargo test --quiet --test runtime_inputs native_errors
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs native_errors
 ```
 
 ## 18. 所有物の破棄で library と一時ファイルを解放する。
 <!-- todo:02-018 -->
 
-```rust file=src/native.rs mode=append
+```rust
+// file=src/native.rs mode=append
 impl Drop for NativeLibrary {
 	fn drop(&mut self) {
 		unsafe {
@@ -860,7 +893,8 @@ impl Drop for NativeLibrary {
 }
 ```
 
-```rust file=tests/runtime_inputs.rs mode=append
+```rust
+// file=tests/runtime_inputs.rs mode=append
 #[test]
 fn native_lifetime() -> Result<()> {
 	let source = "int chibi_entry(void*const* b,const unsigned long long* s){return 0;}";
@@ -875,7 +909,8 @@ fn native_lifetime() -> Result<()> {
 
 `tests/runtime_inputs.rs` の `native_lifetime` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs native_lifetime
 ```
 
@@ -886,7 +921,8 @@ cargo test --quiet --test runtime_inputs native_lifetime
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -909,7 +945,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -920,7 +957,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -943,7 +981,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -954,7 +993,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -977,7 +1017,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -988,7 +1029,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn same_library_two_runs(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn same_library_two_runs("
 fn same_library_two_runs() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.node(Op::Param(0));
@@ -1011,7 +1053,8 @@ fn same_library_two_runs() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs
 ```
 
@@ -1022,7 +1065,8 @@ cargo test --quiet --test runtime_inputs
 
 `tests/runtime_inputs.rs` の `fn constant_and_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
+```rust
+// file="tests/runtime_inputs.rs" mode="replace" item="fn constant_and_add("
 fn constant_and_add() -> Result<()> {
 	let mut g = Graph::default();
 	let c = g.node(Op::Const(7.));
@@ -1035,7 +1079,8 @@ fn constant_and_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs constant_and_add
 ```
 
@@ -1046,13 +1091,15 @@ cargo test --quiet --test runtime_inputs constant_and_add
 
 `src/native.rs` の `pub unsafe fn symbol(`の定義を次の全体で置き換えます。
 
-```rust file="src/native.rs" mode="replace" item="pub unsafe fn symbol("
+```rust
+// file="src/native.rs" mode="replace" item="pub unsafe fn symbol("
 	pub unsafe fn symbol(&self) -> *mut c_void {
 		self.entry
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test runtime_inputs native_lifetime
 ```
 
@@ -1060,10 +1107,12 @@ cargo test --quiet --test runtime_inputs native_lifetime
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```
 
-```sh check
+```sh
+# check
 cargo run --quiet --example scalar_inputs -- 2 3 4 --then 5 1 2 --dump-source
 ```

@@ -12,13 +12,15 @@ GEMM は元の MUL と SUM を残して kernel だけを置き換える。認識
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod conv_opt;
 pub mod gemm_opt;
 pub mod storage;
 ```
 
-```rust file=src/gemm_opt.rs mode=write
+```rust
+// file=src/gemm_opt.rs mode=write
 use crate::{
 	Binary, Graph, Op, Plan, Reduce, Result,
 	graph::kernel_bodies,
@@ -165,7 +167,8 @@ pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Resul
 }
 ```
 
-```rust file=src/conv_opt.rs mode=write
+```rust
+// file=src/conv_opt.rs mode=write
 use crate::{Graph, NodeId, Result};
 pub fn conv2d(
 	g: &mut Graph,
@@ -238,7 +241,8 @@ pub fn conv2d(
 }
 ```
 
-```rust file=src/storage.rs mode=write
+```rust
+// file=src/storage.rs mode=write
 use crate::{
 	Buffer, Graph, Op, Result,
 	graph::kernel_bodies,
@@ -489,7 +493,8 @@ impl MemoryPlan {
 }
 ```
 
-```rust file=src/gpu_kernels.rs mode=append
+```rust
+// file=src/gpu_kernels.rs mode=append
 #[derive(Clone, Copy, Debug)]
 pub struct GemmTile {
 	pub m: usize,
@@ -620,7 +625,8 @@ pub fn gemm(d: Dialect, m: usize, n: usize, k: usize, t: GemmTile) -> Result<Ker
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=append
+```rust
+// file=src/gpu_graph.rs mode=append
 impl GpuPlan {
 	pub fn compile_optimized(
 		graph: &Graph,
@@ -671,7 +677,8 @@ impl GpuPlan {
 }
 ```
 
-```rust file=tests/gemm_opt.rs mode=write
+```rust
+// file=tests/gemm_opt.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	gemm_opt::{compile, flops, recognize},
@@ -722,7 +729,8 @@ fn work_estimate() {
 }
 ```
 
-```rust file=tests/conv_opt.rs mode=write
+```rust
+// file=tests/conv_opt.rs mode=write
 use chibigrad::{Buffer, Graph, conv_opt::conv2d, gemm_opt};
 #[test]
 fn conv_stride_padding_uses_real_gemm() {
@@ -741,7 +749,8 @@ fn conv_stride_padding_uses_real_gemm() {
 }
 ```
 
-```rust file=tests/storage.rs mode=write
+```rust
+// file=tests/storage.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph,
 	storage::{CompileCache, MemoryPlan},
@@ -775,7 +784,8 @@ fn actual_reuse_and_binary_cache() {
 }
 ```
 
-```rust file=tests/gemm_source.rs mode=write
+```rust
+// file=tests/gemm_source.rs mode=write
 use chibigrad::{
 	gpu::Dialect,
 	gpu_kernels::{GemmTile, gemm},
@@ -802,7 +812,8 @@ fn vector_loads_are_guarded() {
 }
 ```
 
-```rust file=tests/gemm_hardware.rs mode=write
+```rust
+// file=tests/gemm_hardware.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	gpu::{Dialect, Kernel},
@@ -868,15 +879,18 @@ fn opencl() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test gemm_hardware --features metal metal -- --ignored --exact
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test gemm_hardware --features opencl opencl -- --ignored --exact
 ```
 
-```rust file=tests/book_19.rs mode=write
+```rust
+// file=tests/book_19.rs mode=write
 mod suite0 {
 	use chibigrad::{
 		Buffer, Graph,
@@ -1015,7 +1029,8 @@ mod suite3 {
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_001() {
 	suite0::tiled_graph_and_rebind();
@@ -1024,7 +1039,8 @@ fn todo_19_001() {
 
 `src/runtime.rs` の `pub fn compile_unfused(`の定義を次の全体で置き換えます。
 
-```rust file="src/runtime.rs" mode="replace" item="pub fn compile_unfused("
+```rust
+// file="src/runtime.rs" mode="replace" item="pub fn compile_unfused("
 	pub fn compile_unfused(graph: &crate::Graph, outputs: &[usize]) -> Result<Self> {
 		let (source, abi, kernel_count) = crate::graph::render(graph, outputs, false)?;
 		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
@@ -1047,7 +1063,8 @@ fn todo_19_001() {
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -1102,7 +1119,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_001 -- --exact
 ```
 
@@ -1114,7 +1132,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_002() {
 	suite0::tiled_graph_and_rebind();
@@ -1123,7 +1142,8 @@ fn todo_19_002() {
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -1178,7 +1198,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_002 -- --exact
 ```
 
@@ -1190,7 +1211,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_003() {
 	suite0::tiled_graph_and_rebind();
@@ -1199,7 +1221,8 @@ fn todo_19_003() {
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -1254,7 +1277,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_003 -- --exact
 ```
 
@@ -1266,7 +1290,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_004() {
 	suite0::tiled_graph_and_rebind();
@@ -1275,7 +1300,8 @@ fn todo_19_004() {
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -1330,7 +1356,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_004 -- --exact
 ```
 
@@ -1342,7 +1369,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_005() {
 	suite0::tiled_graph_and_rebind();
@@ -1351,7 +1379,8 @@ fn todo_19_005() {
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -1408,7 +1437,8 @@ pub fn compile(
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1487,7 +1517,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_005 -- --exact
 ```
 
@@ -1499,7 +1530,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_006() {
 	suite3::vector_loads_are_guarded();
@@ -1508,7 +1540,8 @@ fn todo_19_006() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -1568,7 +1601,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_006 -- --exact
 ```
 
@@ -1580,7 +1614,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_007() {
 	suite3::vector_loads_are_guarded();
@@ -1589,7 +1624,8 @@ fn todo_19_007() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -1649,7 +1685,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_007 -- --exact
 ```
 
@@ -1661,7 +1698,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_008() {
 	suite3::vector_loads_are_guarded();
@@ -1670,7 +1708,8 @@ fn todo_19_008() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -1730,7 +1769,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_008 -- --exact
 ```
 
@@ -1742,7 +1782,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_009() {
 	suite3::vector_loads_are_guarded();
@@ -1751,7 +1792,8 @@ fn todo_19_009() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -1811,7 +1853,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_009 -- --exact
 ```
 
@@ -1823,7 +1866,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_010() {
 	suite3::vector_loads_are_guarded();
@@ -1832,7 +1876,8 @@ fn todo_19_010() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -1894,7 +1939,8 @@ pub fn gemm_scalar(
 
 `src/gpu.rs` の `pub fn header(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu.rs" mode="replace" item="pub fn header("
+```rust
+// file="src/gpu.rs" mode="replace" item="pub fn header("
 pub fn header(d: Dialect, count: usize, body: &str) -> String {
 	let args = (0..count)
 		.map(|i| match d {
@@ -1916,7 +1962,8 @@ pub fn header(d: Dialect, count: usize, body: &str) -> String {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -2086,7 +2133,8 @@ pub fn header(d: Dialect, count: usize, body: &str) -> String {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_010 -- --exact
 ```
 
@@ -2098,7 +2146,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_011() {
 	suite3::vector_loads_are_guarded();
@@ -2107,7 +2156,8 @@ fn todo_19_011() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -2167,7 +2217,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_011 -- --exact
 ```
 
@@ -2179,7 +2230,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_012() {
 	suite3::vector_loads_are_guarded();
@@ -2188,7 +2240,8 @@ fn todo_19_012() {
 
 `src/gpu_kernels.rs` の `pub fn gemm_scalar(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm_scalar("
 pub fn gemm_scalar(
 	d: Dialect,
 	m: usize,
@@ -2248,7 +2301,8 @@ pub fn gemm_scalar(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_012 -- --exact
 ```
 
@@ -2260,7 +2314,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_013() {
 	suite3::vector_loads_are_guarded();
@@ -2269,7 +2324,8 @@ fn todo_19_013() {
 
 `src/gpu_kernels.rs` の `pub fn gemm(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn gemm("
 pub fn gemm(d: Dialect, m: usize, n: usize, k: usize, t: GemmTile) -> Result<Kernel, String> {
 	let mut kernel = gemm_scalar(d, m, n, k, t)?;
 	if !k.is_multiple_of(4)
@@ -2325,7 +2381,8 @@ pub fn gemm(d: Dialect, m: usize, n: usize, k: usize, t: GemmTile) -> Result<Ker
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -2477,7 +2534,8 @@ pub fn gemm(d: Dialect, m: usize, n: usize, k: usize, t: GemmTile) -> Result<Ker
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_013 -- --exact
 ```
 
@@ -2489,7 +2547,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_014() {
 	suite1::conv_stride_padding_uses_real_gemm();
@@ -2498,7 +2557,8 @@ fn todo_19_014() {
 
 `src/conv_opt.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
 pub fn conv2d(
 	g: &mut Graph,
 	x: NodeId,
@@ -2572,7 +2632,8 @@ pub fn conv2d(
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -2627,7 +2688,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_014 -- --exact
 ```
 
@@ -2639,7 +2701,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_015() {
 	suite1::conv_stride_padding_uses_real_gemm();
@@ -2648,7 +2711,8 @@ fn todo_19_015() {
 
 `src/conv_opt.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/conv_opt.rs" mode="replace" item="pub fn conv2d("
 pub fn conv2d(
 	g: &mut Graph,
 	x: NodeId,
@@ -2722,7 +2786,8 @@ pub fn conv2d(
 
 `src/gemm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	outputs: &[usize],
@@ -2777,7 +2842,8 @@ pub fn compile(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_015 -- --exact
 ```
 
@@ -2789,7 +2855,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_016() {
 	suite2::actual_reuse_and_binary_cache();
@@ -2798,7 +2865,8 @@ fn todo_19_016() {
 
 `src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn plan("
 pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
 	let kernels = kernel_bodies(g, outputs, true)?;
 	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -2866,7 +2934,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_016 -- --exact
 ```
 
@@ -2878,7 +2947,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_017() {
 	suite2::actual_reuse_and_binary_cache();
@@ -2887,7 +2957,8 @@ fn todo_19_017() {
 
 `src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn plan("
 pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
 	let kernels = kernel_bodies(g, outputs, true)?;
 	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -2955,7 +3026,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_017 -- --exact
 ```
 
@@ -2967,7 +3039,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_018() {
 	suite2::actual_reuse_and_binary_cache();
@@ -2976,7 +3049,8 @@ fn todo_19_018() {
 
 `src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn plan("
 pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
 	let kernels = kernel_bodies(g, outputs, true)?;
 	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -3044,7 +3118,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_018 -- --exact
 ```
 
@@ -3056,7 +3131,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_019() {
 	suite2::actual_reuse_and_binary_cache();
@@ -3065,7 +3141,8 @@ fn todo_19_019() {
 
 `src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn plan("
 pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
 	let kernels = kernel_bodies(g, outputs, true)?;
 	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -3135,7 +3212,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 
 `src/storage.rs` の `pub fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn run(&self,"
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn run(&self,"
 	pub fn run(&self, inputs: &[Buffer]) -> Result<(Vec<Buffer>, Measurements)> {
 		let total = Instant::now();
 		self.graph.validate_inputs(inputs, &self.outputs)?;
@@ -3200,7 +3278,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_019 -- --exact
 ```
 
@@ -3212,7 +3291,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_020() {
 	suite2::actual_reuse_and_binary_cache();
@@ -3221,7 +3301,8 @@ fn todo_19_020() {
 
 `src/storage.rs` の `pub fn plan(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn plan("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn plan("
 pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Result<StoragePlan> {
 	let kernels = kernel_bodies(g, outputs, true)?;
 	let mut uses: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -3289,7 +3370,8 @@ pub fn plan(g: &Graph, outputs: &[usize], external: &[usize], reuse: bool) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_020 -- --exact
 ```
 
@@ -3301,7 +3383,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_021() {
 	suite2::actual_reuse_and_binary_cache();
@@ -3310,7 +3393,8 @@ fn todo_19_021() {
 
 `src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn cpu("
 	pub fn cpu(source: String, specialization: String) -> Result<Self> {
 		let compiler = Command::new("clang")
 			.arg("--version")
@@ -3332,7 +3416,8 @@ fn todo_19_021() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_021 -- --exact
 ```
 
@@ -3344,7 +3429,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_022() {
 	suite2::actual_reuse_and_binary_cache();
@@ -3353,7 +3439,8 @@ fn todo_19_022() {
 
 `src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn cpu("
 	pub fn cpu(source: String, specialization: String) -> Result<Self> {
 		let compiler = Command::new("clang")
 			.arg("--version")
@@ -3375,7 +3462,8 @@ fn todo_19_022() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_022 -- --exact
 ```
 
@@ -3387,14 +3475,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_023() {
 	suite2::actual_reuse_and_binary_cache();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_023 -- --exact
 ```
 
@@ -3406,14 +3496,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_024() {
 	suite2::actual_reuse_and_binary_cache();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_024 -- --exact
 ```
 
@@ -3425,7 +3517,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_025() {
 	suite2::actual_reuse_and_binary_cache();
@@ -3434,7 +3527,8 @@ fn todo_19_025() {
 
 `src/storage.rs` の `pub fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn run(&self,"
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn run(&self,"
 	pub fn run(&self, inputs: &[Buffer]) -> Result<(Vec<Buffer>, Measurements)> {
 		let total = Instant::now();
 		self.graph.validate_inputs(inputs, &self.outputs)?;
@@ -3501,7 +3595,8 @@ fn todo_19_025() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -3655,7 +3750,8 @@ fn todo_19_025() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -3825,7 +3921,8 @@ fn todo_19_025() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_025 -- --exact
 ```
 
@@ -3837,7 +3934,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_026() {
 	suite0::work_estimate();
@@ -3846,7 +3944,8 @@ fn todo_19_026() {
 
 `src/gemm_opt.rs` の `pub fn flops(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
 pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Result<Flops> {
 	let (tm, tn, tk) = tile;
 	if tm == 0 || tn == 0 || tk == 0 {
@@ -3870,7 +3969,8 @@ pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Resul
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_026 -- --exact
 ```
 
@@ -3882,7 +3982,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_027() {
 	suite0::work_estimate();
@@ -3891,7 +3992,8 @@ fn todo_19_027() {
 
 `src/gemm_opt.rs` の `pub fn flops(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn flops("
 pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Result<Flops> {
 	let (tm, tn, tk) = tile;
 	if tm == 0 || tn == 0 || tk == 0 {
@@ -3915,7 +4017,8 @@ pub fn flops(m: usize, n: usize, k: usize, tile: (usize, usize, usize)) -> Resul
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_027 -- --exact
 ```
 
@@ -3927,14 +4030,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_028() {
 	suite0::tiled_graph_and_rebind();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_028 -- --exact
 ```
 
@@ -3946,14 +4051,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_029() {
 	suite0::tiled_graph_and_rebind();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_029 -- --exact
 ```
 
@@ -3965,14 +4072,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_030() {
 	suite0::tiled_graph_and_rebind();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_030 -- --exact
 ```
 
@@ -3984,14 +4093,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_031() {
 	suite0::tiled_graph_and_rebind();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_031 -- --exact
 ```
 
@@ -4003,14 +4114,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_032() {
 	suite0::tiled_graph_and_rebind();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_032 -- --exact
 ```
 
@@ -4022,14 +4135,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_033() {
 	suite2::actual_reuse_and_binary_cache();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_033 -- --exact
 ```
 
@@ -4041,14 +4156,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_034() {
 	suite3::vector_loads_are_guarded();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_034 -- --exact
 ```
 
@@ -4060,14 +4177,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gemm_opt::recognize、gemm_opt::compile、conv_opt::conv2d、storage::plan、MemoryPlan::run、CompileCache::get`](#gemm-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_19.rs mode=append
+```rust
+// file=tests/book_19.rs mode=append
 #[test]
 fn todo_19_035() {
 	suite0::work_estimate();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_19 todo_19_035 -- --exact
 ```
 
@@ -4075,7 +4194,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

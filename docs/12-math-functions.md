@@ -2,12 +2,13 @@
 
 通常経路は sqrtf、sinf、cosf、log2f、exp2f と libm に接続する。exp と自然対数の合成も示す。近似は opt-in の別 builder で、既存ノードの意味を変更しない。exp2 は x=q+r、|r|<=0.5 の7次 Taylor、log2 は m∈[1,2) の atanh 級数11次、sin は |r|<=π/2 の13次 Taylor を Horner 形式で表す。係数は階乗または奇数分母から生成する。exp2/log2 は exponent -16..16 の範囲だけで近似し、それ以外と NaN/Inf は libm に戻す。sin は |x|<=32 のみ近似する。範囲外の branch の入力を整数へ CAST しない。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. SQRT の dtype と入力数を verifier に追加する。
 <!-- todo:12-001 -->
 
-```rust file=src/math.rs mode=write
+```rust
+// file=src/math.rs mode=write
 use crate::{Binary as B, Graph, NodeId, Result, Unary as U};
 fn scalar(g: &mut Graph, x: f32) -> Result<NodeId> {
 	g.constant(x, vec![])
@@ -137,11 +138,13 @@ pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod math;
 ```
 
-```rust file=tests/math_functions.rs mode=write
+```rust
+// file=tests/math_functions.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
@@ -266,7 +269,8 @@ fn fixed_seed_polynomial_boundaries() -> Result<()> {
 
 `tests/math_functions.rs` の `empty_and_math` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions empty_and_math
 ```
 
@@ -277,7 +281,8 @@ cargo test --quiet --test math_functions empty_and_math
 
 `src/graph.rs` の `fn interpret_node(` の `Op::Unary` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn interpret_node(" arm="Op::Unary"
+```rust
+// file="src/graph.rs" mode="replace" item="fn interpret_node(" arm="Op::Unary"
 			Op::Unary { op, x } => {
 				for (i, v) in data.iter_mut().enumerate() {
 					let a = get(*x, i);
@@ -296,7 +301,8 @@ cargo test --quiet --test math_functions empty_and_math
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions empty_and_math
 ```
 
@@ -307,7 +313,8 @@ cargo test --quiet --test math_functions empty_and_math
 
 `src/native.rs` の `pub unsafe fn compile_with_compiler(`の定義を次の全体で置き換えます。
 
-```rust file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
+```rust
+// file="src/native.rs" mode="replace" item="pub unsafe fn compile_with_compiler("
 	pub unsafe fn compile_with_compiler(source: &str, entry: &str, compiler: &str) -> Result<Self> {
 		let directory = std::env::temp_dir().join(format!(
 			"chibigrad-{}-{}",
@@ -381,7 +388,8 @@ cargo test --quiet --test math_functions empty_and_math
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions empty_and_math
 ```
 
@@ -392,7 +400,8 @@ cargo test --quiet --test math_functions empty_and_math
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -415,7 +424,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions empty_and_math
 ```
 
@@ -426,7 +436,8 @@ cargo test --quiet --test math_functions empty_and_math
 
 `src/graph.rs` の `fn expr(` の `Op::Unary` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
 			Op::Unary { op, x } => {
 				let a = self.expr(x, index, code)?;
 				match op {
@@ -449,7 +460,8 @@ cargo test --quiet --test math_functions empty_and_math
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -460,7 +472,8 @@ cargo test --quiet --test math_functions
 
 `src/graph.rs` の `fn expr(` の `Op::Unary` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Unary"
 			Op::Unary { op, x } => {
 				let a = self.expr(x, index, code)?;
 				match op {
@@ -483,7 +496,8 @@ cargo test --quiet --test math_functions
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -494,7 +508,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn exp(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn exp("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn exp("
 pub fn exp(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let scale = scalar(g, std::f32::consts::LOG2_E)?;
 	let y = mul(g, x, scale)?;
@@ -504,7 +519,8 @@ pub fn exp(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 
 `src/math.rs` の `pub fn log(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn log("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn log("
 pub fn log(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let y = g.unary(U::Log2, x)?;
 	let scale = scalar(g, std::f32::consts::LN_2)?;
@@ -512,7 +528,8 @@ pub fn log(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -523,7 +540,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -546,7 +564,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -557,7 +576,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -580,7 +600,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -591,7 +612,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
 pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let two = scalar(g, 2.)?;
@@ -618,7 +640,8 @@ pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -629,7 +652,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
 pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let two = scalar(g, 2.)?;
@@ -656,7 +680,8 @@ pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -667,7 +692,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_log2(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_log2("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_log2("
 pub fn approximate_log2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let mut e = scalar(g, -16.)?;
@@ -696,7 +722,8 @@ pub fn approximate_log2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -707,7 +734,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
 pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let two = scalar(g, 2.)?;
@@ -734,7 +762,8 @@ pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -745,7 +774,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_exp2(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_exp2("
 pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let two = scalar(g, 2.)?;
@@ -772,7 +802,8 @@ pub fn approximate_exp2(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -783,7 +814,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_sin("
 pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let mut q = scalar(g, -5.)?;
@@ -824,7 +856,8 @@ pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -835,7 +868,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_sin("
 pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let mut q = scalar(g, -5.)?;
@@ -876,7 +910,8 @@ pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -887,7 +922,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -910,7 +946,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -921,7 +958,8 @@ cargo test --quiet --test math_functions
 
 `src/math.rs` の `pub fn approximate_sin(`の定義を次の全体で置き換えます。
 
-```rust file="src/math.rs" mode="replace" item="pub fn approximate_sin("
+```rust
+// file="src/math.rs" mode="replace" item="pub fn approximate_sin("
 pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 	let one = scalar(g, 1.)?;
 	let mut q = scalar(g, -5.)?;
@@ -962,7 +1000,8 @@ pub fn approximate_sin(g: &mut Graph, x: NodeId) -> Result<NodeId> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -973,7 +1012,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -996,7 +1036,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -1007,7 +1048,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -1030,7 +1072,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -1041,7 +1084,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -1064,7 +1108,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions empty_and_math
 ```
 
@@ -1075,7 +1120,8 @@ cargo test --quiet --test math_functions empty_and_math
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -1098,7 +1144,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -1109,7 +1156,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -1132,7 +1180,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -1143,7 +1192,8 @@ cargo test --quiet --test math_functions
 
 `tests/math_functions.rs` の `fn empty_and_math(`の定義を次の全体で置き換えます。
 
-```rust file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
+```rust
+// file="tests/math_functions.rs" mode="replace" item="fn empty_and_math("
 fn empty_and_math() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![2, 0])?;
@@ -1166,7 +1216,8 @@ fn empty_and_math() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test math_functions
 ```
 
@@ -1174,6 +1225,7 @@ cargo test --quiet --test math_functions
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

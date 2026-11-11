@@ -8,7 +8,8 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 `Cargo.toml` を次の全体へ置き換える。Metal の binding は macOS と feature の両方で制限する。依存の version を固定する。
 
-```toml file=Cargo.toml mode=write
+```toml
+# file=Cargo.toml mode=write
 [package]
 name = "chibigrad"
 version = "0.1.0"
@@ -27,18 +28,21 @@ objc2-metal = { version = "=0.3.2", optional = true }
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod backends;
 pub mod gpu;
 pub mod gpu_graph;
 ```
 
-```rust file=src/backends/mod.rs mode=write
+```rust
+// file=src/backends/mod.rs mode=write
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod metal;
 ```
 
-```rust file=src/gpu.rs mode=write
+```rust
+// file=src/gpu.rs mode=write
 use std::time::Duration;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialect {
@@ -134,7 +138,8 @@ pub fn add(d: Dialect, n: usize, local: usize) -> Result<Kernel, String> {
 }
 ```
 
-```rust file=src/backends/metal.rs mode=write
+```rust
+// file=src/backends/metal.rs mode=write
 use crate::gpu::{Kernel, Run, Timings};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
@@ -410,7 +415,8 @@ pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=write
+```rust
+// file=src/gpu_graph.rs mode=write
 use crate::{
 	Buffer, Graph, Op, Result,
 	gpu::{Dialect, Kernel, groups, header},
@@ -756,7 +762,8 @@ impl GpuPlan {
 }
 ```
 
-```rust file=tests/gpu_graph.rs mode=write
+```rust
+// file=tests/gpu_graph.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::Dialect,
@@ -822,7 +829,8 @@ fn unsupported_index_math_rejected_before_compilation() {
 }
 ```
 
-```rust file=tests/book_15.rs mode=write
+```rust
+// file=tests/book_15.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::{Dialect, groups},
@@ -908,7 +916,8 @@ fn hardware_contract() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo check --features metal
 ```
 
@@ -918,7 +927,8 @@ cargo check --features metal
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -929,7 +939,8 @@ fn todo_15_001() {
 
 `src/backends/metal.rs` の `pub fn compile(kernel:`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub fn compile(kernel:"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub fn compile(kernel:"
 	pub fn compile(kernel: &Kernel) -> Result<Self, String> {
 		let device = MTLCreateSystemDefaultDevice().ok_or("Metal device unavailable")?;
 		let queue = device
@@ -939,7 +950,8 @@ fn todo_15_001() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_001 -- --exact --ignored
 ```
 
@@ -951,7 +963,8 @@ cargo test --test book_15 --features metal todo_15_001 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_002() {
 	source_contract();
@@ -960,7 +973,8 @@ fn todo_15_002() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -1073,7 +1087,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_002 -- --exact
 ```
 
@@ -1085,7 +1100,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1096,7 +1112,8 @@ fn todo_15_003() {
 
 `src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="fn compile_on("
 	fn compile_on(
 		kernel: &Kernel,
 		device: Device,
@@ -1136,7 +1153,8 @@ fn todo_15_003() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_003 -- --exact --ignored
 ```
 
@@ -1148,7 +1166,8 @@ cargo test --test book_15 --features metal todo_15_003 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1159,7 +1178,8 @@ fn todo_15_004() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -1311,7 +1331,8 @@ fn todo_15_004() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_004 -- --exact --ignored
 ```
 
@@ -1323,7 +1344,8 @@ cargo test --test book_15 --features metal todo_15_004 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1332,7 +1354,8 @@ fn todo_15_005() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_005 -- --exact --ignored
 ```
 
@@ -1344,7 +1367,8 @@ cargo test --test book_15 --features metal todo_15_005 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_006() {
 	source_contract();
@@ -1353,7 +1377,8 @@ fn todo_15_006() {
 
 `src/gpu.rs` の `pub fn groups(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu.rs" mode="replace" item="pub fn groups("
+```rust
+// file="src/gpu.rs" mode="replace" item="pub fn groups("
 pub fn groups(n: usize, local: usize) -> Result<usize, String> {
 	if local == 0 {
 		return Err("zero local size".into());
@@ -1364,7 +1389,8 @@ pub fn groups(n: usize, local: usize) -> Result<usize, String> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_006 -- --exact
 ```
 
@@ -1376,7 +1402,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_007() {
 	source_contract();
@@ -1385,7 +1412,8 @@ fn todo_15_007() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -1498,7 +1526,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_007 -- --exact
 ```
 
@@ -1510,7 +1539,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1521,7 +1551,8 @@ fn todo_15_008() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -1673,7 +1704,8 @@ fn todo_15_008() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_008 -- --exact --ignored
 ```
 
@@ -1685,7 +1717,8 @@ cargo test --test book_15 --features metal todo_15_008 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1694,7 +1727,8 @@ fn todo_15_009() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_009 -- --exact --ignored
 ```
 
@@ -1706,7 +1740,8 @@ cargo test --test book_15 --features metal todo_15_009 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_010() {
 	source_contract();
@@ -1715,7 +1750,8 @@ fn todo_15_010() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(kernel:`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
 pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	kernel.validate(inputs)?;
 	if kernel.lengths[kernel.output] == 0 {
@@ -1736,7 +1772,8 @@ pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 
 `src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
 	fn from_lowered(
 		graph: &Graph,
 		outputs: &[usize],
@@ -1797,7 +1834,8 @@ pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_010 -- --exact
 ```
 
@@ -1809,7 +1847,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -1820,7 +1859,8 @@ fn todo_15_011() {
 
 `src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
 		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
 			return Err("optimized GPU plan shape mismatch".into());
@@ -1905,7 +1945,8 @@ fn todo_15_011() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -2057,7 +2098,8 @@ fn todo_15_011() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_011 -- --exact --ignored
 ```
 
@@ -2069,7 +2111,8 @@ cargo test --test book_15 --features metal todo_15_011 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_012() {
 	source_contract();
@@ -2078,7 +2121,8 @@ fn todo_15_012() {
 
 `src/graph.rs` の `fn coord(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn coord("
+```rust
+// file="src/graph.rs" mode="replace" item="fn coord("
 	fn coord(&self, id: usize, index: &str, axis: usize) -> String {
 		format!(
 			"((({index}) / {}) % {})",
@@ -2090,7 +2134,8 @@ fn todo_15_012() {
 
 `src/graph.rs` の `fn flatten(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn flatten("
+```rust
+// file="src/graph.rs" mode="replace" item="fn flatten("
 	fn flatten(&self, id: usize, c: &[String]) -> String {
 		if c.is_empty() {
 			return "0".into();
@@ -2111,7 +2156,8 @@ fn todo_15_012() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2224,7 +2270,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_012 -- --exact
 ```
 
@@ -2236,7 +2283,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -2247,7 +2295,8 @@ fn todo_15_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Expand` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
 			Op::Expand { x } => {
 				let xi = self.broadcast_index(x, id, index);
 				return self.expr(x, &xi, code);
@@ -2256,7 +2305,8 @@ fn todo_15_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Permute` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Permute"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Permute"
 			Op::Permute { x, axes } => {
 				let mut c = vec![String::new(); axes.len()];
 				for (a, &old) in axes.iter().enumerate() {
@@ -2269,7 +2319,8 @@ fn todo_15_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Shrink` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
 			Op::Shrink { x, ranges } => {
 				let c = ranges
 					.iter()
@@ -2283,7 +2334,8 @@ fn todo_15_013() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2396,7 +2448,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_013 -- --exact --ignored
 ```
 
@@ -2408,7 +2461,8 @@ cargo test --test book_15 --features metal todo_15_013 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_014() {
 	source_contract();
@@ -2417,7 +2471,8 @@ fn todo_15_014() {
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -2453,7 +2508,8 @@ fn todo_15_014() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2566,7 +2622,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_014 -- --exact
 ```
 
@@ -2578,7 +2635,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_015() {
 	source_contract();
@@ -2587,7 +2645,8 @@ fn todo_15_015() {
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -2623,7 +2682,8 @@ fn todo_15_015() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2736,7 +2796,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_015 -- --exact
 ```
 
@@ -2748,7 +2809,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -2757,7 +2819,8 @@ fn todo_15_016() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_016 -- --exact --ignored
 ```
 
@@ -2769,7 +2832,8 @@ cargo test --test book_15 --features metal todo_15_016 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -2780,7 +2844,8 @@ fn todo_15_017() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2835,7 +2900,8 @@ fn todo_15_017() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2948,7 +3014,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_017 -- --exact --ignored
 ```
 
@@ -2960,7 +3027,8 @@ cargo test --test book_15 --features metal todo_15_017 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -2971,7 +3039,8 @@ fn todo_15_018() {
 
 `src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn matmul("
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
 		let sb = self.get(b)?.shape.clone();
@@ -2988,7 +3057,8 @@ fn todo_15_018() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -3043,7 +3113,8 @@ fn todo_15_018() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -3156,7 +3227,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_018 -- --exact --ignored
 ```
 
@@ -3168,7 +3240,8 @@ cargo test --test book_15 --features metal todo_15_018 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -3179,7 +3252,8 @@ fn todo_15_019() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -3234,7 +3308,8 @@ fn todo_15_019() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -3347,7 +3422,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_019 -- --exact --ignored
 ```
 
@@ -3359,7 +3435,8 @@ cargo test --test book_15 --features metal todo_15_019 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -3370,7 +3447,8 @@ fn todo_15_020() {
 
 `src/graph.rs` の `pub fn reduce(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn reduce("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn reduce("
 	pub fn reduce(
 		&mut self,
 		x: NodeId,
@@ -3405,7 +3483,8 @@ fn todo_15_020() {
 
 `src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn matmul("
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
 		let sb = self.get(b)?.shape.clone();
@@ -3422,7 +3501,8 @@ fn todo_15_020() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -3535,7 +3615,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_020 -- --exact --ignored
 ```
 
@@ -3547,7 +3628,8 @@ cargo test --test book_15 --features metal todo_15_020 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -3558,7 +3640,8 @@ fn todo_15_021() {
 
 `src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
 	fn from_lowered(
 		graph: &Graph,
 		outputs: &[usize],
@@ -3621,7 +3704,8 @@ fn todo_15_021() {
 
 `src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
 		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
 			return Err("optimized GPU plan shape mismatch".into());
@@ -3704,7 +3788,8 @@ fn todo_15_021() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_021 -- --exact --ignored
 ```
 
@@ -3716,14 +3801,16 @@ cargo test --test book_15 --features metal todo_15_021 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_022() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_022 -- --exact
 ```
 
@@ -3735,14 +3822,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_023() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_023 -- --exact
 ```
 
@@ -3754,7 +3843,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -3765,7 +3855,8 @@ fn todo_15_024() {
 
 `src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="fn compile_on("
 	fn compile_on(
 		kernel: &Kernel,
 		device: Device,
@@ -3807,7 +3898,8 @@ fn todo_15_024() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -3959,7 +4051,8 @@ fn todo_15_024() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_024 -- --exact --ignored
 ```
 
@@ -3971,7 +4064,8 @@ cargo test --test book_15 --features metal todo_15_024 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 #[cfg(all(target_os = "macos", feature = "metal"))]
 #[ignore = "requires real device"]
@@ -3982,7 +4076,8 @@ fn todo_15_025() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -4134,7 +4229,8 @@ fn todo_15_025() {
 	}
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test book_15 --features metal todo_15_025 -- --exact --ignored
 ```
 
@@ -4146,7 +4242,8 @@ cargo test --test book_15 --features metal todo_15_025 -- --exact --ignored
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_026() {
 	source_contract();
@@ -4155,7 +4252,8 @@ fn todo_15_026() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -4268,7 +4366,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_026 -- --exact
 ```
 
@@ -4280,14 +4379,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `GpuPlan::compile、GpuPlan::run_with_shapes、gpu::groups、MetalProgram::compile、MetalProgram::run、MetalProgram::limits`](#metal-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_15.rs mode=append
+```rust
+// file=tests/book_15.rs mode=append
 #[test]
 fn todo_15_027() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_15 todo_15_027 -- --exact
 ```
 
@@ -4295,7 +4396,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

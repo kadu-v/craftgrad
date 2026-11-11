@@ -10,11 +10,13 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod loop_opt;
 ```
 
-```rust file=src/loop_opt.rs mode=write
+```rust
+// file=src/loop_opt.rs mode=write
 use crate::{
 	Binary, Graph, Op, Plan, Result,
 	graph::{C_HELPERS, kernel_bodies},
@@ -192,7 +194,8 @@ pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Resu
 }
 ```
 
-```rust file=tests/loop_opt.rs mode=write
+```rust
+// file=tests/loop_opt.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	loop_opt::{Options, compile, interchange_axes},
@@ -284,7 +287,8 @@ fn more_workers_than_outputs() {
 }
 ```
 
-```rust file=tests/book_17.rs mode=write
+```rust
+// file=tests/book_17.rs mode=write
 mod suite0 {
 	use chibigrad::{
 		Binary, Buffer, Graph, Reduce,
@@ -384,7 +388,8 @@ mod suite0 {
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_001() {
 	suite0::transforms_real_compiled_graph();
@@ -393,7 +398,8 @@ fn todo_17_001() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -472,7 +478,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_001 -- --exact
 ```
 
@@ -484,7 +491,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_002() {
 	suite0::reduction_private_accumulators();
@@ -493,7 +501,8 @@ fn todo_17_002() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -572,7 +581,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_002 -- --exact
 ```
 
@@ -584,7 +594,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_003() {
 	suite0::transforms_real_compiled_graph();
@@ -593,7 +604,8 @@ fn todo_17_003() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -672,7 +684,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_003 -- --exact
 ```
 
@@ -684,7 +697,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_004() {
 	suite0::reduction_private_accumulators();
@@ -693,7 +707,8 @@ fn todo_17_004() {
 
 `src/loop_opt.rs` の `pub fn validate(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn validate("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn validate("
 	pub fn validate(&self) -> Result<()> {
 		if self.tile <= 0 || self.unroll == 0 || self.workers == 0 || self.workers > 256 {
 			return Err("tile/unroll/workers must be positive; workers <=256".into());
@@ -708,7 +723,8 @@ fn todo_17_004() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_004 -- --exact
 ```
 
@@ -720,14 +736,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_005() {
 	suite0::transforms_real_compiled_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_005 -- --exact
 ```
 
@@ -739,7 +757,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_006() {
 	suite0::reduction_private_accumulators();
@@ -748,7 +767,8 @@ fn todo_17_006() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -827,7 +847,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_006 -- --exact
 ```
 
@@ -839,7 +860,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_007() {
 	suite0::transforms_real_compiled_graph();
@@ -848,7 +870,8 @@ fn todo_17_007() {
 
 `src/loop_opt.rs` の `pub fn interchange_axes(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn interchange_axes("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn interchange_axes("
 pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Result<Vec<usize>> {
 	if output_axes.iter().any(|a| reduction_axes.contains(a)) {
 		return Err("reduction-axis reordering is disabled".into());
@@ -859,7 +882,8 @@ pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Resu
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_007 -- --exact
 ```
 
@@ -871,7 +895,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_008() {
 	suite0::reduction_private_accumulators();
@@ -880,7 +905,8 @@ fn todo_17_008() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -959,7 +985,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_008 -- --exact
 ```
 
@@ -971,7 +998,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_009() {
 	suite0::transforms_real_compiled_graph();
@@ -980,7 +1008,8 @@ fn todo_17_009() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1059,7 +1088,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_009 -- --exact
 ```
 
@@ -1071,7 +1101,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_010() {
 	suite0::reduction_private_accumulators();
@@ -1080,7 +1111,8 @@ fn todo_17_010() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1159,7 +1191,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_010 -- --exact
 ```
 
@@ -1171,7 +1204,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_011() {
 	suite0::transforms_real_compiled_graph();
@@ -1180,7 +1214,8 @@ fn todo_17_011() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1259,7 +1294,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_011 -- --exact
 ```
 
@@ -1271,7 +1307,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_012() {
 	suite0::reduction_private_accumulators();
@@ -1280,7 +1317,8 @@ fn todo_17_012() {
 
 `src/loop_opt.rs` の `fn vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="fn vector_add("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="fn vector_add("
 fn vector_add(g: &Graph, id: usize) -> Option<(usize, usize)> {
 	match g.nodes[id].op {
 		Op::Binary {
@@ -1301,7 +1339,8 @@ fn vector_add(g: &Graph, id: usize) -> Option<(usize, usize)> {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1380,7 +1419,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_012 -- --exact
 ```
 
@@ -1392,7 +1432,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_013() {
 	suite0::transforms_real_compiled_graph();
@@ -1401,7 +1442,8 @@ fn todo_17_013() {
 
 `src/loop_opt.rs` の `fn vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="fn vector_add("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="fn vector_add("
 fn vector_add(g: &Graph, id: usize) -> Option<(usize, usize)> {
 	match g.nodes[id].op {
 		Op::Binary {
@@ -1422,7 +1464,8 @@ fn vector_add(g: &Graph, id: usize) -> Option<(usize, usize)> {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1501,7 +1544,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_013 -- --exact
 ```
 
@@ -1513,7 +1557,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_014() {
 	suite0::reduction_private_accumulators();
@@ -1522,7 +1567,8 @@ fn todo_17_014() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1601,7 +1647,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_014 -- --exact
 ```
 
@@ -1613,7 +1660,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_015() {
 	suite0::transforms_real_compiled_graph();
@@ -1622,7 +1670,8 @@ fn todo_17_015() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1701,7 +1750,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_015 -- --exact
 ```
 
@@ -1713,7 +1763,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_016() {
 	suite0::reduction_private_accumulators();
@@ -1722,7 +1773,8 @@ fn todo_17_016() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1801,7 +1853,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_016 -- --exact
 ```
 
@@ -1813,7 +1866,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_017() {
 	suite0::transforms_real_compiled_graph();
@@ -1822,7 +1876,8 @@ fn todo_17_017() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -1901,7 +1956,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_017 -- --exact
 ```
 
@@ -1913,7 +1969,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_018() {
 	suite0::reduction_private_accumulators();
@@ -1922,7 +1979,8 @@ fn todo_17_018() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -2001,7 +2059,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_018 -- --exact
 ```
 
@@ -2013,7 +2072,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_019() {
 	suite0::transforms_real_compiled_graph();
@@ -2022,7 +2082,8 @@ fn todo_17_019() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -2101,7 +2162,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_019 -- --exact
 ```
 
@@ -2113,14 +2175,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_020() {
 	suite0::reduction_private_accumulators();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_020 -- --exact
 ```
 
@@ -2132,7 +2196,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_021() {
 	suite0::transforms_real_compiled_graph();
@@ -2141,7 +2206,8 @@ fn todo_17_021() {
 
 `src/loop_opt.rs` の `pub fn capability(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn capability("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn capability("
 pub fn capability(backend: &str) -> Result<Capability> {
 	match backend {
 		"cpu" => Ok(Capability {
@@ -2161,7 +2227,8 @@ pub fn capability(backend: &str) -> Result<Capability> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_021 -- --exact
 ```
 
@@ -2173,7 +2240,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_022() {
 	suite0::reduction_private_accumulators();
@@ -2182,7 +2250,8 @@ fn todo_17_022() {
 
 `src/loop_opt.rs` の `pub fn validate(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn validate("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn validate("
 	pub fn validate(&self) -> Result<()> {
 		if self.tile <= 0 || self.unroll == 0 || self.workers == 0 || self.workers > 256 {
 			return Err("tile/unroll/workers must be positive; workers <=256".into());
@@ -2199,7 +2268,8 @@ fn todo_17_022() {
 
 `src/loop_opt.rs` の `pub fn interchange_axes(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn interchange_axes("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn interchange_axes("
 pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Result<Vec<usize>> {
 	if output_axes.iter().any(|a| reduction_axes.contains(a)) {
 		return Err("reduction-axis reordering is disabled".into());
@@ -2212,7 +2282,8 @@ pub fn interchange_axes(output_axes: &[usize], reduction_axes: &[usize]) -> Resu
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -2291,7 +2362,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_022 -- --exact
 ```
 
@@ -2303,14 +2375,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_023() {
 	suite0::transforms_real_compiled_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_023 -- --exact
 ```
 
@@ -2322,7 +2396,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_024() {
 	suite0::reduction_private_accumulators();
@@ -2331,7 +2406,8 @@ fn todo_17_024() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -2485,7 +2561,8 @@ fn todo_17_024() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -2655,7 +2732,8 @@ fn todo_17_024() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_024 -- --exact
 ```
 
@@ -2667,14 +2745,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_025() {
 	suite0::transforms_real_compiled_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_025 -- --exact
 ```
 
@@ -2686,14 +2766,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_026() {
 	suite0::reduction_private_accumulators();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_026 -- --exact
 ```
 
@@ -2705,7 +2787,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_027() {
 	suite0::transforms_real_compiled_graph();
@@ -2714,7 +2797,8 @@ fn todo_17_027() {
 
 `src/loop_opt.rs` の `pub fn compile_bodies(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn compile_bodies("
 pub fn compile_bodies(
 	g: &Graph,
 	outputs: &[usize],
@@ -2793,7 +2877,8 @@ pub fn compile_bodies(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_027 -- --exact
 ```
 
@@ -2805,7 +2890,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `loop_opt::compile、Options::validate、interchange_axes`](#loop-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_17.rs mode=append
+```rust
+// file=tests/book_17.rs mode=append
 #[test]
 fn todo_17_028() {
 	suite0::reduction_private_accumulators();
@@ -2814,7 +2900,8 @@ fn todo_17_028() {
 
 `src/loop_opt.rs` の `pub fn capability(`の定義を次の全体で置き換えます。
 
-```rust file="src/loop_opt.rs" mode="replace" item="pub fn capability("
+```rust
+// file="src/loop_opt.rs" mode="replace" item="pub fn capability("
 pub fn capability(backend: &str) -> Result<Capability> {
 	match backend {
 		"cpu" => Ok(Capability {
@@ -2834,7 +2921,8 @@ pub fn capability(backend: &str) -> Result<Capability> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_17 todo_17_028 -- --exact
 ```
 
@@ -2842,7 +2930,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

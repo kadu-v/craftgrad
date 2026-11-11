@@ -2,12 +2,13 @@
 
 最初のデータは `Vec<Op>` と root の番号だけである。恒等 rewrite、依存順の走査、C の出力、clang、生成実行ファイルの順に進む。`Op::Add` と `Op::Mul` は二項の enum variant なので入力数の違いは Rust の型で表現できない。入力番号と循環は `order` が検査する。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. Cargo package と `scalar_const` example を必要な分だけ追加する。
 <!-- todo:01-001 -->
 
-```toml file=Cargo.toml mode=write
+```toml
+# file=Cargo.toml mode=write
 [package]
 name = "chibigrad"
 version = "0.1.0"
@@ -16,12 +17,14 @@ edition = "2024"
 [dependencies]
 ```
 
-```rust file=src/lib.rs mode=write
+```rust
+// file=src/lib.rs mode=write
 pub type Result<T> = std::result::Result<T, String>;
 pub mod bootstrap;
 ```
 
-```rust file=examples/scalar_const.rs mode=write
+```rust
+// file=examples/scalar_const.rs mode=write
 use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op},
@@ -55,7 +58,8 @@ fn main() -> Result<()> {
 ## 2. `Const(f32)` と root を保持し、一つのノードを構築する。
 <!-- todo:01-002 -->
 
-```rust file=src/bootstrap.rs mode=write
+```rust
+// file=src/bootstrap.rs mode=write
 use crate::Result;
 use std::{
 	path::PathBuf,
@@ -77,7 +81,8 @@ pub struct Graph {
 ## 3. 恒等 rewrite と依存順 linearize を経由して C を生成する。
 <!-- todo:01-003 -->
 
-```rust file=src/bootstrap.rs mode=append
+```rust
+// file=src/bootstrap.rs mode=append
 impl Graph {
 	pub fn node(&mut self, op: Op) -> usize {
 		let id = self.nodes.len();
@@ -137,7 +142,8 @@ impl Graph {
 ## 4. 一時ディレクトリに C を書き、system clang を子プロセスとして起動する。
 <!-- todo:01-004 -->
 
-```rust file=src/bootstrap.rs mode=append
+```rust
+// file=src/bootstrap.rs mode=append
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Temporary(PathBuf);
 impl Drop for Temporary {
@@ -200,7 +206,8 @@ pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 ## 5. 生成実行ファイルを実行し、成功終了と標準出力 `7` を照合する。
 <!-- todo:01-005 -->
 
-```rust file=tests/scalar_c.rs mode=write
+```rust
+// file=tests/scalar_c.rs mode=write
 use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op, run_source},
@@ -245,7 +252,8 @@ fn rejects_invalid_graph_and_compiler() {
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -256,7 +264,8 @@ cargo test --quiet --test scalar_c
 
 `src/bootstrap.rs` の `pub enum Op`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub enum Op"
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub enum Op"
 pub enum Op {
 	Const(f32),
 	Add(usize, usize),
@@ -264,14 +273,16 @@ pub enum Op {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
 ## 7. `Const(2)`, `Const(3)`, `Add`, `Const(4)`, `Mul` を組み立てる。
 <!-- todo:01-007 -->
 
-```rust file=examples/scalar_arithmetic.rs mode=write
+```rust
+// file=examples/scalar_arithmetic.rs mode=write
 use chibigrad::{
 	Result,
 	bootstrap::{Graph, Op},
@@ -315,7 +326,8 @@ fn main() -> Result<()> {
 
 `tests/scalar_c.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -326,7 +338,8 @@ cargo test --quiet --test scalar_c
 
 `src/bootstrap.rs` の `pub fn order(`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub fn order("
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub fn order("
 	pub fn order(&self, root: usize) -> Result<Vec<usize>> {
 		fn visit(g: &Graph, id: usize, seen: &mut [bool], out: &mut Vec<usize>) -> Result<()> {
 			let node = g.nodes.get(id).ok_or("invalid root or input")?;
@@ -353,7 +366,8 @@ cargo test --quiet --test scalar_c
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -364,7 +378,8 @@ cargo test --quiet --test scalar_c
 
 `src/bootstrap.rs` の `pub fn source(`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub fn source("
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub fn source("
 	pub fn source(&self, root: usize) -> Result<String> {
 		let (g, root) = self.rewrite(root)?;
 		let mut source="#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\nstatic float bits(uint32_t x){float y;memcpy(&y,&x,4);return y;}\nint main(void){\n".to_string();
@@ -383,7 +398,8 @@ cargo test --quiet --test scalar_c
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -394,7 +410,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -412,7 +429,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -423,7 +441,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -441,7 +460,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -452,7 +472,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -470,7 +491,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -481,7 +503,8 @@ cargo test --quiet --test scalar_c
 
 `src/bootstrap.rs` の `pub fn order(`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub fn order("
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub fn order("
 	pub fn order(&self, root: usize) -> Result<Vec<usize>> {
 		fn visit(g: &Graph, id: usize, seen: &mut [bool], out: &mut Vec<usize>) -> Result<()> {
 			let node = g.nodes.get(id).ok_or("invalid root or input")?;
@@ -508,7 +531,8 @@ cargo test --quiet --test scalar_c
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```
 
@@ -519,7 +543,8 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 
 `src/bootstrap.rs` の `pub fn run_source(`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub fn run_source("
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub fn run_source("
 pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 	let dir = Temporary(std::env::temp_dir().join(format!(
 		"chibigrad-exe-{}-{}",
@@ -572,7 +597,8 @@ pub fn run_source(source: &str, compiler: Option<&str>) -> Result<String> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```
 
@@ -583,7 +609,8 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -601,7 +628,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -612,7 +640,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -630,7 +659,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -641,7 +671,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -659,7 +690,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -670,7 +702,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -688,7 +721,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -699,7 +733,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn const_and_arithmetic(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn const_and_arithmetic("
 fn const_and_arithmetic() -> Result<()> {
 	let mut g = Graph::default();
 	let seven = g.node(Op::Const(7.));
@@ -717,7 +752,8 @@ fn const_and_arithmetic() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -728,7 +764,8 @@ cargo test --quiet --test scalar_c
 
 `tests/scalar_c.rs` の `fn rejects_invalid_graph_and_compiler(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_c.rs" mode="replace" item="fn rejects_invalid_graph_and_compiler("
+```rust
+// file="tests/scalar_c.rs" mode="replace" item="fn rejects_invalid_graph_and_compiler("
 fn rejects_invalid_graph_and_compiler() {
 	let mut g = Graph::default();
 	assert!(g.source(0).is_err());
@@ -750,7 +787,8 @@ fn rejects_invalid_graph_and_compiler() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 ```
 
@@ -761,13 +799,15 @@ cargo test --quiet --test scalar_c rejects_invalid_graph_and_compiler
 
 `src/bootstrap.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/bootstrap.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/bootstrap.rs" mode="replace" item="pub fn run("
 	pub fn run(&self, root: usize) -> Result<String> {
 		run_source(&self.source(root)?, None)
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_c
 ```
 
@@ -775,11 +815,13 @@ cargo test --quiet --test scalar_c
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```
 
-```sh check
+```sh
+# check
 cargo run --quiet --example scalar_const -- 7 --dump-source
 cargo run --quiet --example scalar_arithmetic -- 2 3 4 --dump-graph --dump-source
 ```

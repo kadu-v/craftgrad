@@ -10,12 +10,14 @@ capability は device family の名前だけで有効にしない。shader の c
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod matrix;
 pub mod norm_opt;
 ```
 
-```rust file=src/matrix.rs mode=write
+```rust
+// file=src/matrix.rs mode=write
 use crate::{
 	gpu::{Dialect, Kernel, groups},
 	gpu_kernels::{GemmTile, gemm},
@@ -279,7 +281,8 @@ pub fn run_mixed(
 }
 ```
 
-```rust file=src/norm_opt.rs mode=write
+```rust
+// file=src/norm_opt.rs mode=write
 use crate::{
 	Binary, Graph, NodeId, Op, Plan, Reduce, Result, Unary,
 	graph::{C_HELPERS, render},
@@ -366,7 +369,8 @@ pub fn compile(
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=append
+```rust
+// file=src/gpu_graph.rs mode=append
 #[cfg(all(target_os = "macos", feature = "metal"))]
 impl GpuPlan {
 	pub fn compile_matrix(
@@ -399,7 +403,8 @@ impl GpuPlan {
 }
 ```
 
-```rust file=tests/matrix.rs mode=write
+```rust
+// file=tests/matrix.rs mode=write
 use chibigrad::matrix::*;
 #[test]
 fn half_roundtrip() {
@@ -426,7 +431,8 @@ fn guarded_matrix_source() {
 }
 ```
 
-```rust file=tests/norm_opt.rs mode=write
+```rust
+// file=tests/norm_opt.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	norm_opt::{build, compile},
@@ -461,7 +467,8 @@ fn norm_same_graph_fused_and_composite() {
 }
 ```
 
-```rust file=tests/gpu_hardware.rs mode=write
+```rust
+// file=tests/gpu_hardware.rs mode=write
 use chibigrad::{
 	Buffer, Graph, Reduce,
 	gpu::{Dialect, Kernel},
@@ -596,15 +603,18 @@ fn mixed_matrix_actual() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test gpu_hardware --features metal matrix_actual -- --ignored --exact
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test gpu_hardware --features metal mixed_matrix_actual -- --ignored --exact
 ```
 
-```rust file=tests/student_norm.rs mode=write
+```rust
+// file=tests/student_norm.rs mode=write
 use chibigrad::{
 	Buffer, Graph, Reduce,
 	autodiff::gradient,
@@ -668,7 +678,8 @@ fn independent_rmsnorm_extension_and_gradients() {
 }
 ```
 
-```rust file=examples/student_norm.rs mode=write
+```rust
+// file=examples/student_norm.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	norm_opt::{build, compile},
@@ -721,15 +732,18 @@ fn main() -> chibigrad::Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test student_norm
 ```
 
-```sh check
+```sh
+# check
 cargo run --example student_norm
 ```
 
-```rust file=tests/book_25.rs mode=write
+```rust
+// file=tests/book_25.rs mode=write
 mod suite0 {
 	use chibigrad::matrix::*;
 	#[test]
@@ -799,7 +813,8 @@ mod suite1 {
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_001() {
 	suite0::half_roundtrip();
@@ -808,7 +823,8 @@ fn todo_25_001() {
 
 `src/backends/metal.rs` の `pub fn families(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub fn families("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub fn families("
 	pub fn families(&self) -> Vec<String> {
 		let known = [
 			("Apple1", MTLGPUFamily::Apple1),
@@ -832,7 +848,8 @@ fn todo_25_001() {
 
 `src/backends/metal.rs` の `pub fn limits(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub fn limits("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub fn limits("
 	pub fn limits(&self) -> (usize, usize, usize) {
 		(
 			self.pipeline.threadExecutionWidth(),
@@ -844,7 +861,8 @@ fn todo_25_001() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_001 -- --exact
 ```
 
@@ -856,7 +874,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_002() {
 	suite0::guarded_matrix_source();
@@ -865,7 +884,8 @@ fn todo_25_002() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -948,7 +968,8 @@ pub fn probe(disabled: bool) -> Capability {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -981,7 +1002,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_002 -- --exact
 ```
 
@@ -993,7 +1015,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_003() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -1002,7 +1025,8 @@ fn todo_25_003() {
 
 `src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn select("
 pub fn select(
 	d: Dialect,
 	cap: &Capability,
@@ -1030,7 +1054,8 @@ pub fn select(
 
 `src/gpu_graph.rs` の `pub fn compile_matrix(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
 	pub fn compile_matrix(
 		graph: &Graph,
 		outputs: &[usize],
@@ -1060,7 +1085,8 @@ pub fn select(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_003 -- --exact
 ```
 
@@ -1072,7 +1098,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_004() {
 	suite0::half_roundtrip();
@@ -1081,7 +1108,8 @@ fn todo_25_004() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -1164,7 +1192,8 @@ pub fn probe(disabled: bool) -> Capability {
 
 `src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn select("
 pub fn select(
 	d: Dialect,
 	cap: &Capability,
@@ -1190,7 +1219,8 @@ pub fn select(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_004 -- --exact
 ```
 
@@ -1202,7 +1232,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_005() {
 	suite0::guarded_matrix_source();
@@ -1211,7 +1242,8 @@ fn todo_25_005() {
 
 `src/storage.rs` の `pub fn cpu(`の定義を次の全体で置き換えます。
 
-```rust file="src/storage.rs" mode="replace" item="pub fn cpu("
+```rust
+// file="src/storage.rs" mode="replace" item="pub fn cpu("
 	pub fn cpu(source: String, specialization: String) -> Result<Self> {
 		let compiler = Command::new("clang")
 			.arg("--version")
@@ -1233,7 +1265,8 @@ fn todo_25_005() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_005 -- --exact
 ```
 
@@ -1245,7 +1278,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_006() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -1254,7 +1288,8 @@ fn todo_25_006() {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -1287,7 +1322,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_006 -- --exact
 ```
 
@@ -1299,7 +1335,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_007() {
 	suite0::half_roundtrip();
@@ -1308,7 +1345,8 @@ fn todo_25_007() {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -1341,7 +1379,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_007 -- --exact
 ```
 
@@ -1353,7 +1392,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_008() {
 	suite0::guarded_matrix_source();
@@ -1362,7 +1402,8 @@ fn todo_25_008() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -1443,7 +1484,8 @@ pub fn probe(disabled: bool) -> Capability {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_008 -- --exact
 ```
 
@@ -1455,7 +1497,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_009() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -1464,7 +1507,8 @@ fn todo_25_009() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -1545,7 +1589,8 @@ pub fn probe(disabled: bool) -> Capability {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_009 -- --exact
 ```
 
@@ -1557,7 +1602,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_010() {
 	suite0::half_roundtrip();
@@ -1566,7 +1612,8 @@ fn todo_25_010() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -1649,7 +1696,8 @@ pub fn probe(disabled: bool) -> Capability {
 
 `src/backends/metal.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="fn compile_on("
+```rust
+// file="src/backends/metal.rs" mode="replace" item="fn compile_on("
 	fn compile_on(
 		kernel: &Kernel,
 		device: Device,
@@ -1691,7 +1739,8 @@ pub fn probe(disabled: bool) -> Capability {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -1843,7 +1892,8 @@ pub fn probe(disabled: bool) -> Capability {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_010 -- --exact
 ```
 
@@ -1855,7 +1905,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_011() {
 	suite0::guarded_matrix_source();
@@ -1864,7 +1915,8 @@ fn todo_25_011() {
 
 `src/gemm_opt.rs` の `pub fn recognize(`の定義を次の全体で置き換えます。
 
-```rust file="src/gemm_opt.rs" mode="replace" item="pub fn recognize("
+```rust
+// file="src/gemm_opt.rs" mode="replace" item="pub fn recognize("
 pub fn recognize(g: &Graph, id: usize) -> Option<Gemm> {
 	let Op::Reduce {
 		op: Reduce::Sum,
@@ -1919,7 +1971,8 @@ pub fn recognize(g: &Graph, id: usize) -> Option<Gemm> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_011 -- --exact
 ```
 
@@ -1931,7 +1984,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_012() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -1940,7 +1994,8 @@ fn todo_25_012() {
 
 `src/gpu_graph.rs` の `pub fn compile_matrix(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn compile_matrix("
 	pub fn compile_matrix(
 		graph: &Graph,
 		outputs: &[usize],
@@ -1972,7 +2027,8 @@ fn todo_25_012() {
 
 `src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn select("
 pub fn select(
 	d: Dialect,
 	cap: &Capability,
@@ -1998,7 +2054,8 @@ pub fn select(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_012 -- --exact
 ```
 
@@ -2010,7 +2067,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_013() {
 	suite0::half_roundtrip();
@@ -2019,7 +2077,8 @@ fn todo_25_013() {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -2052,7 +2111,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_013 -- --exact
 ```
 
@@ -2064,7 +2124,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_014() {
 	suite0::guarded_matrix_source();
@@ -2073,7 +2134,8 @@ fn todo_25_014() {
 
 `src/matrix.rs` の `pub fn select(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn select("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn select("
 pub fn select(
 	d: Dialect,
 	cap: &Capability,
@@ -2099,7 +2161,8 @@ pub fn select(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_014 -- --exact
 ```
 
@@ -2111,7 +2174,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_015() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -2120,7 +2184,8 @@ fn todo_25_015() {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -2153,7 +2218,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_015 -- --exact
 ```
 
@@ -2165,7 +2231,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_016() {
 	suite0::half_roundtrip();
@@ -2174,7 +2241,8 @@ fn todo_25_016() {
 
 `src/matrix.rs` の `pub fn probe(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn probe("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn probe("
 pub fn probe(disabled: bool) -> Capability {
 	use crate::backends::metal::MetalProgram;
 	let mut result = Capability {
@@ -2257,7 +2325,8 @@ pub fn probe(disabled: bool) -> Capability {
 
 `src/matrix.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn shader("
 pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String> {
 	let gn = groups(n, 8)?;
 	let gm = groups(m, 8)?;
@@ -2290,7 +2359,8 @@ pub fn shader(m: usize, n: usize, k: usize, half: bool) -> Result<Kernel, String
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_016 -- --exact
 ```
 
@@ -2302,7 +2372,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_017() {
 	suite0::guarded_matrix_source();
@@ -2311,7 +2382,8 @@ fn todo_25_017() {
 
 `src/matrix.rs` の `pub fn pack_half(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn pack_half("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn pack_half("
 pub fn pack_half(values: &[f32]) -> (Vec<f32>, Vec<f32>) {
 	let halves = values.iter().map(|&x| f32_to_half(x)).collect::<Vec<_>>();
 	let decoded = halves.iter().map(|&h| half_to_f32(h)).collect();
@@ -2325,7 +2397,8 @@ pub fn pack_half(values: &[f32]) -> (Vec<f32>, Vec<f32>) {
 
 `src/matrix.rs` の `pub fn run_mixed(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
 pub fn run_mixed(
 	a: &[f32],
 	b: &[f32],
@@ -2364,7 +2437,8 @@ pub fn run_mixed(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_017 -- --exact
 ```
 
@@ -2376,14 +2450,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_018() {
 	suite1::norm_same_graph_fused_and_composite();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_018 -- --exact
 ```
 
@@ -2395,7 +2471,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_019() {
 	suite0::half_roundtrip();
@@ -2404,7 +2481,8 @@ fn todo_25_019() {
 
 `src/matrix.rs` の `pub fn run_mixed(`の定義を次の全体で置き換えます。
 
-```rust file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
+```rust
+// file="src/matrix.rs" mode="replace" item="pub fn run_mixed("
 pub fn run_mixed(
 	a: &[f32],
 	b: &[f32],
@@ -2443,7 +2521,8 @@ pub fn run_mixed(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_019 -- --exact
 ```
 
@@ -2455,7 +2534,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_020() {
 	suite0::guarded_matrix_source();
@@ -2464,7 +2544,8 @@ fn todo_25_020() {
 
 `src/backends/metal.rs` の `pub unsafe fn run(kernel:`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(kernel:"
 pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	kernel.validate(inputs)?;
 	if kernel.lengths[kernel.output] == 0 {
@@ -2485,7 +2566,8 @@ pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 
 `src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		kernel.validate(inputs)?;
 		if self.contract
@@ -2637,7 +2719,8 @@ pub unsafe fn run(kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_020 -- --exact
 ```
 
@@ -2649,7 +2732,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_021() {
 	suite1::norm_same_graph_fused_and_composite();
@@ -2658,7 +2742,8 @@ fn todo_25_021() {
 
 `src/norm_opt.rs` の `pub fn build(`の定義を次の全体で置き換えます。
 
-```rust file="src/norm_opt.rs" mode="replace" item="pub fn build("
+```rust
+// file="src/norm_opt.rs" mode="replace" item="pub fn build("
 pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNorm> {
 	if !eps.is_finite() || eps <= 0. {
 		return Err("RMSNorm epsilon".into());
@@ -2687,7 +2772,8 @@ pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNo
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_021 -- --exact
 ```
 
@@ -2699,7 +2785,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_022() {
 	suite0::half_roundtrip();
@@ -2708,7 +2795,8 @@ fn todo_25_022() {
 
 `src/norm_opt.rs` の `pub fn build(`の定義を次の全体で置き換えます。
 
-```rust file="src/norm_opt.rs" mode="replace" item="pub fn build("
+```rust
+// file="src/norm_opt.rs" mode="replace" item="pub fn build("
 pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNorm> {
 	if !eps.is_finite() || eps <= 0. {
 		return Err("RMSNorm epsilon".into());
@@ -2737,7 +2825,8 @@ pub fn build(g: &mut Graph, x: NodeId, weight: NodeId, eps: f32) -> Result<RmsNo
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_022 -- --exact
 ```
 
@@ -2749,7 +2838,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_023() {
 	suite0::guarded_matrix_source();
@@ -2758,7 +2848,8 @@ fn todo_25_023() {
 
 `src/norm_opt.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/norm_opt.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/norm_opt.rs" mode="replace" item="pub fn compile("
 pub fn compile(
 	g: &Graph,
 	n: RmsNorm,
@@ -2805,7 +2896,8 @@ pub fn compile(
 
 `examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
 
-```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
+```rust
+// file="examples/student_norm.rs" mode="replace" item="fn main()"
 fn main() -> chibigrad::Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2])?;
@@ -2854,7 +2946,8 @@ fn main() -> chibigrad::Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_023 -- --exact
 ```
 
@@ -2866,14 +2959,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_024() {
 	suite1::norm_same_graph_fused_and_composite();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_024 -- --exact
 ```
 
@@ -2885,7 +2980,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_025() {
 	suite0::half_roundtrip();
@@ -2894,7 +2990,8 @@ fn todo_25_025() {
 
 `examples/student_norm.rs` の `fn main()`の定義を次の全体で置き換えます。
 
-```rust file="examples/student_norm.rs" mode="replace" item="fn main()"
+```rust
+// file="examples/student_norm.rs" mode="replace" item="fn main()"
 fn main() -> chibigrad::Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2])?;
@@ -2943,7 +3040,8 @@ fn main() -> chibigrad::Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_025 -- --exact
 ```
 
@@ -2955,14 +3053,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_026() {
 	suite0::guarded_matrix_source();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_026 -- --exact
 ```
 
@@ -2974,14 +3074,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_027() {
 	suite1::norm_same_graph_fused_and_composite();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_027 -- --exact
 ```
 
@@ -2993,14 +3095,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_028() {
 	suite0::half_roundtrip();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_028 -- --exact
 ```
 
@@ -3012,14 +3116,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_029() {
 	suite0::guarded_matrix_source();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_029 -- --exact
 ```
 
@@ -3031,14 +3137,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_030() {
 	suite1::norm_same_graph_fused_and_composite();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_030 -- --exact
 ```
 
@@ -3050,14 +3158,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_031() {
 	suite0::half_roundtrip();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_031 -- --exact
 ```
 
@@ -3069,14 +3179,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_032() {
 	suite0::guarded_matrix_source();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_032 -- --exact
 ```
 
@@ -3088,14 +3200,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `matrix::probe、matrix::shader、matrix::select、pack_half、GpuPlan::compile_matrix、norm_opt::build、norm_opt::compile`](#extension-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_25.rs mode=append
+```rust
+// file=tests/book_25.rs mode=append
 #[test]
 fn todo_25_033() {
 	suite1::norm_same_graph_fused_and_composite();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_25 todo_25_033 -- --exact
 ```
 
@@ -3103,7 +3217,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

@@ -10,11 +10,13 @@
 
 まず、この章が追加するモジュールと共有テスト補助を保存する。後続の各節は、ここに掲載した `autodiff::gradient` と `autodiff::unbroadcast` の規則を、焦点を絞ったテストで確認する。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod autodiff;
 ```
 
-```rust file=src/autodiff.rs mode=write
+```rust
+// file=src/autodiff.rs mode=write
 use crate::{Binary, Graph, NodeId, Op, Reduce, Result, Unary};
 use std::collections::HashMap;
 
@@ -246,7 +248,8 @@ pub fn gradient(
 }
 ```
 
-```rust file=tests/autodiff.rs mode=write
+```rust
+// file=tests/autodiff.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Unary, autodiff::gradient};
 fn buffer(shape: &[usize], data: &[f32]) -> Buffer {
 	Buffer::new(shape.to_vec(), data.to_vec()).unwrap()
@@ -264,7 +267,8 @@ fn check(actual: &[f32], expected: &[f32]) {
 
 `tests/autodiff.rs::scalar_graph` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn scalar_graph() {
 	let mut g = Graph::default();
@@ -288,7 +292,8 @@ fn scalar_graph() {
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::scalar_graph` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -301,7 +306,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -498,7 +504,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -511,7 +518,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -708,7 +716,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -719,7 +728,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `tests/autodiff.rs::signs_and_reciprocal` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn signs_and_reciprocal() {
 	for (op, x, expected) in [(Unary::Neg, 2., -1.), (Unary::Recip, 2., -0.25)] {
@@ -747,7 +757,8 @@ fn signs_and_reciprocal() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -944,7 +955,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 ```
 
@@ -957,7 +969,8 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Unary::Recip` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
 					Unary::Recip => {
 						let square = mul(g, id, id)?;
 						let v = mul(g, up, square)?;
@@ -965,7 +978,8 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 					}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 ```
 
@@ -978,7 +992,8 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 
 `src/runtime.rs` の `pub fn compile(`（`impl Plan` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/runtime.rs" mode="replace" item="pub fn compile(" within="impl Plan"
+```rust
+// file="src/runtime.rs" mode="replace" item="pub fn compile(" within="impl Plan"
 	pub fn compile(graph: &crate::Graph, outputs: &[usize]) -> Result<Self> {
 		let (source, abi, kernel_count) = crate::graph::render(graph, outputs, true)?;
 		let library = unsafe { NativeLibrary::compile(&source, "chibi_entry") }?;
@@ -999,7 +1014,8 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -1010,7 +1026,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `tests/autodiff.rs::shared_and_detach` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn shared_and_detach() {
 	for detached in [false, true] {
@@ -1036,7 +1053,8 @@ fn shared_and_detach() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -1233,7 +1251,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```
 
@@ -1246,7 +1265,8 @@ cargo test --offline --test autodiff shared_and_detach -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -1443,7 +1463,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```
 
@@ -1456,7 +1477,8 @@ cargo test --offline --test autodiff shared_and_detach -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -1653,7 +1675,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```
 
@@ -1664,7 +1687,8 @@ cargo test --offline --test autodiff shared_and_detach -- --exact
 
 `tests/autodiff.rs::seeds_and_unreachable` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn seeds_and_unreachable() {
 	let mut g = Graph::default();
@@ -1693,7 +1717,8 @@ fn seeds_and_unreachable() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -1890,7 +1915,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff seeds_and_unreachable -- --exact
 ```
 
@@ -1901,7 +1927,8 @@ cargo test --offline --test autodiff seeds_and_unreachable -- --exact
 
 `tests/autodiff.rs::unsupported_comparison` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn unsupported_comparison() {
 	let mut g = Graph::default();
@@ -1917,7 +1944,8 @@ fn unsupported_comparison() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -2114,7 +2142,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff unsupported_comparison -- --exact
 ```
 
@@ -2125,7 +2154,8 @@ cargo test --offline --test autodiff unsupported_comparison -- --exact
 
 `tests/autodiff.rs::reduce_seed_broadcast` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn reduce_seed_broadcast() {
 	let mut g = Graph::default();
@@ -2148,7 +2178,8 @@ fn reduce_seed_broadcast() {
 
 `src/autodiff.rs` の `pub fn gradient(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Reduce"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2179,7 +2210,8 @@ fn reduce_seed_broadcast() {
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff reduce_seed_broadcast -- --exact
 ```
 
@@ -2190,7 +2222,8 @@ cargo test --offline --test autodiff reduce_seed_broadcast -- --exact
 
 `tests/autodiff.rs::bias_unbroadcast` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn bias_unbroadcast() {
 	for bias_shape in [vec![3], vec![1, 3]] {
@@ -2219,7 +2252,8 @@ fn bias_unbroadcast() {
 
 `src/autodiff.rs` の `pub fn unbroadcast(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn unbroadcast("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn unbroadcast("
 pub fn unbroadcast(g: &mut Graph, value: NodeId, shape: &[usize]) -> Result<NodeId> {
 	let out = g.shape(value).to_vec();
 	if out.len() < shape.len() {
@@ -2238,7 +2272,8 @@ pub fn unbroadcast(g: &mut Graph, value: NodeId, shape: &[usize]) -> Result<Node
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff bias_unbroadcast -- --exact
 ```
 
@@ -2249,7 +2284,8 @@ cargo test --offline --test autodiff bias_unbroadcast -- --exact
 
 `tests/autodiff.rs::movement_inverse` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn movement_inverse() {
 	let mut g = Graph::default();
@@ -2276,7 +2312,8 @@ fn movement_inverse() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -2473,7 +2510,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff movement_inverse -- --exact
 ```
 
@@ -2486,7 +2524,8 @@ cargo test --offline --test autodiff movement_inverse -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -2683,7 +2722,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff movement_inverse -- --exact
 ```
 
@@ -2694,7 +2734,8 @@ cargo test --offline --test autodiff movement_inverse -- --exact
 
 `tests/autodiff.rs::stack_inverse` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn stack_inverse() {
 	let mut g = Graph::default();
@@ -2717,7 +2758,8 @@ fn stack_inverse() {
 
 `src/autodiff.rs` の `pub fn gradient(`の定義を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient("
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient("
 pub fn gradient(
 	g: &mut Graph,
 	loss: NodeId,
@@ -2914,7 +2956,8 @@ pub fn gradient(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff stack_inverse -- --exact
 ```
 
@@ -2927,7 +2970,8 @@ cargo test --offline --test autodiff stack_inverse -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Unary::Recip` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Recip"
 					Unary::Recip => {
 						let square = mul(g, id, id)?;
 						let v = mul(g, up, square)?;
@@ -2935,7 +2979,8 @@ cargo test --offline --test autodiff stack_inverse -- --exact
 					}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 ```
 
@@ -2946,7 +2991,8 @@ cargo test --offline --test autodiff signs_and_reciprocal -- --exact
 
 `tests/autodiff.rs::mathematical_rules` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn mathematical_rules() {
 	for (op, x, derivative) in [
@@ -2979,14 +3025,16 @@ fn mathematical_rules() {
 
 `src/autodiff.rs` の `pub fn gradient(` の `Unary::Sqrt` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sqrt"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sqrt"
 					Unary::Sqrt => {
 						let denom = scale(g, id, 2.)?;
 						g.binary(Binary::Div, up, denom)?
 					}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -2999,7 +3047,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Unary::Sin` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sin"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Unary::Sin"
 					Unary::Sin => {
 						let halfpi = g.constant(std::f32::consts::FRAC_PI_2, vec![])?;
 						let phase = g.binary(Binary::Sub, halfpi, x)?;
@@ -3008,7 +3057,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 					}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3021,7 +3071,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Op::Unary` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
 			Op::Unary { op, x } => {
 				let dx = match op {
 					Unary::Neg => neg(g, up)?,
@@ -3063,7 +3114,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3076,7 +3128,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Op::Unary` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Unary"
 			Op::Unary { op, x } => {
 				let dx = match op {
 					Unary::Neg => neg(g, up)?,
@@ -3118,7 +3171,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3131,7 +3185,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
 fn mathematical_rules() {
 	for (op, x, derivative) in [
 		(Unary::Recip, 2., -0.25),
@@ -3159,7 +3214,8 @@ fn mathematical_rules() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3172,7 +3228,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
 fn mathematical_rules() {
 	for (op, x, derivative) in [
 		(Unary::Recip, 2., -0.25),
@@ -3200,7 +3257,8 @@ fn mathematical_rules() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3211,7 +3269,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `tests/autodiff.rs::matmul_central_difference` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn matmul_central_difference() {
 	let mut g = Graph::default();
@@ -3241,7 +3300,8 @@ fn matmul_central_difference() {
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::matmul_central_difference` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff matmul_central_difference -- --exact
 ```
 
@@ -3254,7 +3314,8 @@ cargo test --offline --test autodiff matmul_central_difference -- --exact
 
 `tests/autodiff.rs` の `fn mathematical_rules(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn mathematical_rules("
 fn mathematical_rules() {
 	for (op, x, derivative) in [
 		(Unary::Recip, 2., -0.25),
@@ -3282,7 +3343,8 @@ fn mathematical_rules() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff mathematical_rules -- --exact
 ```
 
@@ -3295,7 +3357,8 @@ cargo test --offline --test autodiff mathematical_rules -- --exact
 
 `tests/autodiff.rs` の `fn bias_unbroadcast(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn bias_unbroadcast("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn bias_unbroadcast("
 fn bias_unbroadcast() {
 	for bias_shape in [vec![3], vec![1, 3]] {
 		let mut g = Graph::default();
@@ -3319,7 +3382,8 @@ fn bias_unbroadcast() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff bias_unbroadcast -- --exact
 ```
 
@@ -3332,7 +3396,8 @@ cargo test --offline --test autodiff bias_unbroadcast -- --exact
 
 `tests/autodiff.rs` の `fn scalar_graph(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
 fn scalar_graph() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![]).unwrap();
@@ -3353,7 +3418,8 @@ fn scalar_graph() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -3366,7 +3432,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `tests/autodiff.rs` の `fn scalar_graph(`の定義を次の全体で置き換えます。
 
-```rust file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
+```rust
+// file="tests/autodiff.rs" mode="replace" item="fn scalar_graph("
 fn scalar_graph() {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![]).unwrap();
@@ -3387,7 +3454,8 @@ fn scalar_graph() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff scalar_graph -- --exact
 ```
 
@@ -3398,7 +3466,8 @@ cargo test --offline --test autodiff scalar_graph -- --exact
 
 `tests/autodiff.rs::repeated_gather` を追加する。
 
-```rust file=tests/autodiff.rs mode=append
+```rust
+// file=tests/autodiff.rs mode=append
 #[test]
 fn repeated_gather() {
 	let mut g = Graph::default();
@@ -3418,6 +3487,7 @@ fn repeated_gather() {
 
 実装箇所は `autodiff::gradient` の 純粋 graph 変換と明示 target 出力 である。この要件に対する実行可能な確認は `autodiff::shared_and_detach` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test autodiff shared_and_detach -- --exact
 ```

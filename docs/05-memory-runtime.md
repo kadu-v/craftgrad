@@ -2,12 +2,13 @@
 
 メモリ IR は storage identity と view を分ける。Stmt の列が効果の順序であり、LOAD はその位置の状態を読む。AFTER は新しい保存領域ではなく、その列の先行 STORE が完了した時点に対応する。読み取り値を再利用したい場合は別 storage に STORE して保存する。LOAD をアドレスだけで intern しない。Kernel の AST は次章の RANGE も同じ型で表す。有限の静的 loop では全アクセスを列挙して初期化と境界を検証し、1千万手の証明上限を超える場合は compile を拒否する。検証成功を実行の代わりにはしない。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. BUFFER の束縛と ALLOC の固有 ID を追加する。
 <!-- todo:05-001 -->
 
-```rust file=src/native.rs mode=append
+```rust
+// file=src/native.rs mode=append
 #[derive(Clone, Debug)]
 pub struct KernelBody {
 	pub output: usize,
@@ -28,7 +29,8 @@ pub fn render_entry(helpers: &str, slots: &[usize], kernels: &[KernelBody]) -> S
 }
 ```
 
-```rust file=src/kernel.rs mode=write
+```rust
+// file=src/kernel.rs mode=write
 use crate::{Result, native::NativeLibrary};
 use std::{
 	collections::{HashMap, HashSet},
@@ -564,11 +566,13 @@ impl Kernel {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod kernel;
 ```
 
-```rust file=tests/memory_runtime.rs mode=write
+```rust
+// file=tests/memory_runtime.rs mode=write
 use chibigrad::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
@@ -644,7 +648,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 
 `tests/memory_runtime.rs` の `fixed_accesses_and_vector_add` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -655,7 +660,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `src/kernel.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn render("
 	pub fn render(&self) -> Result<String> {
 		let kernel = self.lower()?;
 		Ok(crate::native::render_entry(
@@ -668,7 +674,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `src/kernel.rs` の `fn evaluate(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn evaluate("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn evaluate("
 	fn evaluate(
 		&self,
 		expr: &Expr,
@@ -695,7 +702,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -706,7 +714,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn run("
 	pub fn run(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
 		let mut slots = HashSet::new();
 		let mut storage = self
@@ -753,7 +762,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -764,7 +774,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn run("
 	pub fn run(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
 		let mut slots = HashSet::new();
 		let mut storage = self
@@ -811,7 +822,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -822,7 +834,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
 fn fixed_accesses_and_vector_add() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -863,7 +876,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -874,7 +888,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -921,7 +936,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -932,7 +948,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -979,7 +996,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -990,7 +1008,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
 fn memory_state_and_views() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1019,7 +1038,8 @@ fn memory_state_and_views() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1030,7 +1050,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -1077,7 +1098,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1088,7 +1110,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn inline_effect(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn inline_effect("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn inline_effect("
 	pub fn inline_effect(&mut self, callee: &Kernel, args: &[View]) -> Result<Vec<View>> {
 		callee.verify()?;
 		let mut mapping = vec![];
@@ -1158,7 +1181,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1169,7 +1193,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn shrink(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn shrink("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn shrink("
 	pub fn shrink(self, start: usize, end: usize) -> Result<Self> {
 		if start > end || end > self.len {
 			return Err("invalid memory SHRINK".into());
@@ -1185,7 +1210,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1196,7 +1222,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn address("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn address("
 	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
 		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
 		if view
@@ -1215,7 +1242,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1226,7 +1254,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<Accesses> {
 		let count = self
 			.storage
@@ -1248,7 +1277,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1259,7 +1289,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
 fn fixed_accesses_and_vector_add() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1300,7 +1331,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -1311,7 +1343,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
 fn fixed_accesses_and_vector_add() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1352,7 +1385,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -1363,7 +1397,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<Accesses> {
 		let count = self
 			.storage
@@ -1385,7 +1420,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -1396,7 +1432,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `src/kernel.rs` の `pub fn shrink(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn shrink("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn shrink("
 	pub fn shrink(self, start: usize, end: usize) -> Result<Self> {
 		if start > end || end > self.len {
 			return Err("invalid memory SHRINK".into());
@@ -1412,7 +1449,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1423,7 +1461,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn address("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn address("
 	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
 		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
 		if view
@@ -1442,7 +1481,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1453,7 +1493,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn verify("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn verify("
 	pub fn verify(&self) -> Result<Accesses> {
 		let count = self
 			.storage
@@ -1475,7 +1516,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1486,7 +1528,8 @@ cargo test --quiet --test memory_runtime
 
 `src/kernel.rs` の `fn allocate(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn allocate("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn allocate("
 	fn allocate(&mut self, len: usize, input: Option<usize>, register: bool) -> Result<View> {
 		if len > i32::MAX as usize
 			|| len
@@ -1510,7 +1553,8 @@ cargo test --quiet --test memory_runtime
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1521,7 +1565,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
 fn fixed_accesses_and_vector_add() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1562,7 +1607,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -1573,7 +1619,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fn fixed_accesses_and_vector_add(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn fixed_accesses_and_vector_add("
 fn fixed_accesses_and_vector_add() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1614,7 +1661,8 @@ fn fixed_accesses_and_vector_add() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 ```
 
@@ -1625,7 +1673,8 @@ cargo test --quiet --test memory_runtime fixed_accesses_and_vector_add
 
 `tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
 fn memory_state_and_views() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1654,7 +1703,8 @@ fn memory_state_and_views() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1665,7 +1715,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
 fn memory_state_and_views() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1694,7 +1745,8 @@ fn memory_state_and_views() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1705,7 +1757,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
 fn memory_state_and_views() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1734,7 +1787,8 @@ fn memory_state_and_views() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1745,7 +1799,8 @@ cargo test --quiet --test memory_runtime
 
 `tests/memory_runtime.rs` の `fn memory_state_and_views(`の定義を次の全体で置き換えます。
 
-```rust file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
+```rust
+// file="tests/memory_runtime.rs" mode="replace" item="fn memory_state_and_views("
 fn memory_state_and_views() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 3)?;
@@ -1774,7 +1829,8 @@ fn memory_state_and_views() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test memory_runtime
 ```
 
@@ -1782,6 +1838,7 @@ cargo test --quiet --test memory_runtime
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

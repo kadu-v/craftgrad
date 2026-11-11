@@ -10,7 +10,8 @@
 
 `VarId` は scope と番号を持ちます。同名の `N` を別 scope から渡すと `ShapeEnv::bind` が拒否します。次の3節で一つのモジュールを組み立て、4節で実行します。
 
-```rust file="src/symbolic.rs" mode="write"
+```rust
+// file="src/symbolic.rs" mode="write"
 use crate::{
 	Result,
 	graph::{Graph, NodeId, Op},
@@ -200,7 +201,8 @@ impl ShapeEnv {
 }
 ```
 
-```rust file="src/lib.rs" mode="append"
+```rust
+// file="src/lib.rs" mode="append"
 pub mod symbolic;
 ```
 
@@ -210,7 +212,8 @@ pub mod symbolic;
 
 `ShapeProgram` は元の `Graph` に shape 式を対応させます。`scalar_slots` は入力次元の scalar word の位置を返します。`prepare` は束縛を一度検証し、既存の builder と verifier で全ノードの論理 shape を導出します。物理領域では論理要素を先頭から密に配置します。複数軸の最大 shape の stride を保つ部分配列とは区別します。
 
-```rust file="src/symbolic.rs" mode="append"
+```rust
+// file="src/symbolic.rs" mode="append"
 #[derive(Clone, Debug)]
 pub enum Constraint {
 	Equal(Dim, Dim),
@@ -423,7 +426,8 @@ impl ShapeProgram {
 
 `SymbolicPlan` は native library を所有します。`run_with_shapes` へ毎回の shape 表を渡し、08章の同じ二配列 ABI と C の `s[slot]` を使います。`run` 内で Clang を起動しません。特化を登録しない間は常に generic を選びます。
 
-```rust file="src/symbolic.rs" mode="append"
+```rust
+// file="src/symbolic.rs" mode="append"
 struct Specialization {
 	variable: VarId,
 	value: usize,
@@ -488,7 +492,8 @@ impl SymbolicPlan {
 
 `generic_reuses_binary_for_three_lengths_and_ignores_nan_tail` は生成 C を実行します。容量17を維持し、論理末尾以降を NaN にして長さ3、1、17を同じ Plan へ渡します。
 
-```rust file="tests/symbolic.rs" mode="write"
+```rust
+// file="tests/symbolic.rs" mode="write"
 use chibigrad::symbolic::{Constraint, Dim, DimExpr, ShapeEnv, ShapeProgram};
 use chibigrad::{Binary, Buffer, Graph, Reduce};
 
@@ -537,7 +542,8 @@ fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
 
@@ -549,7 +555,8 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 
 `src/symbolic.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn run("
 	pub fn run(
 		&self,
 		inputs: &[Buffer],
@@ -581,7 +588,8 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
 
@@ -591,7 +599,8 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 
 shape 式は Tensor の `NodeId` と別型の `ExprId` で intern します。1節の `ShapeEnv::expression` と `eval` をこのテストで確認します。0による除算と overflow はエラーです。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes() {
 	let mut env = ShapeEnv::default();
@@ -607,7 +616,8 @@ fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes() {
 }
 ```
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn expression_and_variable_handles_reject_foreign_and_diverged_clones() {
 	let mut a = ShapeEnv::default();
@@ -636,7 +646,8 @@ fn expression_and_variable_handles_reject_foreign_and_diverged_clones() {
 
 `src/symbolic.rs` の `pub fn expression(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn expression("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn expression("
 	pub fn expression(&mut self, expression: DimExpr) -> Result<ExprId> {
 		match expression {
 			DimExpr::Var(id) => {
@@ -672,7 +683,8 @@ fn expression_and_variable_handles_reject_foreign_and_diverged_clones() {
 
 `src/symbolic.rs` の `pub enum DimExpr`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub enum DimExpr"
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub enum DimExpr"
 pub enum DimExpr {
 	Const(usize),
 	Var(VarId),
@@ -683,11 +695,13 @@ pub enum DimExpr {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic dimensions_are_checked_and_expression_ids_do_not_alias_nodes
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic expression_and_variable_handles_reject_foreign_and_diverged_clones
 ```
 
@@ -699,7 +713,8 @@ cargo test --test symbolic expression_and_variable_handles_reject_foreign_and_di
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -752,7 +767,8 @@ cargo test --test symbolic expression_and_variable_handles_reject_foreign_and_di
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
 
@@ -762,7 +778,8 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 
 `target` で reshape の出力次元を `[N,2]` に指定します。`prepare` が同じ `Graph::reshape` を使うため、要素数が違えば native 呼出し前に失敗します。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn dynamic_reshape_rows_and_movement_match_static_graph() {
 	let mut env = ShapeEnv::default();
@@ -808,7 +825,8 @@ fn dynamic_reshape_rows_and_movement_match_static_graph() {
 
 `src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn prepare("
 	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
 		let bindings = self.env.bind(pairs)?;
 		for constraint in &self.constraints {
@@ -922,7 +940,8 @@ fn dynamic_reshape_rows_and_movement_match_static_graph() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic dynamic_reshape_rows_and_movement_match_static_graph
 ```
 
@@ -932,7 +951,8 @@ cargo test --test symbolic dynamic_reshape_rows_and_movement_match_static_graph
 
 別の `VarId` を持つ二つの入力に等値制約を追加します。名前が同じでも値を自動で同一視しません。制約を使わない通常の broadcast は既存 builder が検証します。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn broadcast_equality_constraints_fail_before_native_run() {
 	let mut env = ShapeEnv::default();
@@ -967,7 +987,8 @@ fn broadcast_equality_constraints_fail_before_native_run() {
 
 `src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn prepare("
 	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
 		let bindings = self.env.bind(pairs)?;
 		for constraint in &self.constraints {
@@ -1081,7 +1102,8 @@ fn broadcast_equality_constraints_fail_before_native_run() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 ```
 
@@ -1091,7 +1113,8 @@ cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 
 shrink の開始と終了、pad 幅は graph の定数です。入力の長さが変わるたびに、shrink が現在の論理範囲内か検査します。pad の C は既存の有効条件を通ってから LOAD します。開始位置そのものを実行時変数にする形は、この版では受け付けません。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn dynamic_shrink_rejects_outside_logical_range() {
 	let mut env = ShapeEnv::default();
@@ -1114,7 +1137,8 @@ fn dynamic_shrink_rejects_outside_logical_range() {
 
 `src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn prepare("
 	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
 		let bindings = self.env.bind(pairs)?;
 		for constraint in &self.constraints {
@@ -1228,7 +1252,8 @@ fn dynamic_shrink_rejects_outside_logical_range() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic dynamic_shrink_rejects_outside_logical_range
 ```
 
@@ -1238,7 +1263,8 @@ cargo test --test symbolic dynamic_shrink_rejects_outside_logical_range
 
 gather の添字検査も論理長に限定します。元の領域の NaN tail を読まず、今回の有効添字に NaN が入れば拒否することを確かめます。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn gather_validates_only_the_logical_index_prefix() {
 	let mut env = ShapeEnv::default();
@@ -1264,7 +1290,8 @@ fn gather_validates_only_the_logical_index_prefix() {
 
 `src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn prepare("
 	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
 		let bindings = self.env.bind(pairs)?;
 		for constraint in &self.constraints {
@@ -1378,7 +1405,8 @@ fn gather_validates_only_the_logical_index_prefix() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic gather_validates_only_the_logical_index_prefix
 ```
 
@@ -1388,7 +1416,8 @@ cargo test --test symbolic gather_validates_only_the_logical_index_prefix
 
 GPU も同じ `ShapeProgram::prepare` を使います。次のモジュールは15、16章の `GpuPlan` に検証済みの shape 表を渡します。Metal の scalar buffer と group 数はこの表から作られます。
 
-```rust file="src/symbolic_gpu.rs" mode="write"
+```rust
+// file="src/symbolic_gpu.rs" mode="write"
 use crate::{
 	Buffer, Result,
 	gpu_graph::{Backend, GpuPlan},
@@ -1436,11 +1465,13 @@ impl SymbolicGpuPlan {
 }
 ```
 
-```rust file="src/lib.rs" mode="append"
+```rust
+// file="src/lib.rs" mode="append"
 pub mod symbolic_gpu;
 ```
 
-```sh check
+```sh
+# check
 cargo check --all-features
 ```
 
@@ -1450,7 +1481,8 @@ cargo check --all-features
 
 このテストファイルを追加します。CPU だけで生成 source の条件分岐を確認できます。GPU の4テストはデバイスが必要なので `--ignored` で明示的に実行します。未実行を成功として数えません。
 
-```rust file="tests/symbolic_gpu.rs" mode="write"
+```rust
+// file="tests/symbolic_gpu.rs" mode="write"
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu::{Dialect, Kernel},
@@ -1589,7 +1621,8 @@ fn opencl_local_sum_ignores_nan_tail() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -1702,7 +1735,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic_gpu dynamic_reduction_source_guards_before_load_and_shares_snapshot
 ```
 
@@ -1714,7 +1748,8 @@ cargo test --test symbolic_gpu dynamic_reduction_source_guards_before_load_and_s
 
 `src/gpu_kernels.rs` の `pub fn dynamic_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn dynamic_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn dynamic_sum("
 pub fn dynamic_sum(
 	d: Dialect,
 	n: usize,
@@ -1748,7 +1783,8 @@ pub fn dynamic_sum(
 
 `src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(
 	d: Dialect,
 	rows: usize,
@@ -1792,7 +1828,8 @@ pub fn row_sum(
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --features metal --test symbolic_gpu metal_local_sum_ignores_nan_tail -- --ignored
 ```
 
@@ -1804,7 +1841,8 @@ OpenCL は同じ snapshot の scalar words を `__constant ulong *s` に束縛�
 
 `src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
 		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
 			return Err("optimized GPU plan shape mismatch".into());
@@ -1887,11 +1925,13 @@ OpenCL は同じ snapshot の scalar words を `__constant ulong *s` に束縛�
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --features opencl --test symbolic_gpu opencl_uses_one_compilation_for_three_shapes -- --ignored
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --features opencl --test symbolic_gpu opencl_local_sum_ignores_nan_tail -- --ignored
 ```
 
@@ -1901,7 +1941,8 @@ cargo test --features opencl --test symbolic_gpu opencl_local_sum_ignores_nan_ta
 
 `Bindings` の map は公開せず、検証済みの snapshot から引数を作ります。`scalar_slots`、実行記録の word、論理 shape、容量を照合します。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn scalar_slots_and_metadata_use_the_same_validated_value() {
 	let (plan, n) = vector();
@@ -1919,7 +1960,8 @@ fn scalar_slots_and_metadata_use_the_same_validated_value() {
 
 `src/symbolic_gpu.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic_gpu.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/symbolic_gpu.rs" mode="replace" item="pub fn run("
 	pub fn run(
 		&self,
 		inputs: &[Buffer],
@@ -1943,7 +1985,8 @@ fn scalar_slots_and_metadata_use_the_same_validated_value() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic scalar_slots_and_metadata_use_the_same_validated_value
 ```
 
@@ -1953,7 +1996,8 @@ cargo test --test symbolic scalar_slots_and_metadata_use_the_same_validated_valu
 
 generic の key は今回の束縛値を受け取りません。変数を shape 式内の初出順で正規化し、範囲、制約、graph、出力、ABI、backend、compile options を含めます。名前と生の VarId は含めません。
 
-```rust file="src/symbolic.rs" mode="append"
+```rust
+// file="src/symbolic.rs" mode="append"
 impl ShapeProgram {
 	pub fn generic_key(&self, backend: &str, options: &str) -> Result<Vec<u8>> {
 		let mut ids = BTreeMap::new();
@@ -2021,7 +2065,8 @@ impl ShapeProgram {
 }
 ```
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn canonical_keys_preserve_repeated_variables_and_bounds() {
 	let (a, _) = vector();
@@ -2043,7 +2088,8 @@ fn canonical_keys_preserve_repeated_variables_and_bounds() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 ```
 
@@ -2055,7 +2101,8 @@ cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 
 `src/symbolic.rs` の `pub fn generic_key(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn generic_key("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn generic_key("
 	pub fn generic_key(&self, backend: &str, options: &str) -> Result<Vec<u8>> {
 		let mut ids = BTreeMap::new();
 		let mut signature = format!("abi=2;dtype=f32;backend={backend:?};options={options:?};");
@@ -2121,11 +2168,13 @@ cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 ```
 
@@ -2135,7 +2184,8 @@ cargo test --test symbolic canonical_keys_preserve_repeated_variables_and_bounds
 
 `add_specialization` は一つの shape 変数と tile 条件を検証し、定数 shape を持つ別の native library を一度作ります。`run` は通常の境界検査後だけ predicate を評価します。
 
-```rust file="src/symbolic.rs" mode="append"
+```rust
+// file="src/symbolic.rs" mode="append"
 impl SymbolicPlan {
 	pub fn add_specialization(
 		&mut self,
@@ -2167,7 +2217,8 @@ impl SymbolicPlan {
 }
 ```
 
-```rust file="src/symbolic.rs" mode="append"
+```rust
+// file="src/symbolic.rs" mode="append"
 impl SymbolicPlan {
 	pub fn specialization_key(&self, backend: &str, options: &str) -> Result<Option<Vec<u8>>> {
 		self.specialized
@@ -2184,7 +2235,8 @@ impl SymbolicPlan {
 }
 ```
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn specialization_is_distinct_and_selected_only_at_sixteen() {
 	let (mut plan, n) = vector();
@@ -2212,7 +2264,8 @@ fn specialization_is_distinct_and_selected_only_at_sixteen() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic specialization_is_distinct_and_selected_only_at_sixteen
 ```
 
@@ -2222,7 +2275,8 @@ cargo test --test symbolic specialization_is_distinct_and_selected_only_at_sixte
 
 特化 key に値16と tile=8を加えます。直前のテストは16、17、3の順に実行して、特化版、generic、genericを選び、各末尾も比較します。次の example で選択を表示します。
 
-```rust file="examples/symbolic_dispatch.rs" mode="write"
+```rust
+// file="examples/symbolic_dispatch.rs" mode="write"
 use chibigrad::{
 	Binary, Buffer, Graph,
 	symbolic::{Dim, ShapeEnv, ShapeProgram},
@@ -2256,7 +2310,8 @@ fn main() -> Result<(), String> {
 
 `src/symbolic.rs` の `pub fn specialization_key(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn specialization_key("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn specialization_key("
 	pub fn specialization_key(&self, backend: &str, options: &str) -> Result<Option<Vec<u8>>> {
 		self.specialized
 			.as_ref()
@@ -2271,7 +2326,8 @@ fn main() -> Result<(), String> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo run --example symbolic_dispatch
 ```
 
@@ -2281,7 +2337,8 @@ cargo run --example symbolic_dispatch
 
 graph emitter は座標評価を一回の lowering に閉じ、異なる座標や RANGE をまたぐ値の memo を持ちません。同じ入力と転置を足すテストで、共有ノードを同じ座標として扱わないことを確認します。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 	let mut env = ShapeEnv::default();
@@ -2304,7 +2361,8 @@ fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 
 `src/graph.rs` の `fn expr(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr("
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr("
 	fn expr(&mut self, id: usize, index: &str, code: &mut String) -> Result<String> {
 		if id != self.current && self.material.contains(&id)
 			|| matches!(self.g.nodes[id].op, Op::Input { .. })
@@ -2554,7 +2612,8 @@ fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic shared_node_before_and_after_transpose_keeps_coordinates_separate
 ```
 
@@ -2564,7 +2623,8 @@ cargo test --test symbolic shared_node_before_and_after_transpose_keeps_coordina
 
 `ShapeEnv::bind` の境界条件をまとめて実行します。未知 scope、欠落、二重指定、0、18を拒否し、1と17を受け付けます。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn bindings_reject_missing_duplicate_unknown_and_outside() {
 	let mut env = ShapeEnv::default();
@@ -2588,7 +2648,8 @@ fn bindings_reject_missing_duplicate_unknown_and_outside() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic bindings_reject_missing_duplicate_unknown_and_outside
 ```
 
@@ -2600,7 +2661,8 @@ shape 式の整数演算は checked 演算です。整数で正確に表せる v
 
 `tests/symbolic.rs` の `fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes(`の定義を次の全体で置き換えます。
 
-```rust file="tests/symbolic.rs" mode="replace" item="fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes("
+```rust
+// file="tests/symbolic.rs" mode="replace" item="fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes("
 fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes() {
 	let mut env = ShapeEnv::default();
 	let n = env.variable("N", 1, 17).unwrap();
@@ -2615,11 +2677,13 @@ fn dimensions_are_checked_and_expression_ids_do_not_alias_nodes() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic dimensions_are_checked_and_expression_ids_do_not_alias_nodes
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_nan_tail
 ```
 
@@ -2629,7 +2693,8 @@ cargo test --test symbolic generic_reuses_binary_for_three_lengths_and_ignores_n
 
 整数以外の f32 入力で generic、特化版、静的版を比較します。比較前に有限値も検査します。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn generic_specialized_and_static_f32_match_with_declared_tolerance() {
 	let (mut plan, n) = vector();
@@ -2661,7 +2726,8 @@ fn generic_specialized_and_static_f32_match_with_declared_tolerance() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic generic_specialized_and_static_f32_match_with_declared_tolerance
 ```
 
@@ -2671,7 +2737,8 @@ cargo test --test symbolic generic_specialized_and_static_f32_match_with_declare
 
 この example は Plan をループの外で作り、容量、論理 shape、値、総和を表示します。バックエンドは明示的に指定し、利用できなければエラーを返します。
 
-```rust file="examples/symbolic_vector.rs" mode="write"
+```rust
+// file="examples/symbolic_vector.rs" mode="write"
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce,
 	gpu_graph::Backend,
@@ -2748,7 +2815,8 @@ fn main() -> Result<(), String> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo run --example symbolic_vector -- --backend cpu --lengths 1,3,17
 ```
 
@@ -2758,7 +2826,8 @@ cargo run --example symbolic_vector -- --backend cpu --lengths 1,3,17
 
 matmul は MUL と REDUCE の合成なので、K の等値制約を明示して保存します。二つの K を別 VarId にし、1対2が broadcast として通らないようにします。
 
-```rust file="tests/symbolic.rs" mode="append"
+```rust
+// file="tests/symbolic.rs" mode="append"
 #[test]
 fn symbolic_gemm_k_is_an_explicit_prelaunch_equality() {
 	use chibigrad::Op;
@@ -2819,7 +2888,8 @@ fn symbolic_gemm_k_is_an_explicit_prelaunch_equality() {
 
 `src/symbolic.rs` の `pub fn prepare(`の定義を次の全体で置き換えます。
 
-```rust file="src/symbolic.rs" mode="replace" item="pub fn prepare("
+```rust
+// file="src/symbolic.rs" mode="replace" item="pub fn prepare("
 	pub fn prepare(&self, inputs: &[Buffer], pairs: &[(VarId, usize)]) -> Result<Snapshot> {
 		let bindings = self.env.bind(pairs)?;
 		for constraint in &self.constraints {
@@ -2933,15 +3003,18 @@ fn symbolic_gemm_k_is_an_explicit_prelaunch_equality() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic symbolic_gemm_k_is_an_explicit_prelaunch_equality
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic dynamic_reshape_rows_and_movement_match_static_graph
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 ```
 
@@ -2953,7 +3026,8 @@ cargo test --test symbolic broadcast_equality_constraints_fail_before_native_run
 
 `tests/symbolic.rs` の `fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail(`の定義を次の全体で置き換えます。
 
-```rust file="tests/symbolic.rs" mode="replace" item="fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail("
+```rust
+// file="tests/symbolic.rs" mode="replace" item="fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail("
 fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail() {
 	let (plan, n) = vector();
 	let source = plan.generic().source.clone();
@@ -2980,7 +3054,8 @@ fn generic_reuses_binary_for_three_lengths_and_ignores_nan_tail() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic
 ```
 
@@ -2992,7 +3067,8 @@ cargo test --test symbolic
 
 `tests/symbolic.rs` の `fn shared_node_before_and_after_transpose_keeps_coordinates_separate(`の定義を次の全体で置き換えます。
 
-```rust file="tests/symbolic.rs" mode="replace" item="fn shared_node_before_and_after_transpose_keeps_coordinates_separate("
+```rust
+// file="tests/symbolic.rs" mode="replace" item="fn shared_node_before_and_after_transpose_keeps_coordinates_separate("
 fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 	let mut env = ShapeEnv::default();
 	let n = env.variable("N", 1, 2).unwrap();
@@ -3012,7 +3088,8 @@ fn shared_node_before_and_after_transpose_keeps_coordinates_separate() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test symbolic shared_node_before_and_after_transpose_keeps_coordinates_separate
 ```
 
@@ -3024,17 +3101,20 @@ CPU の結果とは別に各 backend のテストを実行します。デバイ�
 
 `tests/symbolic_gpu.rs` の `fn metal_uses_one_compilation_for_three_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="tests/symbolic_gpu.rs" mode="replace" item="fn metal_uses_one_compilation_for_three_shapes("
+```rust
+// file="tests/symbolic_gpu.rs" mode="replace" item="fn metal_uses_one_compilation_for_three_shapes("
 fn metal_uses_one_compilation_for_three_shapes() {
 	verify_graph(Backend::Metal);
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --features metal --test symbolic_gpu metal_uses_one_compilation_for_three_shapes -- --ignored
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --features opencl --test symbolic_gpu opencl_uses_one_compilation_for_three_shapes -- --ignored
 ```
 

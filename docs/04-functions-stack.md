@@ -2,12 +2,13 @@
 
 Function は固有 scope、署名、scalar body、同型結果の配列を持つ。CALL は capture を許さず caller の arena へ inline する。STACK は同型の NodeId 配列で、INDEX は静的な番号だけを許す。UIR は関数ごとの PARAM、定数 bits、ALU、return を保存する。CALL を inline してから保存するため、再帰 CALL は UIR parser が未対応演算として拒否する。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. `FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。
 <!-- todo:04-001 -->
 
-```rust file=src/functions.rs mode=write
+```rust
+// file=src/functions.rs mode=write
 use crate::{
 	Result,
 	scalar::{Alu, Bounds, DType, SOp, ScalarGraph, Value},
@@ -307,11 +308,13 @@ pub fn assert_uop(
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod functions;
 ```
 
-```rust file=tests/function_stack.rs mode=write
+```rust
+// file=tests/function_stack.rs mode=write
 use chibigrad::functions::Function;
 use chibigrad::{
 	Result,
@@ -367,7 +370,8 @@ fn scoped_calls_and_assertion_failure() -> Result<()> {
 
 `tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -378,7 +382,8 @@ cargo test --quiet --test function_stack
 
 `src/scalar.rs` の `pub fn scoped_param(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn scoped_param("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn scoped_param("
 	pub fn scoped_param(
 		&mut self,
 		scope: usize,
@@ -414,7 +419,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -425,7 +431,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn evaluate(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn evaluate("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn evaluate("
 	pub fn evaluate(&self, args: &[Value]) -> Result<Vec<Value>> {
 		if args.len() != self.parameters.len() {
 			return Err("CALL argument count".into());
@@ -437,7 +444,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -448,7 +456,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn call("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn call("
 	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
 		if args.len() != self.parameters.len() {
 			return Err("CALL argument count".into());
@@ -490,7 +499,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -501,7 +511,8 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -524,7 +535,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -535,7 +547,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn build("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn build("
 	pub fn build(
 		name: &str,
 		parameters: Vec<(DType, Option<Bounds>)>,
@@ -572,7 +585,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -583,7 +597,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn index("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn index("
 	pub fn index(results: &[usize], index: isize) -> Result<usize> {
 		usize::try_from(index)
 			.ok()
@@ -592,7 +607,8 @@ cargo test --quiet --test function_stack function_stack_uir
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -603,7 +619,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn call("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn call("
 	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
 		if args.len() != self.parameters.len() {
 			return Err("CALL argument count".into());
@@ -645,7 +662,8 @@ cargo test --quiet --test function_stack function_stack_uir
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -656,7 +674,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -679,7 +698,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -690,7 +710,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn from_uir("
 	pub fn from_uir(text: &str) -> Result<Self> {
 		let mut lines = text.lines();
 		let header = lines
@@ -785,7 +806,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `src/functions.rs` の `pub fn to_uir(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn to_uir("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn to_uir("
 	pub fn to_uir(&self) -> String {
 		let mut text = format!("function {}\n", self.name);
 		for node in &self.graph.nodes {
@@ -828,7 +850,8 @@ cargo test --quiet --test function_stack function_stack_uir
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -839,7 +862,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn from_uir("
 	pub fn from_uir(text: &str) -> Result<Self> {
 		let mut lines = text.lines();
 		let header = lines
@@ -932,7 +956,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -943,7 +968,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn from_uir("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn from_uir("
 	pub fn from_uir(text: &str) -> Result<Self> {
 		let mut lines = text.lines();
 		let header = lines
@@ -1036,7 +1062,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1047,7 +1074,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1070,7 +1098,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1081,7 +1110,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1104,7 +1134,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1115,7 +1146,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn build("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn build("
 	pub fn build(
 		name: &str,
 		parameters: Vec<(DType, Option<Bounds>)>,
@@ -1152,7 +1184,8 @@ cargo test --quiet --test function_stack function_stack_uir
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1163,7 +1196,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn call("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn call("
 	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
 		if args.len() != self.parameters.len() {
 			return Err("CALL argument count".into());
@@ -1205,7 +1239,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1216,7 +1251,8 @@ cargo test --quiet --test function_stack
 
 `src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
 
-```rust file="src/functions.rs" mode="replace" item="pub fn index("
+```rust
+// file="src/functions.rs" mode="replace" item="pub fn index("
 	pub fn index(results: &[usize], index: isize) -> Result<usize> {
 		usize::try_from(index)
 			.ok()
@@ -1225,7 +1261,8 @@ cargo test --quiet --test function_stack
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1236,7 +1273,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1259,7 +1297,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1270,7 +1309,8 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1293,7 +1333,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1304,7 +1345,8 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1327,7 +1369,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1338,7 +1381,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1361,7 +1405,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1372,7 +1417,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1395,7 +1441,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1406,7 +1453,8 @@ cargo test --quiet --test function_stack
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1429,7 +1477,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack function_stack_uir
 ```
 
@@ -1440,7 +1489,8 @@ cargo test --quiet --test function_stack function_stack_uir
 
 `tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
 
-```rust file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
+```rust
+// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
 fn function_stack_uir() -> Result<()> {
 	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
 		Ok(vec![
@@ -1463,7 +1513,8 @@ fn function_stack_uir() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test function_stack
 ```
 
@@ -1471,6 +1522,7 @@ cargo test --quiet --test function_stack
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

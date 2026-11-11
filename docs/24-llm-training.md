@@ -12,13 +12,15 @@
 
 まず、この章が追加するモジュールと共有テスト補助を保存する。後続の各節は、ここに掲載した `training::TrainingPlan::{new,run}`、`optim::AdamW::update`、`checkpoint::{save_training_checkpoint,restore_training_checkpoint,adopt_checkpoint}` の規則を、焦点を絞ったテストで確認する。
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod checkpoint;
 pub mod optim;
 pub mod training;
 ```
 
-```rust file=src/optim.rs mode=write
+```rust
+// file=src/optim.rs mode=write
 use crate::{Binary, Buffer, Graph, Plan, Result, Unary};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -257,7 +259,8 @@ pub fn accumulate_weighted(microbatches: &[(Vec<BufferData>, usize)]) -> Result<
 }
 ```
 
-```rust file=src/checkpoint.rs mode=write
+```rust
+// file=src/checkpoint.rs mode=write
 use crate::{
 	Result,
 	fetch::sha256,
@@ -473,7 +476,8 @@ pub fn adopt_checkpoint(live: &mut TrainingState, candidate: TrainingState) -> R
 }
 ```
 
-```rust file=src/training.rs mode=write
+```rust
+// file=src/training.rs mode=write
 use crate::{
 	Buffer, Graph, Plan, Result,
 	autodiff::gradient,
@@ -652,7 +656,8 @@ pub fn estimate_training_storage(
 }
 ```
 
-```rust file=examples/train_tiny_llm.rs mode=write
+```rust
+// file=examples/train_tiny_llm.rs mode=write
 use chibigrad::{
 	Result,
 	checkpoint::{
@@ -728,7 +733,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=examples/train_qwen.rs mode=write
+```rust
+// file=examples/train_qwen.rs mode=write
 use chibigrad::{
 	Result,
 	checkpoint::{
@@ -870,7 +876,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=tests/llm_gradients.rs mode=write
+```rust
+// file=tests/llm_gradients.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	autodiff::gradient,
@@ -880,7 +887,8 @@ use chibigrad::{
 };
 ```
 
-```rust file=tests/llm_resume.rs mode=write
+```rust
+// file=tests/llm_resume.rs mode=write
 use chibigrad::{
 	checkpoint::{
 		DataCursor, TrainingState, adopt_checkpoint, restore_training_checkpoint,
@@ -912,7 +920,8 @@ fn initial() -> TrainingState {
 
 `tests/llm_gradients.rs::uniform_logits_and_targets` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn uniform_logits_and_targets() {
 	let mut graph = Graph::default();
@@ -936,7 +945,8 @@ fn uniform_logits_and_targets() {
 
 実装箇所は `nn::qwen::logits_all` と `training::TrainingPlan::new` である。この要件に対する実行可能な確認は `llm_gradients::uniform_logits_and_targets` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 ```
 
@@ -949,7 +959,8 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 
 `src/training.rs` の `pub fn run(`（`impl TrainingPlan` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/training.rs" mode="replace" item="pub fn run(" within="impl TrainingPlan"
+```rust
+// file="src/training.rs" mode="replace" item="pub fn run(" within="impl TrainingPlan"
 	pub fn run(
 		&self,
 		weights: &[BufferData],
@@ -999,7 +1010,8 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 ```
 
@@ -1012,14 +1024,16 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 
 `src/autodiff.rs` の `pub fn gradient(` の `Op::Gather` 分岐を次の全体で置き換えます。
 
-```rust file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Gather"
+```rust
+// file="src/autodiff.rs" mode="replace" item="pub fn gradient(" arm="Op::Gather"
 			Op::Gather { x, indices, axis } => {
 				let zeros = g.constant(0., g.shape(x).to_vec())?;
 				contributions.push((x, g.scatter_add(zeros, indices, up, axis)?));
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 ```
 
@@ -1032,7 +1046,8 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 
 `src/graph.rs` の `fn expr(`（`impl Emitter<'_>` 内） の `Op::ScatterAdd` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::ScatterAdd" within="impl Emitter<'_>"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::ScatterAdd" within="impl Emitter<'_>"
 			Op::ScatterAdd {
 				base,
 				indices,
@@ -1060,7 +1075,8 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 ```
 
@@ -1071,7 +1087,8 @@ cargo test --offline --test llm_gradients uniform_logits_and_targets -- --exact
 
 `tests/llm_gradients.rs::tiny_transformer_parameter_central_difference` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn tiny_transformer_parameter_central_difference() {
 	let mut config = QwenConfig::tiny();
@@ -1119,7 +1136,8 @@ fn tiny_transformer_parameter_central_difference() {
 
 実装箇所は `autodiff::gradient` と `training::TrainingPlan::new` である。この要件に対する実行可能な確認は `llm_gradients::tiny_transformer_parameter_central_difference` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -1132,7 +1150,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `examples/train_tiny_llm.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/train_tiny_llm.rs" mode="replace" item="fn main("
+```rust
+// file="examples/train_tiny_llm.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -1196,7 +1215,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -1209,7 +1229,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `examples/train_tiny_llm.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/train_tiny_llm.rs" mode="replace" item="fn main("
+```rust
+// file="examples/train_tiny_llm.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -1273,7 +1294,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -1286,7 +1308,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `src/runtime.rs` の `pub fn run_with_shapes(`（`impl Plan` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes(" within="impl Plan"
+```rust
+// file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes(" within="impl Plan"
 	pub fn run_with_shapes(
 		&self,
 		inputs: &[Buffer],
@@ -1382,7 +1405,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -1395,7 +1419,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `src/training.rs` の `pub fn run(`（`impl TrainingPlan` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/training.rs" mode="replace" item="pub fn run(" within="impl TrainingPlan"
+```rust
+// file="src/training.rs" mode="replace" item="pub fn run(" within="impl TrainingPlan"
 	pub fn run(
 		&self,
 		weights: &[BufferData],
@@ -1445,7 +1470,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -1458,7 +1484,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `tests/llm_gradients.rs` の `fn tiny_transformer_parameter_central_difference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
 fn tiny_transformer_parameter_central_difference() {
 	let mut config = QwenConfig::tiny();
 	config.hidden_size = 4;
@@ -1503,13 +1530,15 @@ fn tiny_transformer_parameter_central_difference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
 同じ Plan へ更新後の重みを渡す小モデルの driver を実行する。`loss`、入力と1位置ずらした target、global cursor と RNG を行ごとに出力する。
 
-```sh check
+```sh
+# check
 cargo run --offline --example train_tiny_llm -- --optimizer sgd --steps 100 --seed 1
 ```
 
@@ -1520,7 +1549,8 @@ cargo run --offline --example train_tiny_llm -- --optimizer sgd --steps 100 --se
 
 `tests/llm_gradients.rs::adamw_scalar_and_finite_transaction` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn adamw_scalar_and_finite_transaction() {
 	let w = BufferData {
@@ -1557,7 +1587,8 @@ fn adamw_scalar_and_finite_transaction() {
 
 `src/optim.rs` の `pub fn new(`（`impl AdamW` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/optim.rs" mode="replace" item="pub fn new(" within="impl AdamW"
+```rust
+// file="src/optim.rs" mode="replace" item="pub fn new(" within="impl AdamW"
 	pub fn new(weights: &[BufferData], config: AdamConfig) -> Result<Self> {
 		if !(config.lr > 0.
 			&& config.lr.is_finite()
@@ -1614,7 +1645,8 @@ fn adamw_scalar_and_finite_transaction() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction -- --exact
 ```
 
@@ -1627,7 +1659,8 @@ cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction --
 
 `tests/llm_gradients.rs` の `fn adamw_scalar_and_finite_transaction(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
 fn adamw_scalar_and_finite_transaction() {
 	let w = BufferData {
 		shape: vec![],
@@ -1659,7 +1692,8 @@ fn adamw_scalar_and_finite_transaction() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction -- --exact
 ```
 
@@ -1670,7 +1704,8 @@ cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction --
 
 `tests/llm_gradients.rs::norm_clipping_is_global` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn norm_clipping_is_global() {
 	let mut state = AdamState::new(vec![BufferData {
@@ -1701,7 +1736,8 @@ fn norm_clipping_is_global() {
 
 `src/optim.rs` の `pub fn update(`（`impl AdamW` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/optim.rs" mode="replace" item="pub fn update(" within="impl AdamW"
+```rust
+// file="src/optim.rs" mode="replace" item="pub fn update(" within="impl AdamW"
 	pub fn update(&self, state: &mut AdamState, gradients: &[BufferData]) -> Result<f64> {
 		state.validate()?;
 		if gradients.len() != self.count || state.weights.len() != self.count {
@@ -1765,7 +1801,8 @@ fn norm_clipping_is_global() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients norm_clipping_is_global -- --exact
 ```
 
@@ -1776,7 +1813,8 @@ cargo test --offline --test llm_gradients norm_clipping_is_global -- --exact
 
 `tests/llm_gradients.rs::token_weighted_accumulation` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn token_weighted_accumulation() {
 	let gradient = |v| {
@@ -1800,7 +1838,8 @@ fn token_weighted_accumulation() {
 
 `src/optim.rs` の `pub fn accumulate_weighted(`の定義を次の全体で置き換えます。
 
-```rust file="src/optim.rs" mode="replace" item="pub fn accumulate_weighted("
+```rust
+// file="src/optim.rs" mode="replace" item="pub fn accumulate_weighted("
 pub fn accumulate_weighted(microbatches: &[(Vec<BufferData>, usize)]) -> Result<Vec<BufferData>> {
 	let first = microbatches.first().ok_or("empty accumulation")?;
 	let total = microbatches.iter().try_fold(0usize, |a, (_, n)| {
@@ -1833,7 +1872,8 @@ pub fn accumulate_weighted(microbatches: &[(Vec<BufferData>, usize)]) -> Result<
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients token_weighted_accumulation -- --exact
 ```
 
@@ -1846,7 +1886,8 @@ cargo test --offline --test llm_gradients token_weighted_accumulation -- --exact
 
 `tests/llm_gradients.rs` の `fn token_weighted_accumulation(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn token_weighted_accumulation("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn token_weighted_accumulation("
 fn token_weighted_accumulation() {
 	let gradient = |v| {
 		vec![BufferData {
@@ -1865,7 +1906,8 @@ fn token_weighted_accumulation() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients token_weighted_accumulation -- --exact
 ```
 
@@ -1876,7 +1918,8 @@ cargo test --offline --test llm_gradients token_weighted_accumulation -- --exact
 
 `tests/llm_resume.rs::checkpoint_transaction_and_corruption` を追加する。
 
-```rust file=tests/llm_resume.rs mode=append
+```rust
+// file=tests/llm_resume.rs mode=append
 #[test]
 fn checkpoint_transaction_and_corruption() {
 	let path = std::env::temp_dir().join(format!("chibi-ckpt-{}", std::process::id()));
@@ -1914,7 +1957,8 @@ fn checkpoint_transaction_and_corruption() {
 
 `src/checkpoint.rs` の `pub fn save_training_checkpoint(`の定義を次の全体で置き換えます。
 
-```rust file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
+```rust
+// file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
 pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Result<()> {
 	state.validate()?;
 	if destination.exists() {
@@ -1980,7 +2024,8 @@ pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- --exact
 ```
 
@@ -1991,7 +2036,8 @@ cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- 
 
 `tests/llm_resume.rs::process_worker` を追加する。
 
-```rust file=tests/llm_resume.rs mode=append
+```rust
+// file=tests/llm_resume.rs mode=append
 #[test]
 #[ignore]
 fn process_worker() {
@@ -2039,7 +2085,8 @@ fn process_worker() {
 
 `src/checkpoint.rs` の `pub fn save_training_checkpoint(`の定義を次の全体で置き換えます。
 
-```rust file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
+```rust
+// file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
 pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Result<()> {
 	state.validate()?;
 	if destination.exists() {
@@ -2105,7 +2152,8 @@ pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- --exact
 ```
 
@@ -2118,7 +2166,8 @@ cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- 
 
 `src/checkpoint.rs` の `pub fn validate(`（`impl TrainingState` 内）の定義を次の全体で置き換えます。
 
-```rust file="src/checkpoint.rs" mode="replace" item="pub fn validate(" within="impl TrainingState"
+```rust
+// file="src/checkpoint.rs" mode="replace" item="pub fn validate(" within="impl TrainingState"
 	pub fn validate(&self) -> Result<()> {
 		self.optimizer.validate()?;
 		self.data.validate()?;
@@ -2137,7 +2186,8 @@ cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- 
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- --exact
 ```
 
@@ -2150,7 +2200,8 @@ cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- 
 
 `src/checkpoint.rs` の `pub fn save_training_checkpoint(`の定義を次の全体で置き換えます。
 
-```rust file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
+```rust
+// file="src/checkpoint.rs" mode="replace" item="pub fn save_training_checkpoint("
 pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Result<()> {
 	state.validate()?;
 	if destination.exists() {
@@ -2216,7 +2267,8 @@ pub fn save_training_checkpoint(destination: &Path, state: &TrainingState) -> Re
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- --exact
 ```
 
@@ -2227,7 +2279,8 @@ cargo test --offline --test llm_resume checkpoint_transaction_and_corruption -- 
 
 `tests/llm_resume.rs::fresh_process_resume_matches_continuous` を追加する。
 
-```rust file=tests/llm_resume.rs mode=append
+```rust
+// file=tests/llm_resume.rs mode=append
 #[test]
 fn fresh_process_resume_matches_continuous() {
 	let root = std::env::temp_dir().join(format!("chibi-resume-{}", std::process::id()));
@@ -2272,7 +2325,8 @@ fn fresh_process_resume_matches_continuous() {
 
 実装箇所は `checkpoint::{save_training_checkpoint,restore_training_checkpoint,adopt_checkpoint}` と `checkpoint::DataCursor` である。この要件に対する実行可能な確認は `llm_resume::fresh_process_resume_matches_continuous` に置く。
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -- --exact
 ```
 
@@ -2285,7 +2339,8 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 
 `src/nn/qwen.rs` の `pub fn load_parameters(`の定義を次の全体で置き換えます。
 
-```rust file="src/nn/qwen.rs" mode="replace" item="pub fn load_parameters("
+```rust
+// file="src/nn/qwen.rs" mode="replace" item="pub fn load_parameters("
 pub fn load_parameters(
 	c: &QwenConfig,
 	loaded: &BTreeMap<String, TensorRecord>,
@@ -2309,7 +2364,8 @@ pub fn load_parameters(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -- --exact
 ```
 
@@ -2322,7 +2378,8 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 
 `examples/train_qwen.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/train_qwen.rs" mode="replace" item="fn main("
+```rust
+// file="examples/train_qwen.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2452,7 +2509,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -- --exact
 ```
 
@@ -2463,7 +2521,8 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 
 `tests/llm_gradients.rs::storage_counts_all_layers_and_tied_once` を追加する。
 
-```rust file=tests/llm_gradients.rs mode=append
+```rust
+// file=tests/llm_gradients.rs mode=append
 #[test]
 fn storage_counts_all_layers_and_tied_once() {
 	let c: QwenConfig =
@@ -2484,7 +2543,8 @@ fn storage_counts_all_layers_and_tied_once() {
 
 `src/training.rs` の `pub fn estimate_training_storage(`の定義を次の全体で置き換えます。
 
-```rust file="src/training.rs" mode="replace" item="pub fn estimate_training_storage("
+```rust
+// file="src/training.rs" mode="replace" item="pub fn estimate_training_storage("
 pub fn estimate_training_storage(
 	registry: &Registry,
 	batch: u64,
@@ -2541,13 +2601,15 @@ pub fn estimate_training_storage(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_once -- --exact
 ```
 
 ここは shape からの下限計算である。16P に加え、更新候補12P、全層 score、全位置 logits、層境界 activation を別表示する。実行時はさらに `Plan::workspace_bytes` を表示する。host copy と compiler の作業領域は追加で必要になる。
 
-```sh check
+```sh
+# check
 cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.json --sequence-length 8 --microbatch 1 --estimate-only
 ```
 
@@ -2560,7 +2622,8 @@ cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.
 
 `src/training.rs` の `pub fn estimate_training_storage(`の定義を次の全体で置き換えます。
 
-```rust file="src/training.rs" mode="replace" item="pub fn estimate_training_storage("
+```rust
+// file="src/training.rs" mode="replace" item="pub fn estimate_training_storage("
 pub fn estimate_training_storage(
 	registry: &Registry,
 	batch: u64,
@@ -2617,7 +2680,8 @@ pub fn estimate_training_storage(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_once -- --exact
 ```
 
@@ -2630,7 +2694,8 @@ cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_onc
 
 `examples/train_qwen.rs` の `fn main(`の定義を次の全体で置き換えます。
 
-```rust file="examples/train_qwen.rs" mode="replace" item="fn main("
+```rust
+// file="examples/train_qwen.rs" mode="replace" item="fn main("
 fn main() -> Result<()> {
 	let args = std::env::args().collect::<Vec<_>>();
 	let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
@@ -2760,13 +2825,15 @@ fn main() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_once -- --exact
 ```
 
 全 Qwen を実行する際は語彙151936、全24層と全 ParamId を維持する。実資産・メモリを確保した環境で一更新と checkpoint を行う。再開の `--steps` は追加更新数を表す。
 
-```sh check requires=qwen
+```sh
+# check requires=qwen
 checkpoint_dir=$(mktemp -d)
 cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.json --sequence-length 8 --microbatch 1 --steps 1 --checkpoint "$checkpoint_dir/step1"
 cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.json --sequence-length 8 --microbatch 1 --steps 1 --resume "$checkpoint_dir/step1" --checkpoint "$checkpoint_dir/step2"
@@ -2781,7 +2848,8 @@ cargo run --offline --example train_qwen -- --manifest fixtures/qwen25/manifest.
 
 `tests/llm_gradients.rs` の `fn storage_counts_all_layers_and_tied_once(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn storage_counts_all_layers_and_tied_once("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn storage_counts_all_layers_and_tied_once("
 fn storage_counts_all_layers_and_tied_once() {
 	let c: QwenConfig =
 		serde_json::from_str(include_str!("../fixtures/qwen25/config.json")).unwrap();
@@ -2797,7 +2865,8 @@ fn storage_counts_all_layers_and_tied_once() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_once -- --exact
 ```
 
@@ -2810,7 +2879,8 @@ cargo test --offline --test llm_gradients storage_counts_all_layers_and_tied_onc
 
 `tests/llm_gradients.rs` の `fn tiny_transformer_parameter_central_difference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
 fn tiny_transformer_parameter_central_difference() {
 	let mut config = QwenConfig::tiny();
 	config.hidden_size = 4;
@@ -2855,7 +2925,8 @@ fn tiny_transformer_parameter_central_difference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -2868,7 +2939,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `tests/llm_gradients.rs` の `fn tiny_transformer_parameter_central_difference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
 fn tiny_transformer_parameter_central_difference() {
 	let mut config = QwenConfig::tiny();
 	config.hidden_size = 4;
@@ -2913,7 +2985,8 @@ fn tiny_transformer_parameter_central_difference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -2926,7 +2999,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `tests/llm_gradients.rs` の `fn tiny_transformer_parameter_central_difference(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn tiny_transformer_parameter_central_difference("
 fn tiny_transformer_parameter_central_difference() {
 	let mut config = QwenConfig::tiny();
 	config.hidden_size = 4;
@@ -2971,7 +3045,8 @@ fn tiny_transformer_parameter_central_difference() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients tiny_transformer_parameter_central_difference -- --exact
 ```
 
@@ -2984,7 +3059,8 @@ cargo test --offline --test llm_gradients tiny_transformer_parameter_central_dif
 
 `tests/llm_resume.rs` の `fn fresh_process_resume_matches_continuous(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_resume.rs" mode="replace" item="fn fresh_process_resume_matches_continuous("
+```rust
+// file="tests/llm_resume.rs" mode="replace" item="fn fresh_process_resume_matches_continuous("
 fn fresh_process_resume_matches_continuous() {
 	let root = std::env::temp_dir().join(format!("chibi-resume-{}", std::process::id()));
 	let _ = fs::remove_dir_all(&root);
@@ -3026,7 +3102,8 @@ fn fresh_process_resume_matches_continuous() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -- --exact
 ```
 
@@ -3039,7 +3116,8 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 
 `tests/llm_resume.rs` の `fn fresh_process_resume_matches_continuous(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_resume.rs" mode="replace" item="fn fresh_process_resume_matches_continuous("
+```rust
+// file="tests/llm_resume.rs" mode="replace" item="fn fresh_process_resume_matches_continuous("
 fn fresh_process_resume_matches_continuous() {
 	let root = std::env::temp_dir().join(format!("chibi-resume-{}", std::process::id()));
 	let _ = fs::remove_dir_all(&root);
@@ -3081,7 +3159,8 @@ fn fresh_process_resume_matches_continuous() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -- --exact
 ```
 
@@ -3094,7 +3173,8 @@ cargo test --offline --test llm_resume fresh_process_resume_matches_continuous -
 
 `tests/llm_gradients.rs` の `fn adamw_scalar_and_finite_transaction(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
 fn adamw_scalar_and_finite_transaction() {
 	let w = BufferData {
 		shape: vec![],
@@ -3126,7 +3206,8 @@ fn adamw_scalar_and_finite_transaction() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction -- --exact
 ```
 
@@ -3139,7 +3220,8 @@ cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction --
 
 `tests/llm_gradients.rs` の `fn adamw_scalar_and_finite_transaction(`の定義を次の全体で置き換えます。
 
-```rust file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
+```rust
+// file="tests/llm_gradients.rs" mode="replace" item="fn adamw_scalar_and_finite_transaction("
 fn adamw_scalar_and_finite_transaction() {
 	let w = BufferData {
 		shape: vec![],
@@ -3171,6 +3253,7 @@ fn adamw_scalar_and_finite_transaction() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --offline --test llm_gradients adamw_scalar_and_finite_transaction -- --exact
 ```

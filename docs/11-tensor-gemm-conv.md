@@ -2,12 +2,13 @@
 
 Tensor は Graph の Rc と NodeId を持つ薄い builder である。演算メソッドは compile も run も呼ばない。matmul は reshape、permute、MUL、SUM へ、conv は SHRINK、STACK、MUL、SUM へ合成する。convolution は NCHW、stride=1、dilation=1、groups=1 のみで、他の指定は明示的なエラーになる。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. PARAM とホスト配列を結び付ける Tensor のコンストラクタを追加する。
 <!-- todo:11-001 -->
 
-```rust file=src/graph.rs mode=append
+```rust
+// file=src/graph.rs mode=append
 impl Graph {
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
@@ -74,7 +75,8 @@ impl Graph {
 }
 ```
 
-```rust file=src/tensor.rs mode=write
+```rust
+// file=src/tensor.rs mode=write
 use crate::{Binary, Buffer, Graph, NodeId, Plan, Reduce, Result, Unary};
 use std::{cell::RefCell, rc::Rc};
 #[derive(Clone, Default)]
@@ -202,11 +204,13 @@ impl Tensor {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod tensor;
 ```
 
-```rust file=tests/tensor_operations.rs mode=write
+```rust
+// file=tests/tensor_operations.rs mode=write
 use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
 fn buffer(s: &[usize], d: &[f32]) -> Buffer {
 	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
@@ -321,7 +325,8 @@ fn lazy_tensor() -> Result<()> {
 
 `tests/tensor_operations.rs` の `lazy_tensor` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations lazy_tensor
 ```
 
@@ -332,7 +337,8 @@ cargo test --quiet --test tensor_operations lazy_tensor
 
 `src/tensor.rs` の `impl Tensor {`の定義を次の全体で置き換えます。
 
-```rust file="src/tensor.rs" mode="replace" item="impl Tensor {"
+```rust
+// file="src/tensor.rs" mode="replace" item="impl Tensor {"
 impl Tensor {
 	fn wrap(&self, id: NodeId) -> Self {
 		Self {
@@ -342,7 +348,8 @@ impl Tensor {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -353,7 +360,8 @@ cargo test --quiet --test tensor_operations
 
 `src/tensor.rs` の `fn binary(`の定義を次の全体で置き換えます。
 
-```rust file="src/tensor.rs" mode="replace" item="fn binary("
+```rust
+// file="src/tensor.rs" mode="replace" item="fn binary("
 	fn binary(&self, b: &Self, op: Binary) -> Result<Self> {
 		if !Rc::ptr_eq(&self.graph, &b.graph) {
 			return Err("tensors belong to different graphs".into());
@@ -363,7 +371,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations lazy_tensor
 ```
 
@@ -374,13 +383,15 @@ cargo test --quiet --test tensor_operations lazy_tensor
 
 `src/tensor.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/tensor.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/tensor.rs" mode="replace" item="pub fn compile("
 	pub fn compile(&self) -> Result<Plan> {
 		self.graph.borrow().compile(&[self.id])
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -391,7 +402,8 @@ cargo test --quiet --test tensor_operations
 
 `src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn matmul("
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
 		let sb = self.get(b)?.shape.clone();
@@ -406,7 +418,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -417,7 +430,8 @@ cargo test --quiet --test tensor_operations
 
 `src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn matmul("
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
 		let sb = self.get(b)?.shape.clone();
@@ -432,7 +446,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations lazy_tensor
 ```
 
@@ -443,7 +458,8 @@ cargo test --quiet --test tensor_operations lazy_tensor
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -475,7 +491,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -486,7 +503,8 @@ cargo test --quiet --test tensor_operations
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -518,7 +536,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -529,7 +548,8 @@ cargo test --quiet --test tensor_operations
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -561,7 +581,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -572,7 +593,8 @@ cargo test --quiet --test tensor_operations
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -625,7 +647,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -636,7 +659,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -689,7 +713,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -700,7 +725,8 @@ cargo test --quiet --test tensor_operations
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -753,7 +779,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -764,7 +791,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -817,7 +845,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -828,7 +857,8 @@ cargo test --quiet --test tensor_operations
 
 `tests/tensor_operations.rs` の `fn multi_channel_convolution_and_padding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
 fn multi_channel_convolution_and_padding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2, 2, 3])?;
@@ -879,7 +909,8 @@ fn multi_channel_convolution_and_padding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -890,7 +921,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -943,7 +975,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -954,7 +987,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -1007,7 +1041,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1018,7 +1053,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -1071,7 +1107,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1082,7 +1119,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `pub fn conv2d(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn conv2d("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn conv2d("
 	pub fn conv2d(
 		&mut self,
 		x: NodeId,
@@ -1135,7 +1173,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1146,7 +1185,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -1180,7 +1220,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 			}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1191,7 +1232,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -1223,7 +1265,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -1234,7 +1277,8 @@ cargo test --quiet --test tensor_operations
 
 `tests/tensor_operations.rs` の `fn multi_channel_convolution_and_padding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
 fn multi_channel_convolution_and_padding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2, 2, 3])?;
@@ -1285,7 +1329,8 @@ fn multi_channel_convolution_and_padding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1296,7 +1341,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -1328,7 +1374,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -1339,7 +1386,8 @@ cargo test --quiet --test tensor_operations
 
 `src/tensor.rs` の `pub fn bind(`の定義を次の全体で置き換えます。
 
-```rust file="src/tensor.rs" mode="replace" item="pub fn bind("
+```rust
+// file="src/tensor.rs" mode="replace" item="pub fn bind("
 	pub fn bind(&self, slot: usize, buffer: Buffer) -> Result<()> {
 		let mut inputs = self.inputs.borrow_mut();
 		let target = inputs.get_mut(slot).ok_or("unknown tensor input slot")?;
@@ -1351,7 +1399,8 @@ cargo test --quiet --test tensor_operations
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -1362,7 +1411,8 @@ cargo test --quiet --test tensor_operations
 
 `tests/tensor_operations.rs` の `fn multi_channel_convolution_and_padding(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn multi_channel_convolution_and_padding("
 fn multi_channel_convolution_and_padding() -> Result<()> {
 	let mut g = Graph::default();
 	let x = g.input(0, vec![1, 2, 2, 3])?;
@@ -1413,7 +1463,8 @@ fn multi_channel_convolution_and_padding() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations multi_channel_convolution_and_padding
 ```
 
@@ -1424,7 +1475,8 @@ cargo test --quiet --test tensor_operations multi_channel_convolution_and_paddin
 
 `tests/tensor_operations.rs` の `fn matmul_conv(`の定義を次の全体で置き換えます。
 
-```rust file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
+```rust
+// file="tests/tensor_operations.rs" mode="replace" item="fn matmul_conv("
 fn matmul_conv() -> Result<()> {
 	let mut g = Graph::default();
 	let a = g.input(0, vec![2, 3])?;
@@ -1456,7 +1508,8 @@ fn matmul_conv() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test tensor_operations
 ```
 
@@ -1464,6 +1517,7 @@ cargo test --quiet --test tensor_operations
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

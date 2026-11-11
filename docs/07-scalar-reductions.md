@@ -2,12 +2,13 @@
 
 accumulator は長さ1の REG storage である。ゼロ初期化を出力位置の region 内に置き、内側 RANGE で LOAD と STORE を繰り返す。高水準の REDUCE 専用実行器は使わない。生成コードと独立 interpreter で、空の縮約、行和、三重ループ GEMM、1D convolution を比較する。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. REG allocation と初期化の region を実装する。
 <!-- todo:07-001 -->
 
-```rust file=src/reductions.rs mode=write
+```rust
+// file=src/reductions.rs mode=write
 use crate::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
@@ -114,11 +115,13 @@ pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod reductions;
 ```
 
-```rust file=tests/scalar_reductions.rs mode=write
+```rust
+// file=tests/scalar_reductions.rs mode=write
 use chibigrad::reductions;
 use chibigrad::{
 	Result,
@@ -167,7 +170,8 @@ fn scalar_reductions() -> Result<()> {
 
 `tests/scalar_reductions.rs` の `scalar_reductions` で、この経路の値または拒否条件を確認する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -178,7 +182,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -225,7 +230,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -236,7 +242,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -283,7 +290,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -294,7 +302,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -334,7 +343,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -345,7 +355,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
@@ -379,7 +390,8 @@ pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -390,7 +402,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
@@ -424,7 +437,8 @@ pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -435,7 +449,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
@@ -469,7 +484,8 @@ pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -480,7 +496,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
@@ -514,7 +531,8 @@ pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -525,7 +543,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -565,7 +584,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -576,7 +596,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn row_sum("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn row_sum("
 pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let len = rows.checked_mul(cols).ok_or("row size overflow")?;
@@ -610,7 +631,8 @@ pub fn row_sum(rows: usize, cols: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -621,7 +643,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn matmul("
 pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
@@ -659,7 +682,8 @@ pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -670,7 +694,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn matmul("
 pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
@@ -708,7 +733,8 @@ pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -719,7 +745,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn matmul("
 pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 	let mut k = Kernel::default();
 	let a = k.input(0, m.checked_mul(inner).ok_or("matrix overflow")?)?;
@@ -757,7 +784,8 @@ pub fn matmul(m: usize, n: usize, inner: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -768,7 +796,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -808,7 +837,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -819,7 +849,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -859,7 +890,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -870,7 +902,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn conv1d("
 pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 	if width == 0 {
 		return Err("empty convolution kernel".into());
@@ -907,7 +940,8 @@ pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -918,7 +952,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn conv1d("
 pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 	if width == 0 {
 		return Err("empty convolution kernel".into());
@@ -955,7 +990,8 @@ pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -966,7 +1002,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn conv1d("
 pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 	if width == 0 {
 		return Err("empty convolution kernel".into());
@@ -1003,7 +1040,8 @@ pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1014,7 +1052,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1054,7 +1093,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1065,7 +1105,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `src/reductions.rs` の `pub fn conv1d(`の定義を次の全体で置き換えます。
 
-```rust file="src/reductions.rs" mode="replace" item="pub fn conv1d("
+```rust
+// file="src/reductions.rs" mode="replace" item="pub fn conv1d("
 pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 	if width == 0 {
 		return Err("empty convolution kernel".into());
@@ -1102,7 +1143,8 @@ pub fn conv1d(len: usize, width: usize) -> Result<Kernel> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1113,7 +1155,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1153,7 +1196,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1164,7 +1208,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1204,7 +1249,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1215,7 +1261,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1255,7 +1302,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1266,7 +1314,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1306,7 +1355,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1317,7 +1367,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1357,7 +1408,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1368,7 +1420,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1408,7 +1461,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1419,7 +1473,8 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 `tests/scalar_reductions.rs` の `fn scalar_reductions(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
+```rust
+// file="tests/scalar_reductions.rs" mode="replace" item="fn scalar_reductions("
 fn scalar_reductions() -> Result<()> {
 	assert_eq!(
 		reductions::row_sum(1, 4)?
@@ -1459,7 +1514,8 @@ fn scalar_reductions() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_reductions scalar_reductions
 ```
 
@@ -1467,6 +1523,7 @@ cargo test --quiet --test scalar_reductions scalar_reductions
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

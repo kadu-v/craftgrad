@@ -2,12 +2,13 @@
 
 整数演算は i32 wrap、DIV と MOD は床除算、SHR は算術 shift とする。f32 MAX は NaN を伝播し、ゼロ二つなら常に +0 を返す。動的 DIV、shift、float-to-int CAST の安全性は宣言 bounds と実入力の検査で保証する。導出できない bounds は安全と判定しない。型付き scalar IR を追加し、既存の二つの scalar example もこの IR に移す。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. arena に `HashMap<NodeKey, NodeId>` を追加する。
 <!-- todo:03-001 -->
 
-```rust file=src/scalar.rs mode=write
+```rust
+// file=src/scalar.rs mode=write
 use crate::{Result, native::NativeLibrary};
 use std::{
 	collections::{HashMap, HashSet},
@@ -685,11 +686,13 @@ impl CompiledScalar {
 }
 ```
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod scalar;
 ```
 
-```rust file=tests/scalar_rewrite.rs mode=write
+```rust
+// file=tests/scalar_rewrite.rs mode=write
 use chibigrad::{
 	Result,
 	scalar::{Alu, Bounds, DType, ScalarGraph, Value},
@@ -809,7 +812,8 @@ fn forged_scalar_bounds_are_rejected() -> Result<()> {
 }
 ```
 
-```rust file=examples/scalar_const.rs mode=write
+```rust
+// file=examples/scalar_const.rs mode=write
 use chibigrad::{
 	Result,
 	scalar::{ScalarGraph, Value},
@@ -838,7 +842,8 @@ fn main() -> Result<()> {
 }
 ```
 
-```rust file=examples/scalar_arithmetic.rs mode=write
+```rust
+// file=examples/scalar_arithmetic.rs mode=write
 use chibigrad::{
 	Result,
 	scalar::{Alu, ScalarGraph, Value},
@@ -880,7 +885,8 @@ fn main() -> Result<()> {
 
 `tests/scalar_rewrite.rs` の正常系と境界系をまとめて再実行する。
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -891,7 +897,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `fn push(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="fn push("
+```rust
+// file="src/scalar.rs" mode="replace" item="fn push("
 	fn push(&mut self, node: SNode) -> usize {
 		if let Some(&id) = self.intern.get(&node) {
 			return id;
@@ -903,7 +910,8 @@ cargo test --quiet --test scalar_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -914,7 +922,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `fn push(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="fn push("
+```rust
+// file="src/scalar.rs" mode="replace" item="fn push("
 	fn push(&mut self, node: SNode) -> usize {
 		if let Some(&id) = self.intern.get(&node) {
 			return id;
@@ -926,7 +935,8 @@ cargo test --quiet --test scalar_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -937,7 +947,8 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
 fn arithmetic_and_shared_library() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let a = g.param(0, DType::F32, None)?;
@@ -960,7 +971,8 @@ fn arithmetic_and_shared_library() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -971,7 +983,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="fn infer("
+```rust
+// file="src/scalar.rs" mode="replace" item="fn infer("
 	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
 		let arity = match op {
 			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
@@ -1079,7 +1092,8 @@ cargo test --quiet --test scalar_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -1090,7 +1104,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `src/scalar.rs` の `pub fn pack(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn pack("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn pack("
 	pub fn pack(self) -> u64 {
 		match self {
 			Self::Bool(x) => x as u64,
@@ -1102,7 +1117,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `src/scalar.rs` の `pub fn unpack(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn unpack("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn unpack("
 	pub fn unpack(dtype: DType, bits: u64) -> Result<Self> {
 		match dtype {
 			DType::Bool => Ok(Self::Bool(bits != 0)),
@@ -1115,7 +1131,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn render("
 	pub fn render(&self, root: usize) -> Result<String> {
 		self.verify(root, 0)?;
 		let mut source = SCALAR_HELPERS.to_string();
@@ -1197,7 +1214,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -1208,7 +1226,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
 pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	let a = v[0];
 	if let Alu::Cast(t) = op {
@@ -1311,7 +1330,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 
 `src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn render("
 	pub fn render(&self, root: usize) -> Result<String> {
 		self.verify(root, 0)?;
 		let mut source = SCALAR_HELPERS.to_string();
@@ -1393,7 +1413,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
 ```
 
@@ -1404,7 +1425,8 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="fn infer("
+```rust
+// file="src/scalar.rs" mode="replace" item="fn infer("
 	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
 		let arity = match op {
 			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
@@ -1512,7 +1534,8 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -1523,7 +1546,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn where_and_float_classification(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn where_and_float_classification("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn where_and_float_classification("
 fn where_and_float_classification() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let a = g.param(0, DType::F32, None)?;
@@ -1548,7 +1572,8 @@ fn where_and_float_classification() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
 ```
 
@@ -1559,7 +1584,8 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
 pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	let a = v[0];
 	if let Alu::Cast(t) = op {
@@ -1662,7 +1688,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 
 `src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn render("
 	pub fn render(&self, root: usize) -> Result<String> {
 		self.verify(root, 0)?;
 		let mut source = SCALAR_HELPERS.to_string();
@@ -1744,7 +1771,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
 
@@ -1755,7 +1783,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `src/scalar.rs` の `pub fn eval_alu(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn eval_alu("
 pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	let a = v[0];
 	if let Alu::Cast(t) = op {
@@ -1858,7 +1887,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 
 `src/scalar.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn render("
 	pub fn render(&self, root: usize) -> Result<String> {
 		self.verify(root, 0)?;
 		let mut source = SCALAR_HELPERS.to_string();
@@ -1940,7 +1970,8 @@ pub fn eval_alu(op: Alu, v: &[Value]) -> Result<Value> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -1951,7 +1982,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `pub fn validate_inputs(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn validate_inputs("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn validate_inputs("
 	pub fn validate_inputs(&self, root: usize, inputs: &[Value]) -> Result<()> {
 		let mut slots = HashSet::new();
 		for id in self.order(root)? {
@@ -1982,7 +2014,8 @@ cargo test --quiet --test scalar_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
 
@@ -1993,7 +2026,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `src/scalar.rs` の `fn infer(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="fn infer("
+```rust
+// file="src/scalar.rs" mode="replace" item="fn infer("
 	fn infer(&self, op: Alu, inputs: &[usize]) -> Result<(DType, Option<Bounds>)> {
 		let arity = match op {
 			Alu::Neg | Alu::Recip | Alu::Cast(_) => 1,
@@ -2101,7 +2135,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -2112,7 +2147,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn integer_contract_and_rewrite(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
 fn integer_contract_and_rewrite() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let x = g.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
@@ -2145,7 +2181,8 @@ fn integer_contract_and_rewrite() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
 
@@ -2156,7 +2193,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn rewrite("
 	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
 		self.verify(root, 0)?;
 		let mut out = Self::default();
@@ -2204,7 +2242,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
 
@@ -2215,7 +2254,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn rewrite("
 	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
 		self.verify(root, 0)?;
 		let mut out = Self::default();
@@ -2263,7 +2303,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -2274,7 +2315,8 @@ cargo test --quiet --test scalar_rewrite
 
 `src/scalar.rs` の `pub fn rewrite(`の定義を次の全体で置き換えます。
 
-```rust file="src/scalar.rs" mode="replace" item="pub fn rewrite("
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn rewrite("
 	pub fn rewrite(&self, root: usize) -> Result<(Self, usize)> {
 		self.verify(root, 0)?;
 		let mut out = Self::default();
@@ -2322,7 +2364,8 @@ cargo test --quiet --test scalar_rewrite
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite where_and_float_classification
 ```
 
@@ -2333,7 +2376,8 @@ cargo test --quiet --test scalar_rewrite where_and_float_classification
 
 `tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
 fn typed_failures_and_special_values() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let f = g.param(0, DType::F32, None)?;
@@ -2361,7 +2405,8 @@ fn typed_failures_and_special_values() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -2372,7 +2417,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
 fn arithmetic_and_shared_library() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let a = g.param(0, DType::F32, None)?;
@@ -2395,7 +2441,8 @@ fn arithmetic_and_shared_library() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -2406,7 +2453,8 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
 fn typed_failures_and_special_values() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let f = g.param(0, DType::F32, None)?;
@@ -2434,7 +2482,8 @@ fn typed_failures_and_special_values() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -2445,7 +2494,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
 fn typed_failures_and_special_values() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let f = g.param(0, DType::F32, None)?;
@@ -2473,7 +2523,8 @@ fn typed_failures_and_special_values() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -2484,7 +2535,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
 fn arithmetic_and_shared_library() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let a = g.param(0, DType::F32, None)?;
@@ -2507,7 +2559,8 @@ fn arithmetic_and_shared_library() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -2518,7 +2571,8 @@ cargo test --quiet --test scalar_rewrite
 
 `tests/scalar_rewrite.rs` の `fn typed_failures_and_special_values(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn typed_failures_and_special_values("
 fn typed_failures_and_special_values() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let f = g.param(0, DType::F32, None)?;
@@ -2546,7 +2600,8 @@ fn typed_failures_and_special_values() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 ```
 
@@ -2557,7 +2612,8 @@ cargo test --quiet --test scalar_rewrite typed_failures_and_special_values
 
 `tests/scalar_rewrite.rs` の `fn integer_contract_and_rewrite(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn integer_contract_and_rewrite("
 fn integer_contract_and_rewrite() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let x = g.param(0, DType::I32, Some(Bounds::new(-7, 5)?))?;
@@ -2590,7 +2646,8 @@ fn integer_contract_and_rewrite() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 ```
 
@@ -2601,7 +2658,8 @@ cargo test --quiet --test scalar_rewrite integer_contract_and_rewrite
 
 `tests/scalar_rewrite.rs` の `fn arithmetic_and_shared_library(`の定義を次の全体で置き換えます。
 
-```rust file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
+```rust
+// file="tests/scalar_rewrite.rs" mode="replace" item="fn arithmetic_and_shared_library("
 fn arithmetic_and_shared_library() -> Result<()> {
 	let mut g = ScalarGraph::default();
 	let a = g.param(0, DType::F32, None)?;
@@ -2624,7 +2682,8 @@ fn arithmetic_and_shared_library() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test scalar_rewrite
 ```
 
@@ -2632,6 +2691,7 @@ cargo test --quiet --test scalar_rewrite
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```

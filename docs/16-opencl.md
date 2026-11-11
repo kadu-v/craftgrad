@@ -6,7 +6,8 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 `Cargo.toml` を次の全体へ置き換える。Metal の設定を残し、OpenCL の任意依存を追加する。OpenCL loader は `opencl3` の既定の dynamic feature を使う。
 
-```toml file=Cargo.toml mode=write
+```toml
+# file=Cargo.toml mode=write
 [package]
 name = "chibigrad"
 version = "0.1.0"
@@ -29,12 +30,14 @@ objc2-metal = { version = "=0.3.2", optional = true }
 
 ## 実装を保存する
 
-```rust file=src/backends/mod.rs mode=append
+```rust
+// file=src/backends/mod.rs mode=append
 #[cfg(feature = "opencl")]
 pub mod opencl;
 ```
 
-```rust file=src/backends/opencl.rs mode=write
+```rust
+// file=src/backends/opencl.rs mode=write
 use crate::gpu::{Kernel as Spec, Run, Timings};
 use opencl3::{
 	command_queue::{CL_QUEUE_PROFILING_ENABLE, CommandQueue},
@@ -344,7 +347,8 @@ pub unsafe fn run(spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=append
+```rust
+// file=src/gpu_graph.rs mode=append
 #[derive(Clone, Copy, Debug)]
 pub enum MathMode {
 	Precise,
@@ -374,7 +378,8 @@ pub fn lower_math(
 }
 ```
 
-```rust file=tests/book_16.rs mode=write
+```rust
+// file=tests/book_16.rs mode=write
 use chibigrad::{
 	Binary, Buffer, Graph, Reduce, Unary,
 	gpu::{Dialect, groups},
@@ -460,7 +465,8 @@ fn hardware_contract() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo check --features opencl
 ```
 
@@ -470,7 +476,8 @@ cargo check --features opencl
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -481,7 +488,8 @@ fn todo_16_001() {
 
 `src/backends/opencl.rs` の `pub fn devices(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn devices("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn devices("
 pub fn devices() -> Result<Vec<DeviceInfo>, String> {
 	let mut out = vec![];
 	for (p, platform) in api("clGetPlatformIDs", get_platforms())?.iter().enumerate() {
@@ -502,7 +510,8 @@ pub fn devices() -> Result<Vec<DeviceInfo>, String> {
 
 `src/backends/opencl.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
 	pub fn compile(
 		spec: &Spec,
 		platform_index: usize,
@@ -527,7 +536,8 @@ pub fn devices() -> Result<Vec<DeviceInfo>, String> {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_001 -- --exact --ignored
 ```
 
@@ -539,7 +549,8 @@ cargo test --test book_16 --features opencl todo_16_001 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_002() {
 	source_contract();
@@ -548,7 +559,8 @@ fn todo_16_002() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -661,7 +673,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_002 -- --exact
 ```
 
@@ -673,7 +686,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -684,7 +698,8 @@ fn todo_16_003() {
 
 `src/backends/opencl.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="fn compile_on("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="fn compile_on("
 	fn compile_on(
 		spec: &Spec,
 		device: Device,
@@ -715,7 +730,8 @@ fn todo_16_003() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -885,7 +901,8 @@ fn todo_16_003() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_003 -- --exact --ignored
 ```
 
@@ -897,7 +914,8 @@ cargo test --test book_16 --features opencl todo_16_003 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -908,7 +926,8 @@ fn todo_16_004() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -1078,7 +1097,8 @@ fn todo_16_004() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_004 -- --exact --ignored
 ```
 
@@ -1090,7 +1110,8 @@ cargo test --test book_16 --features opencl todo_16_004 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -1101,13 +1122,15 @@ fn todo_16_005() {
 
 `src/backends/opencl.rs` の `fn api<T>(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="fn api<T>("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="fn api<T>("
 fn api<T>(name: &str, value: opencl3::Result<T>) -> Result<T, String> {
 	value.map_err(|e| format!("{name}: {e} ({})", e.0))
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_005 -- --exact --ignored
 ```
 
@@ -1119,7 +1142,8 @@ cargo test --test book_16 --features opencl todo_16_005 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_006() {
 	source_contract();
@@ -1128,7 +1152,8 @@ fn todo_16_006() {
 
 `src/gpu.rs` の `pub fn groups(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu.rs" mode="replace" item="pub fn groups("
+```rust
+// file="src/gpu.rs" mode="replace" item="pub fn groups("
 pub fn groups(n: usize, local: usize) -> Result<usize, String> {
 	if local == 0 {
 		return Err("zero local size".into());
@@ -1141,7 +1166,8 @@ pub fn groups(n: usize, local: usize) -> Result<usize, String> {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -1311,7 +1337,8 @@ pub fn groups(n: usize, local: usize) -> Result<usize, String> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_006 -- --exact
 ```
 
@@ -1323,14 +1350,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_007() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_007 -- --exact
 ```
 
@@ -1342,7 +1371,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_008() {
 	source_contract();
@@ -1351,7 +1381,8 @@ fn todo_16_008() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -1464,7 +1495,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_008 -- --exact
 ```
 
@@ -1476,7 +1508,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -1485,7 +1518,8 @@ fn todo_16_009() {
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_009 -- --exact --ignored
 ```
 
@@ -1497,7 +1531,8 @@ cargo test --test book_16 --features opencl todo_16_009 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_010() {
 	source_contract();
@@ -1506,7 +1541,8 @@ fn todo_16_010() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(spec:`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(spec:"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(spec:"
 pub unsafe fn run(spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	spec.validate(inputs)?;
 	if spec.lengths[spec.output] == 0 {
@@ -1527,7 +1563,8 @@ pub unsafe fn run(spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 
 `src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
 	fn from_lowered(
 		graph: &Graph,
 		outputs: &[usize],
@@ -1588,7 +1625,8 @@ pub unsafe fn run(spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_010 -- --exact
 ```
 
@@ -1600,7 +1638,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -1611,7 +1650,8 @@ fn todo_16_011() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -1781,7 +1821,8 @@ fn todo_16_011() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_011 -- --exact --ignored
 ```
 
@@ -1793,7 +1834,8 @@ cargo test --test book_16 --features opencl todo_16_011 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_012() {
 	source_contract();
@@ -1802,7 +1844,8 @@ fn todo_16_012() {
 
 `src/graph.rs` の `fn coord(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn coord("
+```rust
+// file="src/graph.rs" mode="replace" item="fn coord("
 	fn coord(&self, id: usize, index: &str, axis: usize) -> String {
 		format!(
 			"((({index}) / {}) % {})",
@@ -1814,7 +1857,8 @@ fn todo_16_012() {
 
 `src/graph.rs` の `fn flatten(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn flatten("
+```rust
+// file="src/graph.rs" mode="replace" item="fn flatten("
 	fn flatten(&self, id: usize, c: &[String]) -> String {
 		if c.is_empty() {
 			return "0".into();
@@ -1833,7 +1877,8 @@ fn todo_16_012() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_012 -- --exact
 ```
 
@@ -1845,7 +1890,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_013() {
 	source_contract();
@@ -1854,7 +1900,8 @@ fn todo_16_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Expand` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Expand"
 			Op::Expand { x } => {
 				let xi = self.broadcast_index(x, id, index);
 				return self.expr(x, &xi, code);
@@ -1863,7 +1910,8 @@ fn todo_16_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Permute` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Permute"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Permute"
 			Op::Permute { x, axes } => {
 				let mut c = vec![String::new(); axes.len()];
 				for (a, &old) in axes.iter().enumerate() {
@@ -1876,7 +1924,8 @@ fn todo_16_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Shrink` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Shrink"
 			Op::Shrink { x, ranges } => {
 				let c = ranges
 					.iter()
@@ -1890,7 +1939,8 @@ fn todo_16_013() {
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -1926,7 +1976,8 @@ fn todo_16_013() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2039,7 +2090,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_013 -- --exact
 ```
 
@@ -2051,7 +2103,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_014() {
 	source_contract();
@@ -2060,7 +2113,8 @@ fn todo_16_014() {
 
 `src/graph.rs` の `fn expr(` の `Op::Pad` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Pad"
 			Op::Pad { x, pads } => {
 				let c = (0..pads.len())
 					.map(|a| self.coord(id, index, a))
@@ -2096,7 +2150,8 @@ fn todo_16_014() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2209,7 +2264,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_014 -- --exact
 ```
 
@@ -2221,7 +2277,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_015() {
 	source_contract();
@@ -2230,7 +2287,8 @@ fn todo_16_015() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2343,7 +2401,8 @@ pub fn lower(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_015 -- --exact
 ```
 
@@ -2355,7 +2414,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_016() {
 	source_contract();
@@ -2364,7 +2424,8 @@ fn todo_16_016() {
 
 `src/gpu_graph.rs` の `pub fn lower_math(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower_math("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower_math("
 pub fn lower_math(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2389,7 +2450,8 @@ pub fn lower_math(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_016 -- --exact
 ```
 
@@ -2401,7 +2463,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -2412,7 +2475,8 @@ fn todo_16_017() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2467,7 +2531,8 @@ fn todo_16_017() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2580,7 +2645,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_017 -- --exact --ignored
 ```
 
@@ -2592,7 +2658,8 @@ cargo test --test book_16 --features opencl todo_16_017 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -2603,7 +2670,8 @@ fn todo_16_018() {
 
 `src/graph.rs` の `pub fn matmul(`の定義を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="pub fn matmul("
+```rust
+// file="src/graph.rs" mode="replace" item="pub fn matmul("
 	pub fn matmul(&mut self, a: NodeId, b: NodeId) -> Result<NodeId> {
 		let sa = self.get(a)?.shape.clone();
 		let sb = self.get(b)?.shape.clone();
@@ -2620,7 +2688,8 @@ fn todo_16_018() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2675,7 +2744,8 @@ fn todo_16_018() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2788,7 +2858,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_018 -- --exact --ignored
 ```
 
@@ -2800,7 +2871,8 @@ cargo test --test book_16 --features opencl todo_16_018 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -2811,7 +2883,8 @@ fn todo_16_019() {
 
 `src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
 
-```rust file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
+```rust
+// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
 			Op::Reduce {
 				op,
 				x,
@@ -2866,7 +2939,8 @@ fn todo_16_019() {
 
 `src/gpu_graph.rs` の `pub fn lower(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn lower("
 pub fn lower(
 	graph: &Graph,
 	outputs: &[usize],
@@ -2979,7 +3053,8 @@ pub fn lower(
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_019 -- --exact --ignored
 ```
 
@@ -2991,7 +3066,8 @@ cargo test --test book_16 --features opencl todo_16_019 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -3000,7 +3076,8 @@ fn todo_16_020() {
 }
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_020 -- --exact --ignored
 ```
 
@@ -3012,7 +3089,8 @@ cargo test --test book_16 --features opencl todo_16_020 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -3023,7 +3101,8 @@ fn todo_16_021() {
 
 `src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
 	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
 		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
 			return Err("optimized GPU plan shape mismatch".into());
@@ -3108,7 +3187,8 @@ fn todo_16_021() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -3278,7 +3358,8 @@ fn todo_16_021() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_021 -- --exact --ignored
 ```
 
@@ -3290,7 +3371,8 @@ cargo test --test book_16 --features opencl todo_16_021 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -3301,7 +3383,8 @@ fn todo_16_022() {
 
 `src/backends/opencl.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
 	pub fn compile(
 		spec: &Spec,
 		platform_index: usize,
@@ -3328,7 +3411,8 @@ fn todo_16_022() {
 
 `src/backends/opencl.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
 	pub fn compile_next(&self, spec: &Spec) -> Result<Self, String> {
 		Self::compile_on(
 			spec,
@@ -3341,7 +3425,8 @@ fn todo_16_022() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -3511,7 +3596,8 @@ fn todo_16_022() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_022 -- --exact --ignored
 ```
 
@@ -3523,7 +3609,8 @@ cargo test --test book_16 --features opencl todo_16_022 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -3534,7 +3621,8 @@ fn todo_16_023() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -3704,7 +3792,8 @@ fn todo_16_023() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_023 -- --exact --ignored
 ```
 
@@ -3716,7 +3805,8 @@ cargo test --test book_16 --features opencl todo_16_023 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 #[cfg(feature = "opencl")]
 #[ignore = "requires real device"]
@@ -3727,7 +3817,8 @@ fn todo_16_024() {
 
 `src/backends/opencl.rs` の `pub fn compile(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub fn compile("
 	pub fn compile(
 		spec: &Spec,
 		platform_index: usize,
@@ -3754,7 +3845,8 @@ fn todo_16_024() {
 
 `src/backends/opencl.rs` の `fn compile_on(`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="fn compile_on("
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="fn compile_on("
 	fn compile_on(
 		spec: &Spec,
 		device: Device,
@@ -3785,7 +3877,8 @@ fn todo_16_024() {
 
 `src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
 
-```rust file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
+```rust
+// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
 	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
 		spec.validate(inputs)?;
 		if self.contract
@@ -3955,7 +4048,8 @@ fn todo_16_024() {
 	}
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test book_16 --features opencl todo_16_024 -- --exact --ignored
 ```
 
@@ -3967,14 +4061,16 @@ cargo test --test book_16 --features opencl todo_16_024 -- --exact --ignored
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_025() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_025 -- --exact
 ```
 
@@ -3986,14 +4082,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_026() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_026 -- --exact
 ```
 
@@ -4005,14 +4103,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `gpu_graph::lower_math、OpenClProgram::compile、OpenClProgram::run、opencl::devices`](#opencl-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_16.rs mode=append
+```rust
+// file=tests/book_16.rs mode=append
 #[test]
 fn todo_16_027() {
 	source_contract();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_16 todo_16_027 -- --exact
 ```
 
@@ -4020,7 +4120,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

@@ -10,11 +10,13 @@ CPU の実行結果と GPU の実機結果を別に記録する。`requires=meta
 
 ## 実装を保存する
 
-```rust file=src/lib.rs mode=append
+```rust
+// file=src/lib.rs mode=append
 pub mod flash;
 ```
 
-```rust file=src/flash.rs mode=write
+```rust
+// file=src/flash.rs mode=write
 use crate::gpu::{Dialect, Kernel, header};
 #[derive(Clone, Copy, Debug)]
 pub struct AttentionShape {
@@ -605,7 +607,8 @@ pub(crate) fn boundary_skips(
 }
 ```
 
-```rust file=src/gpu_graph.rs mode=append
+```rust
+// file=src/gpu_graph.rs mode=append
 impl GpuPlan {
 	pub fn compile_flash(
 		graph: &Graph,
@@ -708,7 +711,8 @@ impl GpuPlan {
 }
 ```
 
-```rust file=tests/flash.rs mode=write
+```rust
+// file=tests/flash.rs mode=write
 use chibigrad::flash::*;
 fn compare(a: &[f32], b: &[f64]) {
 	assert_eq!(a.len(), b.len());
@@ -900,7 +904,8 @@ fn gpu_source_has_uniform_barriers() {
 }
 ```
 
-```rust file=tests/flash_hardware.rs mode=write
+```rust
+// file=tests/flash_hardware.rs mode=write
 use chibigrad::{
 	Buffer, Graph,
 	flash::{self, AttentionShape},
@@ -984,15 +989,18 @@ fn opencl() {
 }
 ```
 
-```sh check requires=metal
+```sh
+# check requires=metal
 cargo test --test flash_hardware --features metal metal -- --ignored --exact
 ```
 
-```sh check requires=opencl
+```sh
+# check requires=opencl
 cargo test --test flash_hardware --features opencl opencl -- --ignored --exact
 ```
 
-```rust file=tests/qwen_flash.rs mode=write
+```rust
+// file=tests/qwen_flash.rs mode=write
 use chibigrad::{
 	Graph,
 	flash::{compile_boundaries, register},
@@ -1127,11 +1135,13 @@ fn online_cache_valid_prefix_matches_ordinary() {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test qwen_flash
 ```
 
-```rust file=tests/book_23.rs mode=write
+```rust
+// file=tests/book_23.rs mode=write
 mod suite0 {
 	use chibigrad::flash::*;
 	pub(super) fn compare(a: &[f32], b: &[f64]) {
@@ -1331,7 +1341,8 @@ mod suite0 {
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_001() {
 	suite0::native_c_and_composite_graph();
@@ -1340,7 +1351,8 @@ fn todo_23_001() {
 
 `src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn reference("
 pub fn reference(
 	s: AttentionShape,
 	q: &[f32],
@@ -1399,7 +1411,8 @@ pub fn reference(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_001 -- --exact
 ```
 
@@ -1411,7 +1424,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_002() {
 	suite0::online_boundary_masks_gqa();
@@ -1420,7 +1434,8 @@ fn todo_23_002() {
 
 `src/flash.rs` の `pub fn validate(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn validate("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn validate("
 	pub fn validate(&self, q: &[f32], k: &[f32], v: &[f32], valid: &[bool]) -> Result<(), String> {
 		if self.dim == 0
 			|| self.heads == 0
@@ -1451,7 +1466,8 @@ fn todo_23_002() {
 
 `src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn reference("
 pub fn reference(
 	s: AttentionShape,
 	q: &[f32],
@@ -1510,7 +1526,8 @@ pub fn reference(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_002 -- --exact
 ```
 
@@ -1522,14 +1539,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_003() {
 	suite0::all_masked_and_late_max();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_003 -- --exact
 ```
 
@@ -1541,14 +1560,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_004() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_004 -- --exact
 ```
 
@@ -1560,7 +1581,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_005() {
 	suite0::native_c_and_composite_graph();
@@ -1569,7 +1591,8 @@ fn todo_23_005() {
 
 `src/flash.rs` の `pub fn reference(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn reference("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn reference("
 pub fn reference(
 	s: AttentionShape,
 	q: &[f32],
@@ -1630,7 +1653,8 @@ pub fn reference(
 
 `src/flash.rs` の `pub fn graph_reference(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn graph_reference("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn graph_reference("
 pub fn graph_reference(
 	g: &mut crate::Graph,
 	q: usize,
@@ -1699,7 +1723,8 @@ pub fn graph_reference(
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_005 -- --exact
 ```
 
@@ -1711,7 +1736,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_006() {
 	suite0::online_boundary_masks_gqa();
@@ -1720,7 +1746,8 @@ fn todo_23_006() {
 
 `src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
 	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
 		if tile == 0
 			|| s.dim == 0
@@ -1755,7 +1782,8 @@ fn todo_23_006() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_006 -- --exact
 ```
 
@@ -1767,7 +1795,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_007() {
 	suite0::all_masked_and_late_max();
@@ -1776,7 +1805,8 @@ fn todo_23_007() {
 
 `src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
 	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
 		if tile == 0
 			|| s.dim == 0
@@ -1811,7 +1841,8 @@ fn todo_23_007() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_007 -- --exact
 ```
 
@@ -1823,7 +1854,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_008() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
@@ -1832,7 +1864,8 @@ fn todo_23_008() {
 
 `src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
 	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
 		if tile == 0
 			|| s.dim == 0
@@ -1867,7 +1900,8 @@ fn todo_23_008() {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_008 -- --exact
 ```
 
@@ -1879,7 +1913,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_009() {
 	suite0::native_c_and_composite_graph();
@@ -1888,7 +1923,8 @@ fn todo_23_009() {
 
 `src/flash.rs` の `pub fn compile(s: AttentionShape,`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile(s: AttentionShape,"
 	pub fn compile(s: AttentionShape, tile: usize) -> Result<Self, String> {
 		if tile == 0
 			|| s.dim == 0
@@ -1925,7 +1961,8 @@ fn todo_23_009() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -1988,7 +2025,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_009 -- --exact
 ```
 
@@ -2000,14 +2038,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_010() {
 	suite0::online_boundary_masks_gqa();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_010 -- --exact
 ```
 
@@ -2019,7 +2059,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_011() {
 	suite0::all_masked_and_late_max();
@@ -2028,7 +2069,8 @@ fn todo_23_011() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2091,7 +2133,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_011 -- --exact
 ```
 
@@ -2103,7 +2146,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_012() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
@@ -2112,7 +2156,8 @@ fn todo_23_012() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2175,7 +2220,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_012 -- --exact
 ```
 
@@ -2187,7 +2233,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_013() {
 	suite0::native_c_and_composite_graph();
@@ -2196,7 +2243,8 @@ fn todo_23_013() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2259,7 +2307,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_013 -- --exact
 ```
 
@@ -2271,7 +2320,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_014() {
 	suite0::online_boundary_masks_gqa();
@@ -2280,7 +2330,8 @@ fn todo_23_014() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2343,7 +2394,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_014 -- --exact
 ```
 
@@ -2355,7 +2407,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_015() {
 	suite0::all_masked_and_late_max();
@@ -2364,7 +2417,8 @@ fn todo_23_015() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2427,7 +2481,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_015 -- --exact
 ```
 
@@ -2439,7 +2494,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_016() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
@@ -2448,7 +2504,8 @@ fn todo_23_016() {
 
 `src/flash.rs` の `pub fn shader(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn shader("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn shader("
 pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, String> {
 	if s.dim == 0 || s.heads == 0 || s.kv_heads == 0 || !s.heads.is_multiple_of(s.kv_heads) {
 		return Err("attention heads/dim".into());
@@ -2511,7 +2568,8 @@ pub fn shader(d: Dialect, s: AttentionShape, tile: usize) -> Result<Kernel, Stri
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_016 -- --exact
 ```
 
@@ -2523,7 +2581,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_017() {
 	suite0::native_c_and_composite_graph();
@@ -2532,7 +2591,8 @@ fn todo_23_017() {
 
 `src/flash.rs` の `pub fn select(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn select("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn select("
 pub fn select(
 	s: AttentionShape,
 	requires_grad: bool,
@@ -2563,7 +2623,8 @@ pub fn select(
 
 `src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
 	pub fn compile_flash(
 		graph: &Graph,
 		outputs: &[usize],
@@ -2664,7 +2725,8 @@ pub fn select(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_017 -- --exact
 ```
 
@@ -2676,7 +2738,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_018() {
 	suite0::online_boundary_masks_gqa();
@@ -2685,7 +2748,8 @@ fn todo_23_018() {
 
 `src/flash.rs` の `pub fn compile_boundaries(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
 pub fn compile_boundaries(
 	g: &crate::Graph,
 	outputs: &[usize],
@@ -2813,7 +2877,8 @@ pub fn compile_boundaries(
 
 `src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
 	pub fn compile_flash(
 		graph: &Graph,
 		outputs: &[usize],
@@ -2914,7 +2979,8 @@ pub fn compile_boundaries(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_018 -- --exact
 ```
 
@@ -2926,7 +2992,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_019() {
 	suite0::all_masked_and_late_max();
@@ -2935,7 +3002,8 @@ fn todo_23_019() {
 
 `src/flash.rs` の `pub fn compile_boundaries(`の定義を次の全体で置き換えます。
 
-```rust file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
+```rust
+// file="src/flash.rs" mode="replace" item="pub fn compile_boundaries("
 pub fn compile_boundaries(
 	g: &crate::Graph,
 	outputs: &[usize],
@@ -3063,7 +3131,8 @@ pub fn compile_boundaries(
 
 `src/gpu_graph.rs` の `pub fn compile_flash(`の定義を次の全体で置き換えます。
 
-```rust file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
+```rust
+// file="src/gpu_graph.rs" mode="replace" item="pub fn compile_flash("
 	pub fn compile_flash(
 		graph: &Graph,
 		outputs: &[usize],
@@ -3164,7 +3233,8 @@ pub fn compile_boundaries(
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_019 -- --exact
 ```
 
@@ -3176,14 +3246,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_020() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_020 -- --exact
 ```
 
@@ -3195,14 +3267,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_021() {
 	suite0::native_c_and_composite_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_021 -- --exact
 ```
 
@@ -3214,14 +3288,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_022() {
 	suite0::online_boundary_masks_gqa();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_022 -- --exact
 ```
 
@@ -3233,14 +3309,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_023() {
 	suite0::all_masked_and_late_max();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_023 -- --exact
 ```
 
@@ -3252,14 +3330,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_024() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_024 -- --exact
 ```
 
@@ -3271,14 +3351,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_025() {
 	suite0::native_c_and_composite_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_025 -- --exact
 ```
 
@@ -3290,14 +3372,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_026() {
 	suite0::online_boundary_masks_gqa();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_026 -- --exact
 ```
 
@@ -3309,14 +3393,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_027() {
 	suite0::all_masked_and_late_max();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_027 -- --exact
 ```
 
@@ -3328,14 +3414,16 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 実装は[この章の `flash::reference、FlashPlan::compile、FlashPlan::run、flash::shader、flash::register、compile_boundaries`](#flash-implementation) にある。次の確認を同じファイルへ追記する。
 
-```rust file=tests/book_23.rs mode=append
+```rust
+// file=tests/book_23.rs mode=append
 #[test]
 fn todo_23_028() {
 	suite0::model_boundary_compiler_replaces_actual_graph();
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --test book_23 todo_23_028 -- --exact
 ```
 
@@ -3343,7 +3431,8 @@ assertion がすべて通れば、この入力の期待値と拒否条件を確�
 
 ## 確認記録
 
-```sh check
+```sh
+# check
 cargo test
 ```
 

@@ -2,12 +2,13 @@
 
 RANGE と END は `Stmt::Range { body }` の開始と閉じ括弧で表す。交差した END や未終了 RANGE はこの木では構築できない。軸の番号の重複とスコープ外参照は別に検査する。body に出入りすると interpreter の軸環境も更新する。空の RANGE は LOAD を実行しない。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`sh check` は実際の検証コマンドであり、ソースファイルには保存しない。
+`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
 
 ## 1. RANGE と END を検証、interpreter、C renderer へ追加する。
 <!-- todo:06-001 -->
 
-```rust file=tests/loops.rs mode=write
+```rust
+// file=tests/loops.rs mode=write
 use chibigrad::{
 	Result,
 	kernel::{Expr as E, Index as I, Kernel, range, store},
@@ -90,7 +91,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 
 `src/kernel.rs` の `pub fn render(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn render("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn render("
 	pub fn render(&self) -> Result<String> {
 		let kernel = self.lower()?;
 		Ok(crate::native::render_entry(
@@ -103,7 +105,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -152,7 +155,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 
 `src/kernel.rs` の `fn scope_check(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn scope_check("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn scope_check("
 	fn scope_check(
 		body: &[Stmt],
 		open: &mut HashSet<usize>,
@@ -200,7 +204,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -211,7 +216,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -258,7 +264,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -269,7 +276,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn address("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn address("
 	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
 		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
 		if view
@@ -288,7 +296,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -299,7 +308,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -328,7 +338,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -339,7 +350,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -368,7 +380,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -379,13 +392,15 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `pub fn range(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn range("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn range("
 pub fn range(axis: usize, len: usize, body: Vec<Stmt>) -> Stmt {
 	Stmt::Range { axis, len, body }
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -396,7 +411,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `src/kernel.rs` の `fn scope_check(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn scope_check("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn scope_check("
 	fn scope_check(
 		body: &[Stmt],
 		open: &mut HashSet<usize>,
@@ -444,7 +460,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -455,7 +472,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -484,7 +502,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -495,7 +514,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -524,7 +544,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -535,7 +556,8 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -582,7 +604,8 @@ cargo test --quiet --test loops
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -593,7 +616,8 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `fn walk(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn walk("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn walk("
 	fn walk(
 		&self,
 		body: &[Stmt],
@@ -640,7 +664,8 @@ cargo test --quiet --test loops
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -651,7 +676,8 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `pub fn run(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="pub fn run("
+```rust
+// file="src/kernel.rs" mode="replace" item="pub fn run("
 	pub fn run(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
 		let mut slots = HashSet::new();
 		let mut storage = self
@@ -698,7 +724,8 @@ cargo test --quiet --test loops
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -709,7 +736,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -738,7 +766,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -749,7 +778,8 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `fn scope_check(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn scope_check("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn scope_check("
 	fn scope_check(
 		body: &[Stmt],
 		open: &mut HashSet<usize>,
@@ -797,7 +827,8 @@ cargo test --quiet --test loops
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -808,7 +839,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `src/kernel.rs` の `fn scope_check(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn scope_check("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn scope_check("
 	fn scope_check(
 		body: &[Stmt],
 		open: &mut HashSet<usize>,
@@ -856,7 +888,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -867,7 +900,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn address("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn address("
 	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
 		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
 		if view
@@ -886,7 +920,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -897,7 +932,8 @@ cargo test --quiet --test loops
 
 `src/kernel.rs` の `fn address(`の定義を次の全体で置き換えます。
 
-```rust file="src/kernel.rs" mode="replace" item="fn address("
+```rust
+// file="src/kernel.rs" mode="replace" item="fn address("
 	fn address(&self, view: View, index: &Index, axes: &HashMap<usize, i32>) -> Result<usize> {
 		let storage = self.storage.get(view.storage).ok_or("unknown storage")?;
 		if view
@@ -916,7 +952,8 @@ cargo test --quiet --test loops
 	}
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -927,7 +964,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -956,7 +994,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -967,7 +1006,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -996,7 +1036,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -1007,7 +1048,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn nested_loops_effect_calls_and_rejections(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
 fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 6)?;
@@ -1053,7 +1095,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -1064,7 +1107,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -1093,7 +1137,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -1104,7 +1149,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn nested_loops_effect_calls_and_rejections(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
 fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 6)?;
@@ -1150,7 +1196,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -1161,7 +1208,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `tests/loops.rs` の `fn nested_loops_effect_calls_and_rejections(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
 fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 6)?;
@@ -1207,7 +1255,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -1218,7 +1267,8 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 `tests/loops.rs` の `fn loops_and_scope(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn loops_and_scope("
 fn loops_and_scope() -> Result<()> {
 	for len in [0, 1, 3] {
 		let mut k = Kernel::default();
@@ -1247,7 +1297,8 @@ fn loops_and_scope() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops
 ```
 
@@ -1258,7 +1309,8 @@ cargo test --quiet --test loops
 
 `tests/loops.rs` の `fn nested_loops_effect_calls_and_rejections(`の定義を次の全体で置き換えます。
 
-```rust file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
+```rust
+// file="tests/loops.rs" mode="replace" item="fn nested_loops_effect_calls_and_rejections("
 fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 	let mut k = Kernel::default();
 	let x = k.input(0, 6)?;
@@ -1304,7 +1356,8 @@ fn nested_loops_effect_calls_and_rejections() -> Result<()> {
 }
 ```
 
-```sh check
+```sh
+# check
 cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 ```
 
@@ -1312,6 +1365,7 @@ cargo test --quiet --test loops nested_loops_effect_calls_and_rejections
 
 前章までの example と test も同じ checkout で再ビルドする。
 
-```sh check
+```sh
+# check
 cargo test --quiet --all-targets
 ```
