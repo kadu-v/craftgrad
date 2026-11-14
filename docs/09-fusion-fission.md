@@ -1,2818 +1,1387 @@
-# 09. 融合と分割で閉じた kernel graph を作り、Plan を再実行する
+# 09. kernel の境界、依存、schedule とメモリ計画を作る
 
-Graph::compile が consumer 数、STAGE、reduction を見て materialize 位置を選ぶ。定数は出力以外では inline する。Plan は閉じた kernel の順序と binding 署名を持ち、入力値をキャッシュしない。実体化する kernel の出力だけを確保し、融合で消えた broadcast product をホストに確保しない。公開 dump metadata の変更は seal の検証で実行前に拒否する。
+前の節で動かしたコードに、今回使う演算と処理を追加します。各節の確認を実行してから次へ進みます。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
+参照するUOpの構成は [tinygrad c22edff](https://github.com/tinygrad/tinygrad/blob/c22edff14c79310a9b2df62a78819cf77c8289fa/tinygrad/uop/ops.py) です。最初から全機能を実装せず、使う節で増やします。
 
-## 1. 元グラフから consumer 数を集める。
-<!-- todo:09-001 -->
+## 09.01 共有する計算と効果からスケジュールを作る
 
-この章の閉じたkernel表現を追加します。`KernelSignature` と `KernelCall` を比較し、producerの完了stateを要求します。body検査はこのcompilerの生成する構造化Cの部分言語に限定します。任意の外部Cのメモリ安全性を証明する関数ではありません。添字の範囲はGraphと実行時shapeの検証も使います。
+利用回数と STAGE を調べ、再利用する値を一度だけ中間バッファへ出す。CALL と AFTER の依存を並べ、読み書きの順序が曖昧なグラフを拒否する。
+
+`src/codegen.rs` の `impl Lower` 内 の `fn scalar`を置き換える。
 
 ```rust
-// file=src/lib.rs mode=append
-pub mod closure;
+// file="src/codegen.rs" mode="replace" within="impl Lower" item="fn scalar"
+    fn scalar(&mut self, u: &UOp, indices: &[UOp], valid: &UOp) -> Result<UOp> {
+        let key = (u.id, indices.iter().map(|i| i.id).collect(), valid.id);
+        if let Some(v) = self.cache.get(&key) {
+            return Ok(v.clone());
+        }
+        let result = match (&u.op, &u.arg) {
+            (Ops::Const, _) => self.emit(u.clone()),
+            (Ops::Buffer, _) | (Ops::Param, _) => {
+                let shape = u.shape_uops()?;
+                let idx = simplify(&offset(indices, &shape))?;
+                let gate = simplify(valid)?;
+                self.emit(u.index(idx, gate).load())
+            }
+            (Ops::Reduce, Arg::Reduction { op, axes, keepdim }) => {
+                let shape = u.src[0].shape_uops()?;
+                let mut input = vec![];
+                let mut output_axis = 0;
+                for i in 0..shape.len() {
+                    if axes.contains(&i) {
+                        input.push(UOp::int(0));
+                        if *keepdim {
+                            output_axis += 1;
+                        }
+                    } else {
+                        input.push(indices[output_axis].clone());
+                        output_axis += 1;
+                    }
+                }
+                if axes.is_empty() {
+                    self.scalar(&u.src[0], &input, valid)?
+                } else {
+                    let identity = if *op == Ops::Add {
+                        0.
+                    } else {
+                        f32::NEG_INFINITY
+                    };
+                    let (alloc, init) = self.accumulator(UOp::f32(identity));
+                    let saved = self.cache.clone();
+                    let old_seen = self.seen.clone();
+                    let mut ranges = vec![];
+                    for &a in axes {
+                        let r = self.range(shape[a].clone(), Axis::Reduce);
+                        input[a] = r.clone();
+                        ranges.push(r);
+                    }
+                    let value = self.scalar(&u.src[0], &input, valid)?;
+                    let mut deps = vec![init];
+                    deps.extend(ranges.clone());
+                    let ptr = alloc.after(deps);
+                    let current = self.emit(ptr.load());
+                    let update = self.emit(ptr.store(current.alu(*op, &[value])));
+                    let mut end = update;
+                    for r in ranges.iter().rev() {
+                        end = self.close(r, end);
+                    }
+                    self.cache = saved;
+                    self.seen = old_seen;
+                    self.seen.insert(alloc.id);
+                    self.seen.insert(end.id);
+                    self.emit(alloc.after(vec![end]).load())
+                }
+            }
+            (Ops::Stage, _) => self.scalar(&u.src[0], indices, valid)?,
+            (op, _) if is_unary(*op) => {
+                let x = self.scalar(&u.src[0], indices, valid)?;
+                self.emit(UOp::new(*op, vec![x], u.arg.clone()))
+            }
+            (op, _) if is_binary(*op) || *op == Ops::Where => {
+                let mut src = vec![];
+                for x in &u.src {
+                    src.push(self.scalar(x, &broadcast(indices, &x.shape_uops()?), valid)?)
+                }
+                self.emit(UOp::new(*op, src, u.arg.clone()))
+            }
+            _ => return Err(format!("rangeify cannot lower {:?}", u.op)),
+        };
+        self.cache.insert(key, result.clone());
+        Ok(result)
+    }
 ```
 
-```rust
-// file=src/closure.rs mode=write
-use crate::{Graph, Op, Result, native::KernelBody};
-use std::collections::HashSet;
+`src/effects.rs`を保存する。
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KernelSignature {
-	pub buffers: Vec<usize>,
-	pub scalar_words: usize,
-	pub output: usize,
+```rust
+// file="src/effects.rs" mode="write"
+use crate::{Ops, Result, UOp};
+use std::collections::{HashMap, HashSet, VecDeque};
+fn state(mut node: UOp) -> Result<UOp> {
+    while !matches!(node.op, Ops::Buffer | Ops::Alloc | Ops::Param | Ops::After) {
+        node = node
+            .src
+            .first()
+            .ok_or("kernel argument does not refer to storage")?
+            .clone();
+    }
+    Ok(node)
+}
+pub fn order_effects(sink: &UOp) -> Result<UOp> {
+    let mut visited = HashSet::new();
+    let mut order = Vec::new();
+    let mut stack = vec![(sink.clone(), false)];
+    while let Some((u, done)) = stack.pop() {
+        if done {
+            order.push(u);
+            continue;
+        }
+        if !visited.insert(u.id) {
+            continue;
+        }
+        stack.push((u.clone(), true));
+        let sources = if u.op == Ops::Call {
+            &u.src[1..]
+        } else {
+            &u.src[..]
+        };
+        for src in sources.iter().rev() {
+            stack.push((src.clone(), false));
+        }
+    }
+    let mut nodes = HashMap::<u64, UOp>::new();
+    let mut sequence = Vec::new();
+    let mut writes = HashMap::<u64, (u64, Vec<u64>)>::new();
+    let mut reads = Vec::<(u64, u64, u64)>::new();
+    let mut edges = HashSet::<(u64, u64)>::new();
+    for after in order.iter().filter(|u| u.op == Ops::After) {
+        let previous = state(after.src.first().ok_or("AFTER missing storage")?.clone())?;
+        let calls = after.src[1..]
+            .iter()
+            .filter(|u| u.op == Ops::Call)
+            .cloned()
+            .collect::<Vec<_>>();
+        if after.src[1..]
+            .iter()
+            .any(|u| !matches!(u.op, Ops::Call | Ops::After))
+        {
+            return Err("schedule requires STORE effects to be split into CALLs".into());
+        }
+        if let Some((old, _)) = writes.insert(
+            previous.id,
+            (after.id, calls.iter().map(|u| u.id).collect()),
+        ) {
+            if old != after.id {
+                return Err("sibling AFTERs supersede one storage state".into());
+            }
+        }
+        if nodes.insert(after.id, after.clone()).is_none() {
+            sequence.push(after.id);
+        }
+        if previous.op == Ops::After {
+            edges.insert((previous.id, after.id));
+        }
+        for dep in after.src[1..].iter().filter(|u| u.op == Ops::After) {
+            edges.insert((dep.id, after.id));
+        }
+        for call in calls {
+            if nodes.insert(call.id, call.clone()).is_none() {
+                sequence.push(call.id);
+            }
+            edges.insert((call.id, after.id));
+            if previous.op == Ops::After {
+                edges.insert((previous.id, call.id));
+            }
+            for argument in &call.src[1..] {
+                let source = state(argument.clone())?;
+                reads.push((after.id, call.id, source.id));
+                if source.op == Ops::After {
+                    edges.insert((source.id, call.id));
+                }
+            }
+            for dep in after.src[1..].iter().filter(|u| u.op == Ops::After) {
+                edges.insert((dep.id, call.id));
+            }
+        }
+    }
+    for (owner, reader, read_state) in reads {
+        if let Some((next, writers)) = writes.get(&read_state) {
+            if *next == owner {
+                continue;
+            }
+            for &writer in writers {
+                if reader != writer {
+                    edges.insert((reader, writer));
+                }
+            }
+        }
+    }
+    let mut children = HashMap::<u64, Vec<u64>>::new();
+    let mut degree = nodes
+        .keys()
+        .map(|&id| (id, 0usize))
+        .collect::<HashMap<_, _>>();
+    let mut edges = edges.into_iter().collect::<Vec<_>>();
+    edges.sort_unstable();
+    for (before, after) in edges {
+        if !nodes.contains_key(&before) || !nodes.contains_key(&after) {
+            return Err("missing schedule dependency".into());
+        }
+        children.entry(before).or_default().push(after);
+        *degree.get_mut(&after).unwrap() += 1;
+    }
+    let mut queue = sequence
+        .iter()
+        .filter(|id| degree[id] == 0)
+        .copied()
+        .collect::<VecDeque<_>>();
+    let mut calls = Vec::new();
+    let mut count = 0;
+    while let Some(id) = queue.pop_front() {
+        count += 1;
+        let node = &nodes[&id];
+        if node.op == Ops::Call {
+            calls.push(node.clone());
+        }
+        for child in children.get(&id).into_iter().flatten() {
+            let d = degree.get_mut(child).unwrap();
+            *d -= 1;
+            if *d == 0 {
+                queue.push_back(*child);
+            }
+        }
+    }
+    if count != nodes.len() {
+        return Err("cycle in storage read/write dependencies".into());
+    }
+    Ok(UOp::linear(calls))
+}
+```
+
+`src/lib.rs`を追記する。
+
+```rust
+// file="src/lib.rs" mode="append"
+
+pub mod effects;
+
+pub mod schedule;
+```
+
+`src/runtime.rs`を保存する。
+
+```rust
+// file="src/runtime.rs" mode="write"
+use crate::codegen::signature;
+use crate::{
+    Result, codegen::{rangeify, render},
+    schedule::{Schedule, create_schedule},
+    tensor::{Buffer, Tensor},
+    uop::{Arg, Ops, UOp, numel},
+};
+use std::collections::{HashMap, HashSet};
+#[derive(Clone, Debug)]
+pub struct InputSpec {
+    pub name: String,
+    pub shape: Vec<usize>,
+}
+/// Compiled signatures and lifetime plans are read-only.
+/// ```compile_fail
+/// fn alter(e: &mut chibigrad::Executable) { e.schedule.lifetimes.clear(); }
+/// ```
+pub struct Executable {
+    inputs: Vec<InputSpec>,
+    schedule: Schedule,
+    programs: Vec<UOp>,
+    native: Vec<crate::cpu::CpuProgram>,
+    input_nodes: Vec<UOp>,
+    captured: HashMap<u64, Buffer>,
+}
+pub fn compile_many(outputs: &[Tensor]) -> Result<Executable> {
+    unsafe { compile_many_with_transform(outputs, |linear| Ok(linear.clone())) }
+}
+/// # Safety
+/// The transform must preserve buffer bounds, lifetimes, control-flow scope and
+/// the packed signature. Native code generated from the result must be safe to execute.
+pub unsafe fn compile_many_with_transform(
+    outputs: &[Tensor],
+    transform: impl Fn(&UOp) -> Result<UOp>,
+) -> Result<Executable> {
+    let debug = std::env::var_os("CHIBI_DEBUG").is_some();
+    if debug {
+        eprintln!("schedule starts");
+    }
+    let schedule = create_schedule(
+        &outputs.iter().map(|x| x.uop.clone()).collect::<Vec<_>>(),
+    )?;
+    if debug {
+        eprintln!("schedule built {} kernels", schedule.kernels.len());
+    }
+    let produced: HashSet<_> = schedule.lifetimes.iter().map(|l| l.buffer.id).collect();
+    let mut input_nodes = vec![];
+    let mut inputs = vec![];
+    let mut captured = HashMap::new();
+    for u in &schedule.buffers {
+        if produced.contains(&u.id) {
+            continue;
+        }
+        let Arg::Buffer { name, shape, data } = &u.arg else {
+            return Err("invalid buffer argument".into());
+        };
+        if let Some(bits) = data {
+            captured
+                .insert(
+                    u.id,
+                    Buffer::new(
+                        shape.clone(),
+                        bits.iter().map(|&b| f32::from_bits(b)).collect(),
+                    )?,
+                );
+        } else {
+            input_nodes.push(u.clone());
+            inputs
+                .push(InputSpec {
+                    name: name.clone(),
+                    shape: shape.clone(),
+                });
+        }
+    }
+    let mut programs = vec![];
+    let mut native = vec![];
+    for (i, kernel) in schedule.kernels.iter().enumerate() {
+        if debug {
+            eprintln!("kernel {i} rangeify");
+        }
+        let linear = transform(&rangeify(&kernel.sink)?)?;
+        if debug {
+            eprintln!("kernel {i} render {} UOps", linear.src.len());
+        }
+        let entry = format!("chibi_kernel_{i}");
+        let source = render(&linear, &entry)?;
+        let stages = vec![
+            kernel.sink.clone(), linear, UOp::new(Ops::Source, vec![], Arg::Text(source
+            .clone())),
+        ];
+        let stages = {
+            if debug {
+                eprintln!("kernel {i} compile {} source bytes", source.len());
+            }
+            let compiled = unsafe { crate::cpu::CpuProgram::compile(&source, &entry) }?;
+            let mut stages = stages;
+            stages
+                .push(
+                    UOp::new(Ops::Binary, vec![], Arg::Bytes(compiled.object().to_vec())),
+                );
+            native.push(compiled);
+            stages
+        };
+        programs.push(UOp::new(Ops::Program, stages, Arg::Text(entry)));
+    }
+    Ok(Executable {
+        inputs,
+        schedule,
+        programs,
+        native,
+        input_nodes,
+        captured,
+    })
+}
+impl Executable {
+    pub fn inputs(&self) -> &[InputSpec] {
+        &self.inputs
+    }
+    pub fn programs(&self) -> &[UOp] {
+        &self.programs
+    }
+    pub fn schedule(&self) -> &Schedule {
+        &self.schedule
+    }
+    pub fn kernel_count(&self) -> usize {
+        self.programs.len()
+    }
+    pub fn sources(&self) -> Vec<&str> {
+        self.programs
+            .iter()
+            .filter_map(|p| p.src.iter().find(|s| s.op == Ops::Source))
+            .filter_map(|s| {
+                if let Arg::Text(text) = &s.arg { Some(text.as_str()) } else { None }
+            })
+            .collect()
+    }
+    pub fn run(
+        &self,
+        inputs: &[Buffer],
+        _vars: &HashMap<String, i64>,
+    ) -> Result<Vec<Buffer>> {
+        if inputs.len() != self.inputs.len() {
+            return Err(
+                format!(
+                    "expected {} input buffers, received {}", self.inputs.len(), inputs
+                    .len()
+                ),
+            );
+        }
+        for ((buffer, spec), node) in inputs
+            .iter()
+            .zip(&self.inputs)
+            .zip(&self.input_nodes)
+        {
+            let expected = node.shape()?;
+            if buffer.shape != expected || buffer.data.len() != numel(&expected) {
+                return Err(
+                    format!(
+                        "input {} expected {:?}, received {:?} with {} elements", spec
+                        .name, expected, buffer.shape, buffer.data.len()
+                    ),
+                );
+            }
+        }
+        let mut external: HashMap<u64, &Buffer> = self
+            .captured
+            .iter()
+            .map(|(&id, b)| (id, b))
+            .collect();
+        for (u, b) in self.input_nodes.iter().zip(inputs) {
+            external.insert(u.id, b);
+        }
+        let mut sizes = vec![];
+        for life in &self.schedule.lifetimes {
+            if sizes.len() <= life.slot {
+                sizes.resize(life.slot + 1, 0)
+            }
+            sizes[life.slot] = sizes[life.slot].max(life.elements);
+        }
+        let slots: Vec<Vec<f32>> = sizes.iter().map(|&n| vec![0.; n]).collect();
+        let mut slots = slots;
+        let locations: HashMap<_, _> = self
+            .schedule
+            .lifetimes
+            .iter()
+            .map(|l| (l.buffer.id, l.slot))
+            .collect();
+        {
+            for (i, program) in self.programs.iter().enumerate() {
+                let linear = &program.src[1];
+                let sig = signature(linear)?;
+                let count = sig.buffers.iter().map(|x| x.0).max().map_or(0, |x| x + 1);
+                let mut packed = vec![0u8; count * 8];
+                let mut validation_status = 0f32;
+                for (slot, u) in sig.buffers {
+                    let pointer = if matches!(
+                        & u.arg, Arg::Buffer { name, data : Some(_), .. } if name ==
+                        "__chibi_error"
+                    ) {
+                        &mut validation_status as *mut f32 as usize
+                    } else if let Some(b) = external.get(&u.id) {
+                        b.data.as_ptr() as usize
+                    } else {
+                        let loc = locations
+                            .get(&u.id)
+                            .ok_or("missing runtime allocation")?;
+                        slots[*loc].as_mut_ptr() as usize
+                    };
+                    packed[slot * 8..slot * 8 + 8]
+                        .copy_from_slice(&(pointer as u64).to_ne_bytes());
+                }
+                unsafe { self.native[i].run(&mut packed) }?;
+                if validation_status != 0. {
+                    return Err(
+                        "gather/scatter index must be finite, integral, and within bounds"
+                            .into(),
+                    );
+                }
+            }
+            self.schedule
+                .outputs
+                .iter()
+                .map(|u| {
+                    let slot = locations[&u.id];
+                    let shape = u.shape()?;
+                    Buffer::new(shape.clone(), slots[slot][..numel(&shape)].to_vec())
+                })
+                .collect()
+        }
+    }
+}
+```
+
+`src/schedule.rs`を保存する。
+
+```rust
+// file="src/schedule.rs" mode="write"
+use crate::{
+    Result,
+    uop::{Arg, Ops, UOp, is_binary, is_unary, numel},
+};
+use std::collections::{HashMap, HashSet};
+#[derive(Clone, Debug)]
+pub struct KernelPlan {
+    pub sink: UOp,
+    pub call: UOp,
+    pub reads: Vec<UOp>,
+    pub writes: Vec<UOp>,
 }
 #[derive(Clone, Debug)]
-pub struct KernelCall {
-	pub target: usize,
-	pub buffers: Vec<usize>,
-	pub scalar_words: usize,
-	pub after: Vec<usize>,
-	pub output_state: usize,
+pub struct Lifetime {
+    pub buffer: UOp,
+    pub first: usize,
+    pub last: usize,
+    pub slot: usize,
+    pub elements: usize,
 }
-
-pub fn signatures(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelSignature>> {
-	let scalar_words = graph.nodes.iter().try_fold(0usize, |n, node| {
-		n.checked_add(node.shape.len())
-			.ok_or("scalar signature overflow")
-	})?;
-	kernels
-		.iter()
-		.map(|kernel| {
-			if kernel.output >= graph.nodes.len() {
-				return Err("kernel output outside graph".into());
-			}
-			if matches!(graph.nodes[kernel.output].op, Op::Input { .. }) {
-				return Err("kernel cannot STORE into a read-only input".into());
-			}
-			let mut buffers = kernel.dependencies.clone();
-			buffers.push(kernel.output);
-			let unique: HashSet<_> = buffers.iter().copied().collect();
-			if unique.len() != buffers.len() || buffers.iter().any(|&id| id >= graph.nodes.len()) {
-				return Err("kernel signature has duplicate or unknown storage".into());
-			}
-			Ok(KernelSignature {
-				buffers,
-				scalar_words,
-				output: kernel.output,
-			})
-		})
-		.collect()
+#[derive(Clone, Debug)]
+pub struct Schedule {
+    pub dag: UOp,
+    pub linear: UOp,
+    pub kernels: Vec<KernelPlan>,
+    pub buffers: Vec<UOp>,
+    pub outputs: Vec<UOp>,
+    pub lifetimes: Vec<Lifetime>,
 }
-
-pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
-	let signatures = signatures(graph, kernels)?;
-	let mut produced = std::collections::HashMap::new();
-	let mut result = Vec::new();
-	for (index, signature) in signatures.iter().enumerate() {
-		let mut after = Vec::new();
-		for &id in &kernels[index].dependencies {
-			if !matches!(graph.nodes[id].op, Op::Input { .. }) {
-				after.push(
-					*produced
-						.get(&id)
-						.ok_or("producer must complete before consumer")?,
-				);
-			}
-		}
-		after.sort_unstable();
-		after.dedup();
-		let state = index + 1;
-		if produced.insert(signature.output, state).is_some() {
-			return Err("multiple producers for one output state".into());
-		}
-		result.push(KernelCall {
-			target: index,
-			buffers: signature.buffers.clone(),
-			scalar_words: signature.scalar_words,
-			after,
-			output_state: state,
-		});
-	}
-	verify_calls(graph, kernels, &result)?;
-	Ok(result)
+fn substitute(root: &UOp, replacements: &HashMap<u64, UOp>) -> UOp {
+    let mut memo: HashMap<u64, UOp> = HashMap::new();
+    for u in root.toposort() {
+        let v = replacements
+            .get(&u.id)
+            .cloned()
+            .unwrap_or_else(|| u.replace(u.src.iter().map(|s| memo[&s.id].clone()).collect()));
+        memo.insert(u.id, v);
+    }
+    memo[&root.id].clone()
 }
-
-fn tokens(body: &str) -> Result<Vec<String>> {
-	let bytes = body.as_bytes();
-	let mut result = Vec::new();
-	let mut i = 0;
-	while i < bytes.len() {
-		if bytes[i].is_ascii_whitespace() {
-			i += 1;
-			continue;
-		}
-		if bytes[i] == b'"' || bytes[i] == b'\'' || !bytes[i].is_ascii() {
-			return Err("unsupported token in generated kernel body".into());
-		}
-		if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.' {
-			let start = i;
-			i += 1;
-			while i < bytes.len()
-				&& (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.')
-			{
-				i += 1;
-			}
-			result.push(body[start..i].into());
-		} else {
-			result.push((bytes[i] as char).to_string());
-			i += 1;
-		}
-	}
-	Ok(result)
+pub(crate) fn tensor_toposort(root: &UOp) -> Vec<UOp> {
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+    let mut stack = vec![(root.clone(), false)];
+    while let Some((u, done)) = stack.pop() {
+        if done {
+            order.push(u);
+            continue;
+        }
+        if !seen.insert(u.id) {
+            continue;
+        }
+        stack.push((u.clone(), true));
+        let sources = if u.op == Ops::Call {
+            u.src.get(1..).unwrap_or_default().iter().collect()
+        } else {
+            u.ordered_sources()
+        };
+        for s in sources.into_iter().rev() {
+            stack.push((s.clone(), false));
+        }
+    }
+    order
 }
-
-fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
-	let at = |i: usize| code.get(i).map(String::as_str);
-	let assignment = at(end) == Some("=") && at(end + 1) != Some("=");
-	let compound = matches!(at(end), Some("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"))
-		&& at(end + 1) == Some("=");
-	let shift = matches!(
-		(at(end), at(end + 1), at(end + 2)),
-		(Some("<"), Some("<"), Some("=")) | (Some(">"), Some(">"), Some("="))
-	);
-	let suffix = matches!(
-		(at(end), at(end + 1)),
-		(Some("+"), Some("+")) | (Some("-"), Some("-"))
-	);
-	let prefix = position >= 2
-		&& matches!(
-			(at(position - 2), at(position - 1)),
-			(Some("+"), Some("+")) | (Some("-"), Some("-"))
-		);
-	(
-		assignment || compound || shift || suffix || prefix,
-		assignment,
-	)
-}
-
-pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
-	let code = tokens(body)?;
-	let mut scopes: Vec<(HashSet<String>, bool)> = vec![(HashSet::new(), false)];
-	let mut pending_for = false;
-	let mut stored = false;
-	let types = [
-		"float", "double", "size_t", "int32_t", "uint32_t", "uint64_t",
-	];
-	let fixed = [
-		"for",
-		"if",
-		"else",
-		"return",
-		"const",
-		"s",
-		"NAN",
-		"INFINITY",
-		"chibi_bits",
-		"chibi_max",
-		"expf",
-		"logf",
-		"sinf",
-		"cosf",
-		"sqrtf",
-		"exp2f",
-		"log2f",
-		"floorf",
-		"isfinite",
-	];
-	for (position, word) in code.iter().enumerate() {
-		if word == "for" {
-			if pending_for {
-				return Err("nested incomplete RANGE header".into());
-			}
-			scopes.push((HashSet::new(), false));
-			pending_for = true;
-		} else if word == "{" {
-			scopes.push((HashSet::new(), pending_for));
-			pending_for = false;
-		} else if word == "}" {
-			let (_, closes_for) = scopes.pop().ok_or("unmatched kernel scope")?;
-			if closes_for {
-				scopes.pop().ok_or("missing RANGE scope")?;
-			}
-			if scopes.is_empty() {
-				return Err("kernel scope escaped body".into());
-			}
-		}
-		if let Some(digits) = word
-			.strip_prefix('b')
-			.filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
-		{
-			let id: usize = digits.parse().map_err(|_| "storage ID overflow")?;
-			if !signature.buffers.contains(&id) {
-				return Err(format!("unbound storage PARAM b{id}"));
-			}
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("storage must be indexed".into());
-			}
-			let mut nesting = 1;
-			let mut end = position + 2;
-			while end < code.len() && nesting != 0 {
-				match code[end].as_str() {
-					"[" => nesting += 1,
-					"]" => nesting -= 1,
-					_ => {}
-				}
-				end += 1;
-			}
-			if nesting != 0 {
-				return Err("unclosed storage index".into());
-			}
-			let (write, assignment) = mutation(&code, position, end);
-			if write {
-				if id != signature.output {
-					return Err("STORE targets a non-output PARAM".into());
-				}
-				if !assignment {
-					return Err("output update reads uninitialized output".into());
-				}
-				stored = true;
-			} else if id == signature.output {
-				return Err("output LOAD is not allowed before its STORE".into());
-			}
-			continue;
-		}
-		if word == "s" {
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("scalar PARAM must use a literal slot".into());
-			}
-			let slot: usize = code
-				.get(position + 2)
-				.ok_or("missing scalar slot")?
-				.parse()
-				.map_err(|_| "nonliteral scalar slot")?;
-			if slot >= signature.scalar_words
-				|| code.get(position + 3).map(String::as_str) != Some("]")
-			{
-				return Err("unbound scalar PARAM".into());
-			}
-			if mutation(&code, position, position + 4).0 {
-				return Err("scalar PARAM is read-only".into());
-			}
-			continue;
-		}
-		let identifier = word.as_bytes()[0].is_ascii_alphabetic() || word.starts_with('_');
-		if !identifier || types.contains(&word.as_str()) || fixed.contains(&word.as_str()) {
-			continue;
-		}
-		let declaration = position > 0 && types.contains(&code[position - 1].as_str());
-		if declaration {
-			if !scopes.last_mut().unwrap().0.insert(word.clone()) {
-				return Err("duplicate local declaration".into());
-			}
-		} else if !scopes.iter().rev().any(|scope| scope.0.contains(word)) {
-			return Err(format!("free or closed RANGE/local {word}"));
-		}
-	}
-	if pending_for || scopes.len() != 1 {
-		return Err("unclosed RANGE or kernel scope".into());
-	}
-	if !stored {
-		return Err("kernel is missing its output STORE".into());
-	}
-	Ok(())
-}
-
-pub fn verify_calls(graph: &Graph, kernels: &[KernelBody], calls: &[KernelCall]) -> Result<()> {
-	let signatures = signatures(graph, kernels)?;
-	if calls.len() != kernels.len() {
-		return Err("kernel CALL count mismatch".into());
-	}
-	let mut initialized: HashSet<usize> = graph
-		.nodes
-		.iter()
-		.enumerate()
-		.filter_map(|(id, node)| matches!(node.op, Op::Input { .. }).then_some(id))
-		.collect();
-	let mut states = std::collections::HashMap::new();
-	for (index, (signature, call)) in signatures.iter().zip(calls).enumerate() {
-		if call.target != index
-			|| call.buffers != signature.buffers
-			|| call.scalar_words != signature.scalar_words
-		{
-			return Err("kernel signature and CALL arguments differ".into());
-		}
-		if call.output_state != index + 1 {
-			return Err("kernel output state mismatch".into());
-		}
-		if initialized.contains(&signature.output) {
-			return Err("duplicate producer STORE".into());
-		}
-		let mut required = Vec::new();
-		for &id in &kernels[index].dependencies {
-			if !initialized.contains(&id) {
-				return Err("LOAD before producer STORE".into());
-			}
-			if let Some(state) = states.get(&id) {
-				required.push(*state);
-			}
-		}
-		required.sort_unstable();
-		required.dedup();
-		if call.after != required {
-			return Err("CALL does not depend on the producer state".into());
-		}
-		verify_body(&kernels[index].body, signature)?;
-		initialized.insert(signature.output);
-		states.insert(signature.output, call.output_state);
-	}
-	Ok(())
+pub fn create_schedule(outputs: &[UOp]) -> Result<Schedule> {
+    if outputs.is_empty() {
+        return Err("compile requires at least one output".into());
+    }
+    let sink = UOp::sink(outputs.to_vec());
+    let topo = tensor_toposort(&sink);
+    for u in &topo {
+        if !matches!(u.op, Ops::Sink | Ops::Call) {
+            u.shape()?;
+        }
+    }
+    let mut users: HashMap<u64, usize> = HashMap::new();
+    for u in &topo {
+        for src in &u.src {
+            *users.entry(src.id).or_default() += 1;
+        }
+    }
+    let output_ids: HashSet<_> = outputs.iter().map(|u| u.id).collect();
+    let mut buffers: Vec<UOp> = topo
+        .iter()
+        .filter(|u| u.op == Ops::Buffer)
+        .cloned()
+        .collect();
+    let mut replacements = HashMap::new();
+    let mut producers: HashMap<u64, UOp> = HashMap::new();
+    let mut kernels = vec![];
+    fn add_kernel(
+        values: Vec<(UOp, UOp)>,
+        kernels: &mut Vec<KernelPlan>,
+        producers: &mut HashMap<u64, UOp>,
+    ) -> Result<()> {
+        let writes: Vec<_> = values.iter().map(|(b, _)| b.clone()).collect();
+        let stores = values
+            .into_iter()
+            .map(|(b, v)| UOp::new(Ops::Store, vec![b, v], Arg::None))
+            .collect();
+        let sink = UOp::sink(stores);
+        let write_ids: HashSet<_> = writes.iter().map(|b| b.id).collect();
+        let reads: Vec<_> = sink
+            .toposort()
+            .into_iter()
+            .filter(|u| u.op == Ops::Buffer && !write_ids.contains(&u.id))
+            .collect();
+        let mut args = vec![sink.clone()];
+        args.extend(reads.iter().map(|b| {
+            if let Some(call) = producers.get(&b.id) {
+                b.after(vec![call.clone()])
+            } else {
+                b.clone()
+            }
+        }));
+        args.extend(writes.clone());
+        let call = UOp::new(Ops::Call, args, Arg::Id(kernels.len()));
+        for b in &writes {
+            producers.insert(b.id, call.clone());
+        }
+        kernels.push(KernelPlan {
+            sink,
+            call,
+            reads,
+            writes,
+        });
+        Ok(())
+    }
+    for u in &topo {
+        let shared = users.get(&u.id).copied().unwrap_or(0) > 1
+            && (is_binary(u.op) || is_unary(u.op) || matches!(u.op, Ops::Reduce));
+        let nonempty_reduce = matches!(
+            & u.arg, Arg::Reduction { axes,.. } if ! axes.is_empty()
+        );
+        if (u.op == Ops::Stage || shared || nonempty_reduce) && !output_ids.contains(&u.id) {
+            let value = if u.op == Ops::Stage {
+                substitute(&u.src[0], &replacements)
+            } else {
+                substitute(u, &replacements)
+            };
+            let buffer = UOp::new(
+                Ops::Buffer,
+                vec![],
+                Arg::Buffer {
+                    name: format!("temp_{}", u.id),
+                    shape: u.shape()?,
+                    data: None,
+                },
+            );
+            add_kernel(vec![(buffer.clone(), value)], &mut kernels, &mut producers)?;
+            buffers.push(buffer.clone());
+            replacements.insert(u.id, buffer);
+        }
+    }
+    let mut output_buffers = vec![];
+    let mut final_values = vec![];
+    for (i, u) in outputs.iter().enumerate() {
+        let b = UOp::new(
+            Ops::Buffer,
+            vec![],
+            Arg::Buffer {
+                name: format!("output_{}_{}", sink.id, i),
+                shape: u.shape()?,
+                data: None,
+            },
+        );
+        buffers.push(b.clone());
+        output_buffers.push(b.clone());
+        final_values.push((b, substitute(u, &replacements)));
+    }
+    add_kernel(final_values, &mut kernels, &mut producers)?;
+    let dag = UOp::sink(
+        output_buffers
+            .iter()
+            .map(|b| b.after(vec![producers[&b.id].clone()]))
+            .collect(),
+    );
+    let linear = crate::effects::order_effects(&dag)?;
+    kernels = linear
+        .src
+        .iter()
+        .map(|call| {
+            kernels
+                .iter()
+                .find(|kernel| kernel.call == *call)
+                .cloned()
+                .ok_or("scheduled CALL missing kernel".to_string())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let output_set: HashSet<_> = output_buffers.iter().map(|b| b.id).collect();
+    let mut lives = vec![];
+    for b in buffers.iter().filter(|b| producers.contains_key(&b.id)) {
+        let first = kernels
+            .iter()
+            .position(|k| k.writes.contains(b))
+            .ok_or("missing buffer writer")?;
+        let last = if output_set.contains(&b.id) {
+            kernels.len()
+        } else {
+            kernels
+                .iter()
+                .rposition(|k| k.reads.contains(b))
+                .unwrap_or(first)
+        };
+        lives.push(Lifetime {
+            buffer: b.clone(),
+            first,
+            last,
+            slot: 0,
+            elements: numel(&b.shape()?),
+        });
+    }
+    lives.sort_by_key(|l| l.first);
+    for (i, life) in lives.iter_mut().enumerate() {
+        life.slot = i;
+    }
+    Ok(Schedule {
+        dag,
+        linear,
+        kernels,
+        buffers,
+        outputs: output_buffers,
+        lifetimes: lives,
+    })
 }
 ```
 
-
-`src/graph.rs` の同名関数全体を置き換えます。08章の非融合の選択を、consumer 数、STAGE、縮約に応じた選択へ変更します。
+`src/tensor.rs` の `impl Tensor` 内を追記する。
 
 ```rust
-// file=src/graph.rs mode=replace item="pub fn kernel_bodies("
-pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
-	graph.verify(outputs)?;
-	let order = graph.topology(outputs)?;
-	let mut users = vec![0; graph.nodes.len()];
-	for &id in &order {
-		for input in graph.nodes[id].op.sources() {
-			users[input] += 1
-		}
-	}
-	let material: HashSet<_> = order
-		.iter()
-		.copied()
-		.filter(|&id| {
-			outputs.contains(&id)
-				|| (!matches!(graph.nodes[id].op, Op::Const { .. }) && (!fuse || users[id] > 1))
-				|| matches!(
-					graph.nodes[id].op,
-					Op::Input { .. }
-						| Op::Stage { .. } | Op::Reduce { .. }
-						| Op::Gather { .. }
-						| Op::ScatterAdd { .. }
-				)
-		})
-		.collect();
-	let mut offsets = vec![];
-	let mut offset = 0;
-	for node in &graph.nodes {
-		offsets.push(offset);
-		offset += node.shape.len()
-	}
-	let mut emitter = Emitter {
-		g: graph,
-		offsets,
-		material,
-		current: 0,
-		serial: 0,
-	};
-	let mut kernels = vec![];
-	for id in order {
-		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
-			continue;
-		}
-		emitter.current = id;
-		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
-		let value = emitter.expr(id, "i", &mut body)?;
-		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
-		let dependencies = graph
-			.topology(&[id])?
-			.into_iter()
-			.filter(|&x| x != id && emitter.material.contains(&x))
-			.collect();
-		kernels.push(KernelBody {
-			output: id,
-			body,
-			dependencies,
-		});
-	}
-	crate::closure::calls(graph, &kernels)?;
-	Ok(kernels)
+// file="src/tensor.rs" mode="append" within="impl Tensor"
+    pub fn stage(&self) -> Self {
+        Self::from_uop(UOp::new(Ops::Stage, vec![self.uop.clone()], Arg::None))
+    }
+```
+
+`src/uir.rs` の `fn op`を置き換える。
+
+```rust
+// file="src/uir.rs" mode="replace" item="fn op"
+fn op(s: &str) -> Result<Ops> {
+    [
+        Ops::Invalid,
+        Ops::Const,
+        Ops::Buffer,
+        Ops::Alloc,
+        Ops::Param,
+        Ops::Cast,
+        Ops::Bitcast,
+        Ops::Shl,
+        Ops::Shr,
+        Ops::Xor,
+        Ops::Add,
+        Ops::Sub,
+        Ops::Mul,
+        Ops::Div,
+        Ops::Mod,
+        Ops::Neg,
+        Ops::Max,
+        Ops::Lt,
+        Ops::Eq,
+        Ops::And,
+        Ops::Or,
+        Ops::Where,
+        Ops::Stack,
+        Ops::Reduce,
+        Ops::Stage,
+        Ops::Range,
+        Ops::Index,
+        Ops::Load,
+        Ops::Store,
+        Ops::End,
+        Ops::After,
+        Ops::Call,
+        Ops::Sink,
+        Ops::Linear,
+        Ops::Program,
+        Ops::Source,
+        Ops::Binary,
+    ]
+    .into_iter()
+    .find(|o| format!("{o:?}") == s)
+    .ok_or("unknown operation".into())
 }
 ```
 
+`src/uop.rs` の `pub enum Ops`を置き換える。
 
 ```rust
-// file=tests/fusion_plan.rs mode=write
-use chibigrad::{Binary, Buffer, Graph, Reduce, Result, Unary};
-fn buffer(s: &[usize], d: &[f32]) -> Buffer {
-	Buffer::new(s.to_vec(), d.to_vec()).unwrap()
+// file="src/uop.rs" mode="replace" item="pub enum Ops"
+pub enum Ops {
+    Invalid,
+    Const,
+    Buffer,
+    Alloc,
+    Param,
+    Cast,
+    Bitcast,
+    Shl,
+    Shr,
+    Xor,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Neg,
+    Max,
+    Lt,
+    Eq,
+    And,
+    Or,
+    Where,
+    Stack,
+    Reduce,
+    Stage,
+    Range,
+    Index,
+    Load,
+    Store,
+    End,
+    After,
+    Call,
+    Sink,
+    Linear,
+    Program,
+    Source,
+    Binary,
 }
-fn compare(g: &Graph, outs: &[usize], inputs: &[Buffer]) -> Result<Vec<Buffer>> {
-	let actual = g.compile(outs)?.run(inputs)?;
-	let reference = g.interpret(outs, inputs)?;
-	for (a, b) in actual.iter().zip(reference) {
-		assert_eq!(a.shape, b.shape);
-		for (&x, &y) in a.data.iter().zip(&b.data) {
-			assert!(
-				x.is_nan() && y.is_nan() || (x - y).abs() <= 1e-5 + 1e-5 * y.abs(),
-				"{x} != {y}"
-			);
-		}
-	}
-	Ok(actual)
-}
+```
 
-#[test]
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
+`src/uop.rs` の `impl UOp` 内 の `fn infer_shape`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" within="impl UOp" item="fn infer_shape"
+    fn infer_shape(&self) -> Result<Vec<usize>> {
+        let err = || format!("invalid {:?} arguments", self.op);
+        let source = || self.src.first().ok_or_else(err)?.shape();
+        match (&self.op, &self.arg) {
+            (Ops::Invalid, Arg::Text(s)) => Err(s.clone()),
+            (Ops::Buffer, Arg::Buffer { shape, data, .. }) => {
+                checked_numel(shape)?;
+                if data.as_ref().is_some_and(|d| d.len() != numel(shape)) {
+                    return Err("buffer data length disagrees with shape".into());
+                }
+                Ok(shape.clone())
+            }
+            (Ops::Param, Arg::Slot { .. }) => Ok(vec![]),
+            (Ops::Param, Arg::ScalarParam { .. }) => Ok(vec![]),
+            (Ops::Const, _) | (Ops::Range, _) | (Ops::Load, _) => Ok(vec![]),
+            (Ops::Reduce, Arg::Reduction { op, axes, keepdim }) => {
+                let old = source()?;
+                if !matches!(op, Ops::Add | Ops::Max)
+                    || axes.iter().any(|&a| a >= old.len())
+                    || axes.iter().copied().collect::<HashSet<_>>().len() != axes.len()
+                {
+                    return Err("invalid reduction axes or operation".into());
+                }
+                Ok(old
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &n)| {
+                        if axes.contains(&i) {
+                            keepdim.then_some(1)
+                        } else {
+                            Some(n)
+                        }
+                    })
+                    .collect())
+            }
+            (Ops::Where, _) => {
+                if self.src.len() != 3 {
+                    return Err(err());
+                }
+                let s = broadcast_shape(&self.src[0].shape()?, &self.src[1].shape()?)?;
+                broadcast_shape(&s, &self.src[2].shape()?)
+            }
+            (op, _) if is_binary(*op) => {
+                if self.src.len() != 2 {
+                    return Err(err());
+                }
+                broadcast_shape(&self.src[0].shape()?, &self.src[1].shape()?)
+            }
+            (op, _) if is_unary(*op) || matches!(op, Ops::Stage | Ops::After) => source(),
+            _ => Err(err()),
+        }
+    }
+```
+
+`tests/schedule_effects.rs`を保存する。
+
+```rust
+// file="tests/schedule_effects.rs" mode="write"
+use chibigrad::{Arg, Ops, UOp, effects::order_effects};
+fn buffer(name: &str) -> UOp {
+    UOp::new(
+        Ops::Buffer,
+        vec![],
+        Arg::Buffer {
+            name: name.into(),
+            shape: vec![1],
+            data: None,
+        },
+    )
+}
+fn call(id: usize, args: Vec<UOp>) -> UOp {
+    let mut sources = vec![UOp::sink(vec![])];
+    sources.extend(args);
+    UOp::new(Ops::Call, sources, Arg::Id(id))
 }
 #[test]
-fn reductions_and_rebinding() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![4])?;
-	let w = g.input(1, vec![4])?;
-	let one = g.constant(1., vec![])?;
-	let p = g.binary(Binary::Mul, x, w)?;
-	let p = g.binary(Binary::Add, p, one)?;
-	let y = g.reduce(p, Reduce::Sum, vec![0], false)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[2., 3., 4., 5.])
-		])?[0]
-			.data,
-		[44.]
-	);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[1., 1., 1., 1.])
-		])?[0]
-			.data,
-		[14.]
-	);
-	Ok(())
+fn raw_and_war_dependencies_override_incidental_graph_order() {
+    let x = buffer("x");
+    let y = buffer("y");
+    let write = call(0, vec![x.clone()]);
+    let new_x = x.after(vec![write.clone()]);
+    let read = call(1, vec![new_x.clone(), y.clone()]);
+    let new_y = y.after(vec![read.clone()]);
+    assert_eq!(
+        order_effects(&UOp::sink(vec![new_y, new_x])).unwrap().src,
+        [write.clone(), read]
+    );
+    let old_reader = call(2, vec![x.clone(), y.clone()]);
+    let read_done = y.after(vec![old_reader.clone()]);
+    let overwritten = x.after(vec![write.clone()]);
+    assert_eq!(
+        order_effects(&UOp::sink(vec![overwritten, read_done]))
+            .unwrap()
+            .src,
+        [old_reader, write]
+    );
 }
 #[test]
-fn dynamic_metadata() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let two = g.constant(2., vec![])?;
-	let y = g.binary(Binary::Mul, x, two)?;
-	let p = g.compile(&[y])?;
-	let shapes = vec![vec![2], vec![], vec![2]];
-	assert_eq!(
-		p.run_with_shapes(&[buffer(&[4], &[3., 4., 9., 9.])], &shapes)?[0].data,
-		[6., 8.]
-	);
-	assert!(
-		chibigrad::Plan::compile_specialized(&g, &[y])?
-			.run_with_shapes(&[buffer(&[4], &[3., 4., 9., 9.])], &shapes)
-			.is_err()
-	);
-	Ok(())
+fn sibling_writes_and_derived_cycles_are_rejected() {
+    let x = buffer("x");
+    let a = call(10, vec![x.clone()]);
+    let b = call(11, vec![x.clone()]);
+    assert!(
+        order_effects(&UOp::sink(vec![
+            x.after(vec![a.clone()]),
+            x.after(vec![b.clone()])
+        ]))
+        .is_err()
+    );
+    let first = x.after(vec![a]);
+    let second = first.after(vec![b]);
+    assert!(order_effects(&UOp::sink(vec![second])).is_err());
 }
+```
+
+`tests/schedule_stages.rs`を保存する。
+
+```rust
+// file="tests/schedule_stages.rs" mode="write"
+use chibigrad::Tensor;
 #[test]
-fn compiled_plan_metadata_is_sealed() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![2])?;
-	let y = g.unary(Unary::Neg, x)?;
-	let mut plan = g.compile(&[y])?;
-	plan.graph.nodes[x].shape = vec![1];
-	assert!(plan.run(&[buffer(&[1], &[1.])]).is_err());
-	Ok(())
-}
-```
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 2. 単一消費先の ADD と MUL の境界を materialize しない。
-<!-- todo:09-002 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
-pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
-	graph.verify(outputs)?;
-	let order = graph.topology(outputs)?;
-	let mut users = vec![0; graph.nodes.len()];
-	for &id in &order {
-		for input in graph.nodes[id].op.sources() {
-			users[input] += 1
-		}
-	}
-	let material: HashSet<_> = order
-		.iter()
-		.copied()
-		.filter(|&id| {
-			outputs.contains(&id)
-				|| (!matches!(graph.nodes[id].op, Op::Const { .. }) && (!fuse || users[id] > 1))
-				|| matches!(
-					graph.nodes[id].op,
-					Op::Input { .. }
-						| Op::Stage { .. } | Op::Reduce { .. }
-						| Op::Gather { .. }
-						| Op::ScatterAdd { .. }
-				)
-		})
-		.collect();
-	let mut offsets = vec![];
-	let mut offset = 0;
-	for node in &graph.nodes {
-		offsets.push(offset);
-		offset += node.shape.len()
-	}
-	let mut emitter = Emitter {
-		g: graph,
-		offsets,
-		material,
-		current: 0,
-		serial: 0,
-	};
-	let mut kernels = vec![];
-	for id in order {
-		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
-			continue;
-		}
-		emitter.current = id;
-		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
-		let value = emitter.expr(id, "i", &mut body)?;
-		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
-		let dependencies = graph
-			.topology(&[id])?
-			.into_iter()
-			.filter(|&x| x != id && emitter.material.contains(&x))
-			.collect();
-		kernels.push(KernelBody {
-			output: id,
-			body,
-			dependencies,
-		});
-	}
-	crate::closure::calls(graph, &kernels)?;
-	Ok(kernels)
+fn stages_run_in_dependency_order() {
+    let x = Tensor::from_slice(&[1., 2.], &[2]);
+    let a = x.add(&Tensor::scalar(1.)).stage();
+    let y = a.mul(&a).stage().add(&a);
+    let p = y.compile().unwrap();
+    assert!(p.kernel_count() >= 3);
+    assert_eq!(
+        p.run(&[], &std::collections::HashMap::new()).unwrap()[0].data,
+        [6., 12.]
+    );
 }
 ```
 
 ```sh
-# check
-cargo test --quiet --test fusion_plan
+# check step=09.01
+cargo test --offline
 ```
 
-## 3. lower で同じ出力座標を producer へ伝える。
-<!-- todo:09-003 -->
+複数のカーネルを依存順に実行し、RAW・WAR の順序、競合書込みと循環の拒否を確認する。
 
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
+## 09.02 使い終えた一時領域を再利用する
 
-`src/graph.rs` の `fn expr(` の `Op::Binary` 分岐を次の全体で置き換えます。
+各バッファの最初と最後の利用カーネルを記録する。寿命が重ならず容量が足りるスロットだけを再利用する。出力の寿命は実行終了まで延ばす。
+
+`src/schedule.rs` の `pub fn create_schedule`を置き換える。
 
 ```rust
-// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Binary"
-			Op::Binary { op, a, b } => {
-				let ai = self.broadcast_index(a, id, index);
-				let bi = self.broadcast_index(b, id, index);
-				let av = self.expr(a, &ai, code)?;
-				let bv = self.expr(b, &bi, code)?;
-				match op {
-					Binary::Max => format!("chibi_max({av},{bv})"),
-					_ => format!(
-						"(({av}) {} ({bv}))",
-						match op {
-							Binary::Add => "+",
-							Binary::Sub => "-",
-							Binary::Mul => "*",
-							Binary::Div => "/",
-							Binary::Lt => "<",
-							Binary::Eq => "==",
-							_ => unreachable!(),
-						}
-					),
-				}
-			}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 4. `(x+1)*2` を単一 kernel で `[4,6,8]` にする。
-<!-- todo:09-004 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
+// file="src/schedule.rs" mode="replace" item="pub fn create_schedule"
+pub fn create_schedule(outputs: &[UOp]) -> Result<Schedule> {
+    if outputs.is_empty() {
+        return Err("compile requires at least one output".into());
+    }
+    let sink = UOp::sink(outputs.to_vec());
+    let topo = tensor_toposort(&sink);
+    for u in &topo {
+        if !matches!(u.op, Ops::Sink | Ops::Call) {
+            u.shape()?;
+        }
+    }
+    let mut users: HashMap<u64, usize> = HashMap::new();
+    for u in &topo {
+        for src in &u.src {
+            *users.entry(src.id).or_default() += 1;
+        }
+    }
+    let output_ids: HashSet<_> = outputs.iter().map(|u| u.id).collect();
+    let mut buffers: Vec<UOp> = topo
+        .iter()
+        .filter(|u| u.op == Ops::Buffer)
+        .cloned()
+        .collect();
+    let mut replacements = HashMap::new();
+    let mut producers: HashMap<u64, UOp> = HashMap::new();
+    let mut kernels = vec![];
+    fn add_kernel(
+        values: Vec<(UOp, UOp)>,
+        kernels: &mut Vec<KernelPlan>,
+        producers: &mut HashMap<u64, UOp>,
+    ) -> Result<()> {
+        let writes: Vec<_> = values.iter().map(|(b, _)| b.clone()).collect();
+        let stores = values
+            .into_iter()
+            .map(|(b, v)| UOp::new(Ops::Store, vec![b, v], Arg::None))
+            .collect();
+        let sink = UOp::sink(stores);
+        let write_ids: HashSet<_> = writes.iter().map(|b| b.id).collect();
+        let reads: Vec<_> = sink
+            .toposort()
+            .into_iter()
+            .filter(|u| u.op == Ops::Buffer && !write_ids.contains(&u.id))
+            .collect();
+        let mut args = vec![sink.clone()];
+        args.extend(reads.iter().map(|b| {
+            if let Some(call) = producers.get(&b.id) {
+                b.after(vec![call.clone()])
+            } else {
+                b.clone()
+            }
+        }));
+        args.extend(writes.clone());
+        let call = UOp::new(Ops::Call, args, Arg::Id(kernels.len()));
+        for b in &writes {
+            producers.insert(b.id, call.clone());
+        }
+        kernels.push(KernelPlan {
+            sink,
+            call,
+            reads,
+            writes,
+        });
+        Ok(())
+    }
+    for u in &topo {
+        let shared = users.get(&u.id).copied().unwrap_or(0) > 1
+            && (is_binary(u.op) || is_unary(u.op) || matches!(u.op, Ops::Reduce));
+        let nonempty_reduce = matches!(
+            & u.arg, Arg::Reduction { axes,.. } if ! axes.is_empty()
+        );
+        if (u.op == Ops::Stage || shared || nonempty_reduce) && !output_ids.contains(&u.id) {
+            let value = if u.op == Ops::Stage {
+                substitute(&u.src[0], &replacements)
+            } else {
+                substitute(u, &replacements)
+            };
+            let buffer = UOp::new(
+                Ops::Buffer,
+                vec![],
+                Arg::Buffer {
+                    name: format!("temp_{}", u.id),
+                    shape: u.shape()?,
+                    data: None,
+                },
+            );
+            add_kernel(vec![(buffer.clone(), value)], &mut kernels, &mut producers)?;
+            buffers.push(buffer.clone());
+            replacements.insert(u.id, buffer);
+        }
+    }
+    let mut output_buffers = vec![];
+    let mut final_values = vec![];
+    for (i, u) in outputs.iter().enumerate() {
+        let b = UOp::new(
+            Ops::Buffer,
+            vec![],
+            Arg::Buffer {
+                name: format!("output_{}_{}", sink.id, i),
+                shape: u.shape()?,
+                data: None,
+            },
+        );
+        buffers.push(b.clone());
+        output_buffers.push(b.clone());
+        final_values.push((b, substitute(u, &replacements)));
+    }
+    add_kernel(final_values, &mut kernels, &mut producers)?;
+    let dag = UOp::sink(
+        output_buffers
+            .iter()
+            .map(|b| b.after(vec![producers[&b.id].clone()]))
+            .collect(),
+    );
+    let linear = crate::effects::order_effects(&dag)?;
+    kernels = linear
+        .src
+        .iter()
+        .map(|call| {
+            kernels
+                .iter()
+                .find(|kernel| kernel.call == *call)
+                .cloned()
+                .ok_or("scheduled CALL missing kernel".to_string())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let output_set: HashSet<_> = output_buffers.iter().map(|b| b.id).collect();
+    let mut lives = vec![];
+    for b in buffers.iter().filter(|b| producers.contains_key(&b.id)) {
+        let first = kernels
+            .iter()
+            .position(|k| k.writes.contains(b))
+            .ok_or("missing buffer writer")?;
+        let last = if output_set.contains(&b.id) {
+            kernels.len()
+        } else {
+            kernels
+                .iter()
+                .rposition(|k| k.reads.contains(b))
+                .unwrap_or(first)
+        };
+        lives.push(Lifetime {
+            buffer: b.clone(),
+            first,
+            last,
+            slot: 0,
+            elements: numel(&b.shape()?),
+        });
+    }
+    lives.sort_by_key(|l| l.first);
+    let mut slots: Vec<(usize, usize)> = vec![];
+    for life in &mut lives {
+        if let Some((i, slot)) = slots
+            .iter_mut()
+            .enumerate()
+            .find(|(_, s)| s.0 < life.first && s.1 >= life.elements)
+        {
+            life.slot = i;
+            slot.0 = life.last;
+        } else {
+            life.slot = slots.len();
+            slots.push((life.last, life.elements));
+        }
+    }
+    Ok(Schedule {
+        dag,
+        linear,
+        kernels,
+        buffers,
+        outputs: output_buffers,
+        lifetimes: lives,
+    })
 }
 ```
 
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 5. 前章の非融合経路とも出力を比較する。
-<!-- todo:09-005 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
+`tests/schedule.rs`を保存する。
 
 ```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 6. `sum(x*w+1)` の reduction 座標を要素演算へ伝える。
-<!-- todo:09-006 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
-			Op::Reduce {
-				op,
-				x,
-				axes,
-				keepdim,
-			} => {
-				let target = self.name();
-				let k = self.name();
-				code.push_str(&format!(
-					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
-					if op == Reduce::Sum {
-						"0.0f"
-					} else {
-						"-INFINITY"
-					},
-					self.product(x, axes.iter().copied())
-				));
-				let mut out_axis = 0;
-				let c = (0..self.g.shape(x).len())
-					.map(|a| {
-						if let Some(ra) = axes.iter().position(|&v| v == a) {
-							format!(
-								"(({k} / {}) % {})",
-								self.product(x, axes[ra + 1..].iter().copied()),
-								self.dim(x, a)
-							)
-						} else {
-							let oa = if keepdim {
-								a
-							} else {
-								let v = out_axis;
-								out_axis += 1;
-								v
-							};
-							self.coord(id, index, oa)
-						}
-					})
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				let value = self.expr(x, &xi, code)?;
-				code.push_str(&format!(
-					"{target} = {};\n}}\n",
-					if op == Reduce::Sum {
-						format!("{target} + ({value})")
-					} else {
-						format!("chibi_max({target},{value})")
-					}
-				));
-				return Ok(target);
-			}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 7. reduction の外側出力と内側 k のスコープを区別する。
-<!-- todo:09-007 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
-			Op::Reduce {
-				op,
-				x,
-				axes,
-				keepdim,
-			} => {
-				let target = self.name();
-				let k = self.name();
-				code.push_str(&format!(
-					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
-					if op == Reduce::Sum {
-						"0.0f"
-					} else {
-						"-INFINITY"
-					},
-					self.product(x, axes.iter().copied())
-				));
-				let mut out_axis = 0;
-				let c = (0..self.g.shape(x).len())
-					.map(|a| {
-						if let Some(ra) = axes.iter().position(|&v| v == a) {
-							format!(
-								"(({k} / {}) % {})",
-								self.product(x, axes[ra + 1..].iter().copied()),
-								self.dim(x, a)
-							)
-						} else {
-							let oa = if keepdim {
-								a
-							} else {
-								let v = out_axis;
-								out_axis += 1;
-								v
-							};
-							self.coord(id, index, oa)
-						}
-					})
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				let value = self.expr(x, &xi, code)?;
-				code.push_str(&format!(
-					"{target} = {};\n}}\n",
-					if op == Reduce::Sum {
-						format!("{target} + ({value})")
-					} else {
-						format!("chibi_max({target},{value})")
-					}
-				));
-				return Ok(target);
-			}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 8. LOAD、MUL、ADD、accumulator 更新を同じ body に作る。
-<!-- todo:09-008 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `fn expr(` の `Op::Reduce` 分岐を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="fn expr(" arm="Op::Reduce"
-			Op::Reduce {
-				op,
-				x,
-				axes,
-				keepdim,
-			} => {
-				let target = self.name();
-				let k = self.name();
-				code.push_str(&format!(
-					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
-					if op == Reduce::Sum {
-						"0.0f"
-					} else {
-						"-INFINITY"
-					},
-					self.product(x, axes.iter().copied())
-				));
-				let mut out_axis = 0;
-				let c = (0..self.g.shape(x).len())
-					.map(|a| {
-						if let Some(ra) = axes.iter().position(|&v| v == a) {
-							format!(
-								"(({k} / {}) % {})",
-								self.product(x, axes[ra + 1..].iter().copied()),
-								self.dim(x, a)
-							)
-						} else {
-							let oa = if keepdim {
-								a
-							} else {
-								let v = out_axis;
-								out_axis += 1;
-								v
-							};
-							self.coord(id, index, oa)
-						}
-					})
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				let value = self.expr(x, &xi, code)?;
-				code.push_str(&format!(
-					"{target} = {};\n}}\n",
-					if op == Reduce::Sum {
-						format!("{target} + ({value})")
-					} else {
-						format!("chibi_max({target},{value})")
-					}
-				));
-				return Ok(target);
-			}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 9. `x=[1,2,3,4]`, `w=[2,3,4,5]` の結果を `44` にする。
-<!-- todo:09-009 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
-fn reductions_and_rebinding() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![4])?;
-	let w = g.input(1, vec![4])?;
-	let one = g.constant(1., vec![])?;
-	let p = g.binary(Binary::Mul, x, w)?;
-	let p = g.binary(Binary::Add, p, one)?;
-	let y = g.reduce(p, Reduce::Sum, vec![0], false)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[2., 3., 4., 5.])
-		])?[0]
-			.data,
-		[44.]
-	);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[1., 1., 1., 1.])
-		])?[0]
-			.data,
-		[14.]
-	);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 10. 入力側の一時配列がなく、一つの reduction kernel になることを確認する。
-<!-- todo:09-010 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
-fn reductions_and_rebinding() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![4])?;
-	let w = g.input(1, vec![4])?;
-	let one = g.constant(1., vec![])?;
-	let p = g.binary(Binary::Mul, x, w)?;
-	let p = g.binary(Binary::Add, p, one)?;
-	let y = g.reduce(p, Reduce::Sum, vec![0], false)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[2., 3., 4., 5.])
-		])?[0]
-			.data,
-		[44.]
-	);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[1., 1., 1., 1.])
-		])?[0]
-			.data,
-		[14.]
-	);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 11. 明示 STAGE を非融合境界として扱う。
-<!-- todo:09-011 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
-pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
-	graph.verify(outputs)?;
-	let order = graph.topology(outputs)?;
-	let mut users = vec![0; graph.nodes.len()];
-	for &id in &order {
-		for input in graph.nodes[id].op.sources() {
-			users[input] += 1
-		}
-	}
-	let material: HashSet<_> = order
-		.iter()
-		.copied()
-		.filter(|&id| {
-			outputs.contains(&id)
-				|| (!matches!(graph.nodes[id].op, Op::Const { .. }) && (!fuse || users[id] > 1))
-				|| matches!(
-					graph.nodes[id].op,
-					Op::Input { .. }
-						| Op::Stage { .. } | Op::Reduce { .. }
-						| Op::Gather { .. }
-						| Op::ScatterAdd { .. }
-				)
-		})
-		.collect();
-	let mut offsets = vec![];
-	let mut offset = 0;
-	for node in &graph.nodes {
-		offsets.push(offset);
-		offset += node.shape.len()
-	}
-	let mut emitter = Emitter {
-		g: graph,
-		offsets,
-		material,
-		current: 0,
-		serial: 0,
-	};
-	let mut kernels = vec![];
-	for id in order {
-		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
-			continue;
-		}
-		emitter.current = id;
-		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
-		let value = emitter.expr(id, "i", &mut body)?;
-		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
-		let dependencies = graph
-			.topology(&[id])?
-			.into_iter()
-			.filter(|&x| x != id && emitter.material.contains(&x))
-			.collect();
-		kernels.push(KernelBody {
-			output: id,
-			body,
-			dependencies,
-		});
-	}
-	crate::closure::calls(graph, &kernels)?;
-	Ok(kernels)
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 12. producer の出力を ALLOC、STORE、AFTER に変える。
-<!-- todo:09-012 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `pub fn kernel_bodies(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn kernel_bodies("
-pub fn kernel_bodies(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<Vec<KernelBody>> {
-	graph.verify(outputs)?;
-	let order = graph.topology(outputs)?;
-	let mut users = vec![0; graph.nodes.len()];
-	for &id in &order {
-		for input in graph.nodes[id].op.sources() {
-			users[input] += 1
-		}
-	}
-	let material: HashSet<_> = order
-		.iter()
-		.copied()
-		.filter(|&id| {
-			outputs.contains(&id)
-				|| (!matches!(graph.nodes[id].op, Op::Const { .. }) && (!fuse || users[id] > 1))
-				|| matches!(
-					graph.nodes[id].op,
-					Op::Input { .. }
-						| Op::Stage { .. } | Op::Reduce { .. }
-						| Op::Gather { .. }
-						| Op::ScatterAdd { .. }
-				)
-		})
-		.collect();
-	let mut offsets = vec![];
-	let mut offset = 0;
-	for node in &graph.nodes {
-		offsets.push(offset);
-		offset += node.shape.len()
-	}
-	let mut emitter = Emitter {
-		g: graph,
-		offsets,
-		material,
-		current: 0,
-		serial: 0,
-	};
-	let mut kernels = vec![];
-	for id in order {
-		if !emitter.material.contains(&id) || matches!(graph.nodes[id].op, Op::Input { .. }) {
-			continue;
-		}
-		emitter.current = id;
-		let mut body = format!("for (size_t i=0; i<{}; ++i) {{\n", emitter.count(id));
-		let value = emitter.expr(id, "i", &mut body)?;
-		body.push_str(&format!("b{id}[i]={value};\n}}\n"));
-		let dependencies = graph
-			.topology(&[id])?
-			.into_iter()
-			.filter(|&x| x != id && emitter.material.contains(&x))
-			.collect();
-		kernels.push(KernelBody {
-			output: id,
-			body,
-			dependencies,
-		});
-	}
-	crate::closure::calls(graph, &kernels)?;
-	Ok(kernels)
-}
-```
-
-`src/runtime.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
-	pub fn run_with_shapes(
-		&self,
-		inputs: &[Buffer],
-		node_shapes: &[Vec<usize>],
-	) -> Result<Vec<Buffer>> {
-		self.verify_seal()?;
-		if self.specialized
-			&& self
-				.graph
-				.nodes
-				.iter()
-				.map(|n| &n.shape)
-				.ne(node_shapes.iter())
-		{
-			return Err("specialized plan shape mismatch".into());
-		}
-		let mut graph = self.graph.clone();
-		if node_shapes.len() != graph.nodes.len() {
-			return Err("node shape table length mismatch".into());
-		}
-		for (node, shape) in graph.nodes.iter_mut().zip(node_shapes) {
-			if node.shape.len() != shape.len() {
-				return Err("dynamic rank change is unsupported".into());
-			}
-			elements(shape)?;
-			node.shape = shape.clone();
-		}
-		graph.verify(&self.outputs)?;
-		if inputs.len() != self.abi.inputs.len() {
-			return Err("input count mismatch".into());
-		}
-		for node in &graph.nodes {
-			if let crate::Op::Input { slot } = node.op {
-				let input = inputs.get(slot).ok_or("missing input")?;
-				if input.shape.len() != node.shape.len()
-					|| input.data.len() < elements(&node.shape)?
-				{
-					return Err("input capacity or rank mismatch".into());
-				}
-			}
-		}
-		graph.validate_indices(inputs, &self.outputs)?;
-		let mut storage = graph
-			.nodes
-			.iter()
-			.enumerate()
-			.map(|(id, node)| {
-				if self.allocations.contains(&id) {
-					Buffer::zeros(node.shape.clone())
-				} else {
-					Ok(Buffer {
-						shape: node.shape.clone(),
-						data: vec![],
-					})
-				}
-			})
-			.collect::<Result<Vec<_>>>()?;
-		let mut pointers = storage
-			.iter_mut()
-			.map(|b| b.data.as_mut_ptr().cast::<c_void>())
-			.collect::<Vec<_>>();
-		for (id, node) in graph.nodes.iter().enumerate() {
-			if let crate::Op::Input { slot } = node.op {
-				pointers[id] = inputs[slot].data.as_ptr().cast_mut().cast();
-			}
-		}
-		let dims = node_shapes
-			.iter()
-			.flatten()
-			.map(|&n| n as u64)
-			.collect::<Vec<_>>();
-		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
-		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
-		let status = unsafe { entry(pointers.as_ptr(), dims.as_ptr()) };
-		if status != 0 {
-			return Err(format!(
-				"generated kernel rejected input or allocation: {status}"
-			));
-		}
-		self.outputs
-			.iter()
-			.map(|&id| {
-				if let crate::Op::Input { slot } = graph.nodes[id].op {
-					Buffer::new(
-						graph.nodes[id].shape.clone(),
-						inputs[slot].data[..elements(&graph.nodes[id].shape)?].to_vec(),
-					)
-				} else {
-					Ok(storage[id].clone())
-				}
-			})
-			.collect()
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 13. consumer が新しい PARAM から保存済みの値を読むようにする。
-<!-- todo:09-013 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `fn expr(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="fn expr("
-	fn expr(&mut self, id: usize, index: &str, code: &mut String) -> Result<String> {
-		if id != self.current && self.material.contains(&id)
-			|| matches!(self.g.nodes[id].op, Op::Input { .. })
-		{
-			return Ok(format!("b{id}[{index}]"));
-		}
-		let index_name = self.name();
-		code.push_str(&format!("size_t {index_name}={index};\n"));
-		let index = index_name.as_str();
-		let op = self.g.nodes[id].op.clone();
-		let value = match op {
-			Op::Input { .. } => unreachable!(),
-			Op::Const { bits } => format!("chibi_bits({bits}u)"),
-			Op::Unary { op, x } => {
-				let a = self.expr(x, index, code)?;
-				match op {
-					Unary::Neg => format!("(-({a}))"),
-					Unary::Recip => format!("(1.0f / ({a}))"),
-					other => format!(
-						"{}({a})",
-						match other {
-							Unary::Exp => "expf",
-							Unary::Log => "logf",
-							Unary::Sin => "sinf",
-							Unary::Cos => "cosf",
-							Unary::Sqrt => "sqrtf",
-							Unary::Exp2 => "exp2f",
-							Unary::Log2 => "log2f",
-							_ => unreachable!(),
-						}
-					),
-				}
-			}
-			Op::Binary { op, a, b } => {
-				let ai = self.broadcast_index(a, id, index);
-				let bi = self.broadcast_index(b, id, index);
-				let av = self.expr(a, &ai, code)?;
-				let bv = self.expr(b, &bi, code)?;
-				match op {
-					Binary::Max => format!("chibi_max({av},{bv})"),
-					_ => format!(
-						"(({av}) {} ({bv}))",
-						match op {
-							Binary::Add => "+",
-							Binary::Sub => "-",
-							Binary::Mul => "*",
-							Binary::Div => "/",
-							Binary::Lt => "<",
-							Binary::Eq => "==",
-							_ => unreachable!(),
-						}
-					),
-				}
-			}
-			Op::Where { cond, yes, no } => {
-				let ci = self.broadcast_index(cond, id, index);
-				let yi = self.broadcast_index(yes, id, index);
-				let ni = self.broadcast_index(no, id, index);
-				let cv = self.expr(cond, &ci, code)?;
-				let target = self.name();
-				code.push_str(&format!("float {target};\nif ({cv} != 0.0f) {{\n"));
-				let y = self.expr(yes, &yi, code)?;
-				code.push_str(&format!("{target} = {y};\n}} else {{\n"));
-				let n = self.expr(no, &ni, code)?;
-				code.push_str(&format!("{target} = {n};\n}}\n"));
-				return Ok(target);
-			}
-			Op::Reshape { x } | Op::Stage { x } | Op::StopGradient { x } => {
-				return self.expr(x, index, code);
-			}
-			Op::Expand { x } => {
-				let xi = self.broadcast_index(x, id, index);
-				return self.expr(x, &xi, code);
-			}
-			Op::Reduce {
-				op,
-				x,
-				axes,
-				keepdim,
-			} => {
-				let target = self.name();
-				let k = self.name();
-				code.push_str(&format!(
-					"float {target} = {};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
-					if op == Reduce::Sum {
-						"0.0f"
-					} else {
-						"-INFINITY"
-					},
-					self.product(x, axes.iter().copied())
-				));
-				let mut out_axis = 0;
-				let c = (0..self.g.shape(x).len())
-					.map(|a| {
-						if let Some(ra) = axes.iter().position(|&v| v == a) {
-							format!(
-								"(({k} / {}) % {})",
-								self.product(x, axes[ra + 1..].iter().copied()),
-								self.dim(x, a)
-							)
-						} else {
-							let oa = if keepdim {
-								a
-							} else {
-								let v = out_axis;
-								out_axis += 1;
-								v
-							};
-							self.coord(id, index, oa)
-						}
-					})
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				let value = self.expr(x, &xi, code)?;
-				code.push_str(&format!(
-					"{target} = {};\n}}\n",
-					if op == Reduce::Sum {
-						format!("{target} + ({value})")
-					} else {
-						format!("chibi_max({target},{value})")
-					}
-				));
-				return Ok(target);
-			}
-			Op::Permute { x, axes } => {
-				let mut c = vec![String::new(); axes.len()];
-				for (a, &old) in axes.iter().enumerate() {
-					c[old] = self.coord(id, index, a)
-				}
-				let xi = self.flatten(x, &c);
-				return self.expr(x, &xi, code);
-			}
-			Op::Shrink { x, ranges } => {
-				let c = ranges
-					.iter()
-					.enumerate()
-					.map(|(a, &(lo, _))| format!("({}+{lo})", self.coord(id, index, a)))
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				return self.expr(x, &xi, code);
-			}
-			Op::Pad { x, pads } => {
-				let c = (0..pads.len())
-					.map(|a| self.coord(id, index, a))
-					.collect::<Vec<_>>();
-				let checks = pads
-					.iter()
-					.enumerate()
-					.map(|(a, &(lo, _))| {
-						format!("({} >= {lo} && {} - {lo} < {})", c[a], c[a], self.dim(x, a))
-					})
-					.collect::<Vec<_>>();
-				let target = self.name();
-				code.push_str(&format!(
-					"float {target}=0.0f;\nif ({}) {{\n",
-					if checks.is_empty() {
-						"1".into()
-					} else {
-						checks.join(" && ")
-					}
-				));
-				let xi = self.flatten(
-					x,
-					&c.iter()
-						.zip(&pads)
-						.map(|(c, &(lo, _))| format!("({c}-{lo})"))
-						.collect::<Vec<_>>(),
-				);
-				let value = self.expr(x, &xi, code)?;
-				code.push_str(&format!("{target}={value};\n}}\n"));
-				return Ok(target);
-			}
-			Op::Flip { x, axes } => {
-				let c = (0..self.g.shape(x).len())
-					.map(|a| {
-						let c = self.coord(id, index, a);
-						if axes.contains(&a) {
-							format!("({}-1-{c})", self.dim(x, a))
-						} else {
-							c
-						}
-					})
-					.collect::<Vec<_>>();
-				let xi = self.flatten(x, &c);
-				return self.expr(x, &xi, code);
-			}
-			Op::Stack { xs, axis } => {
-				let target = self.name();
-				code.push_str(&format!("float {target}=0.0f;\n"));
-				let select = self.coord(id, index, axis);
-				for (j, x) in xs.into_iter().enumerate() {
-					code.push_str(&format!(
-						"{}if ({select} == {j}) {{\n",
-						if j == 0 { "" } else { "else " }
-					));
-					let c = (0..self.g.shape(id).len())
-						.filter(|&a| a != axis)
-						.map(|a| self.coord(id, index, a))
-						.collect::<Vec<_>>();
-					let xi = self.flatten(x, &c);
-					let value = self.expr(x, &xi, code)?;
-					code.push_str(&format!("{target}={value};\n}}\n"));
-				}
-				return Ok(target);
-			}
-			Op::Gather { x, indices, axis } => {
-				let ii = self.coord(id, index, axis);
-				let iv = self.expr(indices, &ii, code)?;
-				let ivar = self.name();
-				code.push_str(&format!("float {ivar}={iv};\nif (!isfinite({ivar}) || {ivar}<0.0f || floorf({ivar})!={ivar} || (double){ivar}>=(double){}) return 2;\n",self.dim(x,axis)));
-				let mut c = (0..self.g.shape(x).len())
-					.map(|a| self.coord(id, index, a))
-					.collect::<Vec<_>>();
-				c[axis] = format!("(size_t){ivar}");
-				let xi = self.flatten(x, &c);
-				return self.expr(x, &xi, code);
-			}
-			Op::ScatterAdd {
-				base,
-				indices,
-				updates,
-				axis,
-			} => {
-				let bv = self.expr(base, index, code)?;
-				let target = self.name();
-				let k = self.name();
-				code.push_str(&format!(
-					"float {target}={bv};\nfor (size_t {k}=0; {k}<{}; ++{k}) {{\n",
-					self.count(indices)
-				));
-				let iv = self.expr(indices, &k, code)?;
-				let ivar = self.name();
-				code.push_str(&format!("float {ivar}={iv};\nif (!isfinite({ivar}) || {ivar}<0.0f || floorf({ivar})!={ivar} || (double){ivar}>=(double){}) return 2;\nif ((size_t){ivar} == {}) {{\n",self.dim(id,axis),self.coord(id,index,axis)));
-				let mut c = (0..self.g.shape(id).len())
-					.map(|a| self.coord(id, index, a))
-					.collect::<Vec<_>>();
-				c[axis] = k;
-				let ui = self.flatten(updates, &c);
-				let uv = self.expr(updates, &ui, code)?;
-				code.push_str(&format!("{target}+={uv};\n}}\n}}\n"));
-				return Ok(target);
-			}
-		};
-		let variable = self.name();
-		code.push_str(&format!("float {variable} = {value};\n"));
-		Ok(variable)
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 14. `(STAGE(x+1))*2` を二 kernel で `[4,6,8]` にする。
-<!-- todo:09-014 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 15. `t=x+1; y=t*2; z=t+3` を三 kernel で実行する。
-<!-- todo:09-015 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 16. 各 body の外部 storage と scalar を PARAM に正規化する。
-<!-- todo:09-016 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `pub fn render(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn render("
-pub fn render(graph: &Graph, outputs: &[NodeId], fuse: bool) -> Result<(String, Abi, usize)> {
-	let kernels = kernel_bodies(graph, outputs, fuse)?;
-	let source = crate::native::render_entry(C_HELPERS, &graph.topology(outputs)?, &kernels);
-	let mut inputs = vec![];
-	for node in &graph.nodes {
-		if let Op::Input { slot } = node.op {
-			let binding = Binding {
-				slot,
-				shape: node.shape.clone(),
-			};
-			if !inputs.contains(&binding) {
-				inputs.push(binding)
-			}
-		}
-	}
-	inputs.sort_by_key(|b| b.slot);
-	let outputs = outputs
-		.iter()
-		.map(|&id| Binding {
-			slot: id,
-			shape: graph.shape(id).to_vec(),
-		})
-		.collect();
-	Ok((source, Abi { inputs, outputs }, kernels.len()))
-}
-```
-
-`src/closure.rs` の `pub fn signatures(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn signatures("
-pub fn signatures(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelSignature>> {
-	let scalar_words = graph.nodes.iter().try_fold(0usize, |n, node| {
-		n.checked_add(node.shape.len())
-			.ok_or("scalar signature overflow")
-	})?;
-	kernels
-		.iter()
-		.map(|kernel| {
-			if kernel.output >= graph.nodes.len() {
-				return Err("kernel output outside graph".into());
-			}
-			if matches!(graph.nodes[kernel.output].op, Op::Input { .. }) {
-				return Err("kernel cannot STORE into a read-only input".into());
-			}
-			let mut buffers = kernel.dependencies.clone();
-			buffers.push(kernel.output);
-			let unique: HashSet<_> = buffers.iter().copied().collect();
-			if unique.len() != buffers.len() || buffers.iter().any(|&id| id >= graph.nodes.len()) {
-				return Err("kernel signature has duplicate or unknown storage".into());
-			}
-			Ok(KernelSignature {
-				buffers,
-				scalar_words,
-				output: kernel.output,
-			})
-		})
-		.collect()
-}
-```
-
-`src/closure.rs` の `pub fn calls(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn calls("
-pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
-	let signatures = signatures(graph, kernels)?;
-	let mut produced = std::collections::HashMap::new();
-	let mut result = Vec::new();
-	for (index, signature) in signatures.iter().enumerate() {
-		let mut after = Vec::new();
-		for &id in &kernels[index].dependencies {
-			if !matches!(graph.nodes[id].op, Op::Input { .. }) {
-				after.push(
-					*produced
-						.get(&id)
-						.ok_or("producer must complete before consumer")?,
-				);
-			}
-		}
-		after.sort_unstable();
-		after.dedup();
-		let state = index + 1;
-		if produced.insert(signature.output, state).is_some() {
-			return Err("multiple producers for one output state".into());
-		}
-		result.push(KernelCall {
-			target: index,
-			buffers: signature.buffers.clone(),
-			scalar_words: signature.scalar_words,
-			after,
-			output_state: state,
-		});
-	}
-	verify_calls(graph, kernels, &result)?;
-	Ok(result)
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 17. kernel の署名、CALL 引数、出力 state を照合する verifier を追加する。
-<!-- todo:09-017 -->
-
-次のテストは署名・CALL・stateの不一致を個別に作り、生成コードの実行も確認します。
-
-```rust
-// file=tests/closed_kernels.rs mode=write
-use chibigrad::{
-	Binary, Buffer, Graph, Result,
-	closure::{calls, signatures, verify_body, verify_calls},
-};
-
-fn fixture() -> Result<(Graph, Vec<chibigrad::native::KernelBody>)> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let _outside = g.input(1, vec![3])?;
-	let one = g.constant(1., vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let stage = g.stage(a)?;
-	let out = g.binary(Binary::Mul, stage, one)?;
-	let bodies = chibigrad::graph::kernel_bodies(&g, &[out], true)?;
-	Ok((g, bodies))
-}
-
+// file="tests/schedule.rs" mode="write"
+use chibigrad::{Tensor, compile_many};
 #[test]
-fn signature_call_and_output_state_are_checked() -> Result<()> {
-	let (graph, bodies) = fixture()?;
-	let schedule = calls(&graph, &bodies)?;
-	verify_calls(&graph, &bodies, &schedule)?;
-	let mut wrong = schedule.clone();
-	wrong[0].buffers.swap(0, 1);
-	assert!(
-		verify_calls(&graph, &bodies, &wrong)
-			.unwrap_err()
-			.contains("arguments")
-	);
-	let mut wrong = schedule.clone();
-	wrong[0].scalar_words += 1;
-	assert!(verify_calls(&graph, &bodies, &wrong).is_err());
-	let mut wrong = schedule.clone();
-	wrong[0].output_state += 1;
-	assert!(
-		verify_calls(&graph, &bodies, &wrong)
-			.unwrap_err()
-			.contains("output state")
-	);
-	let mut wrong = schedule.clone();
-	wrong[1].after.clear();
-	assert!(
-		verify_calls(&graph, &bodies, &wrong)
-			.unwrap_err()
-			.contains("producer state")
-	);
-	let reversed = bodies.into_iter().rev().collect::<Vec<_>>();
-	assert!(calls(&graph, &reversed).is_err());
-	Ok(())
-}
-
-#[test]
-fn unbound_storage_scalar_range_and_missing_store_are_rejected() -> Result<()> {
-	let (graph, bodies) = fixture()?;
-	let signature = &signatures(&graph, &bodies)?[0];
-	let body = &bodies[0].body;
-	assert!(
-		verify_body(&(body.clone() + "float v999=b1[0];\n"), signature)
-			.unwrap_err()
-			.contains("unbound storage")
-	);
-	let scalar = format!("float v999=s[{}];\n", signature.scalar_words);
-	assert!(
-		verify_body(&(body.clone() + &scalar), signature)
-			.unwrap_err()
-			.contains("scalar")
-	);
-	let closed_range = format!("b{}[0]=i;\n", signature.output);
-	assert!(
-		verify_body(&(body.clone() + &closed_range), signature)
-			.unwrap_err()
-			.contains("RANGE")
-	);
-	assert!(
-		verify_body("for(size_t i=0;i<1;++i){float v0=0.0f;}\n", signature)
-			.unwrap_err()
-			.contains("STORE")
-	);
-	let wrong_store = body.replace(&format!("b{}[i]", signature.output), "b0[i]");
-	assert!(
-		verify_body(&wrong_store, signature)
-			.unwrap_err()
-			.contains("non-output")
-	);
-	for update in ["b0[i]++", "--b0[i]", "b0[i]<<=1", "s[0]=0", "s[0]++"] {
-		let forged = format!(
-			"for(size_t i=0;i<s[0];++i){{{update};b{}[i]=b0[i];}}",
-			signature.output
-		);
-		assert!(
-			verify_body(&forged, signature).is_err(),
-			"accepted {update}"
-		);
-	}
-	let uninitialized = format!(
-		"for(size_t i=0;i<s[0];++i){{b{0}[i]=b{0}[i]+b0[i];}}",
-		signature.output
-	);
-	assert!(
-		verify_body(&uninitialized, signature)
-			.unwrap_err()
-			.contains("output LOAD")
-	);
-	Ok(())
-}
-
-#[test]
-fn closing_checks_preserve_native_execution_and_original_graph() -> Result<()> {
-	let (graph, bodies) = fixture()?;
-	let original = format!("{graph:?}");
-	let output = bodies.last().unwrap().output;
-	let plan = graph.compile(&[output])?;
-	let input = [
-		Buffer::new(vec![3], vec![1., 2., 3.])?,
-		Buffer::new(vec![3], vec![9., 9., 9.])?,
-	];
-	assert_eq!(plan.run(&input)?[0].data, vec![2., 3., 4.]);
-	assert_eq!(plan.run(&input)?[0].data, vec![2., 3., 4.]);
-	assert_eq!(format!("{graph:?}"), original);
-	Ok(())
-}
-```
-
-`src/closure.rs` の `pub fn verify_calls(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn verify_calls("
-pub fn verify_calls(graph: &Graph, kernels: &[KernelBody], calls: &[KernelCall]) -> Result<()> {
-	let signatures = signatures(graph, kernels)?;
-	if calls.len() != kernels.len() {
-		return Err("kernel CALL count mismatch".into());
-	}
-	let mut initialized: HashSet<usize> = graph
-		.nodes
-		.iter()
-		.enumerate()
-		.filter_map(|(id, node)| matches!(node.op, Op::Input { .. }).then_some(id))
-		.collect();
-	let mut states = std::collections::HashMap::new();
-	for (index, (signature, call)) in signatures.iter().zip(calls).enumerate() {
-		if call.target != index
-			|| call.buffers != signature.buffers
-			|| call.scalar_words != signature.scalar_words
-		{
-			return Err("kernel signature and CALL arguments differ".into());
-		}
-		if call.output_state != index + 1 {
-			return Err("kernel output state mismatch".into());
-		}
-		if initialized.contains(&signature.output) {
-			return Err("duplicate producer STORE".into());
-		}
-		let mut required = Vec::new();
-		for &id in &kernels[index].dependencies {
-			if !initialized.contains(&id) {
-				return Err("LOAD before producer STORE".into());
-			}
-			if let Some(state) = states.get(&id) {
-				required.push(*state);
-			}
-		}
-		required.sort_unstable();
-		required.dedup();
-		if call.after != required {
-			return Err("CALL does not depend on the producer state".into());
-		}
-		verify_body(&kernels[index].body, signature)?;
-		initialized.insert(signature.output);
-		states.insert(signature.output, call.output_state);
-	}
-	Ok(())
+fn schedule_stages_shared_values_and_reuses_dead_slots() {
+    let x = Tensor::from_slice(&[1., 2., 3., 4.], &[4]);
+    let a = x.add(&Tensor::scalar(1.)).stage();
+    let b = a.mul(&Tensor::scalar(2.)).stage();
+    let c = b.add(&Tensor::scalar(3.)).stage();
+    let d = c.mul(&Tensor::scalar(4.)).stage();
+    let plan = compile_many(&[d]).unwrap();
+    assert!(plan.kernel_count() >= 4);
+    let lives = &plan.schedule().lifetimes;
+    assert!(lives.iter().enumerate().any(|(i, a)| {
+        lives[i + 1..]
+            .iter()
+            .any(|b| a.slot == b.slot && a.last < b.first)
+    }));
+    assert_eq!(
+        plan.run(&[], &std::collections::HashMap::new()).unwrap()[0].data,
+        [28., 36., 44., 52.]
+    );
 }
 ```
 
 ```sh
-# check
-cargo test --test closed_kernels
+# check step=09.02
+cargo test --offline
 ```
 
-
-`tests/fusion_plan.rs` の `dynamic_metadata` で、この経路の値または拒否条件を確認する。
-
-```sh
-# check
-cargo test --quiet --test fusion_plan dynamic_metadata
-```
-
-## 18. producer と consumer の辺から実行順を作り、循環なら拒否する。
-<!-- todo:09-018 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/graph.rs` の `pub fn topology(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn topology("
-	pub fn topology(&self, outputs: &[NodeId]) -> Result<Vec<NodeId>> {
-		fn visit(g: &Graph, id: usize, marks: &mut [u8], order: &mut Vec<usize>) -> Result<()> {
-			g.get(id)?;
-			if marks[id] == 1 {
-				return Err("graph cycle".into());
-			}
-			if marks[id] == 2 {
-				return Ok(());
-			}
-			marks[id] = 1;
-			for child in g.nodes[id].op.sources() {
-				visit(g, child, marks, order)?
-			}
-			marks[id] = 2;
-			order.push(id);
-			Ok(())
-		}
-		if outputs.is_empty() {
-			return Err("no outputs".into());
-		}
-		let mut marks = vec![0; self.nodes.len()];
-		let mut order = vec![];
-		for &id in outputs {
-			visit(self, id, &mut marks, &mut order)?
-		}
-		Ok(order)
-	}
-```
-
-`src/closure.rs` の `pub fn calls(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn calls("
-pub fn calls(graph: &Graph, kernels: &[KernelBody]) -> Result<Vec<KernelCall>> {
-	let signatures = signatures(graph, kernels)?;
-	let mut produced = std::collections::HashMap::new();
-	let mut result = Vec::new();
-	for (index, signature) in signatures.iter().enumerate() {
-		let mut after = Vec::new();
-		for &id in &kernels[index].dependencies {
-			if !matches!(graph.nodes[id].op, Op::Input { .. }) {
-				after.push(
-					*produced
-						.get(&id)
-						.ok_or("producer must complete before consumer")?,
-				);
-			}
-		}
-		after.sort_unstable();
-		after.dedup();
-		let state = index + 1;
-		if produced.insert(signature.output, state).is_some() {
-			return Err("multiple producers for one output state".into());
-		}
-		result.push(KernelCall {
-			target: index,
-			buffers: signature.buffers.clone(),
-			scalar_words: signature.scalar_words,
-			after,
-			output_state: state,
-		});
-	}
-	verify_calls(graph, kernels, &result)?;
-	Ok(result)
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 19. 既存の CPU compile と run を Plan の kernel 列へ接続する。
-<!-- todo:09-019 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/runtime.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/runtime.rs" mode="replace" item="pub fn run_with_shapes("
-	pub fn run_with_shapes(
-		&self,
-		inputs: &[Buffer],
-		node_shapes: &[Vec<usize>],
-	) -> Result<Vec<Buffer>> {
-		self.verify_seal()?;
-		if self.specialized
-			&& self
-				.graph
-				.nodes
-				.iter()
-				.map(|n| &n.shape)
-				.ne(node_shapes.iter())
-		{
-			return Err("specialized plan shape mismatch".into());
-		}
-		let mut graph = self.graph.clone();
-		if node_shapes.len() != graph.nodes.len() {
-			return Err("node shape table length mismatch".into());
-		}
-		for (node, shape) in graph.nodes.iter_mut().zip(node_shapes) {
-			if node.shape.len() != shape.len() {
-				return Err("dynamic rank change is unsupported".into());
-			}
-			elements(shape)?;
-			node.shape = shape.clone();
-		}
-		graph.verify(&self.outputs)?;
-		if inputs.len() != self.abi.inputs.len() {
-			return Err("input count mismatch".into());
-		}
-		for node in &graph.nodes {
-			if let crate::Op::Input { slot } = node.op {
-				let input = inputs.get(slot).ok_or("missing input")?;
-				if input.shape.len() != node.shape.len()
-					|| input.data.len() < elements(&node.shape)?
-				{
-					return Err("input capacity or rank mismatch".into());
-				}
-			}
-		}
-		graph.validate_indices(inputs, &self.outputs)?;
-		let mut storage = graph
-			.nodes
-			.iter()
-			.enumerate()
-			.map(|(id, node)| {
-				if self.allocations.contains(&id) {
-					Buffer::zeros(node.shape.clone())
-				} else {
-					Ok(Buffer {
-						shape: node.shape.clone(),
-						data: vec![],
-					})
-				}
-			})
-			.collect::<Result<Vec<_>>>()?;
-		let mut pointers = storage
-			.iter_mut()
-			.map(|b| b.data.as_mut_ptr().cast::<c_void>())
-			.collect::<Vec<_>>();
-		for (id, node) in graph.nodes.iter().enumerate() {
-			if let crate::Op::Input { slot } = node.op {
-				pointers[id] = inputs[slot].data.as_ptr().cast_mut().cast();
-			}
-		}
-		let dims = node_shapes
-			.iter()
-			.flatten()
-			.map(|&n| n as u64)
-			.collect::<Vec<_>>();
-		type Entry = unsafe extern "C" fn(*const *mut c_void, *const u64) -> i32;
-		let entry: Entry = unsafe { std::mem::transmute(self.library.symbol()) };
-		let status = unsafe { entry(pointers.as_ptr(), dims.as_ptr()) };
-		if status != 0 {
-			return Err(format!(
-				"generated kernel rejected input or allocation: {status}"
-			));
-		}
-		self.outputs
-			.iter()
-			.map(|&id| {
-				if let crate::Op::Input { slot } = graph.nodes[id].op {
-					Buffer::new(
-						graph.nodes[id].shape.clone(),
-						inputs[slot].data[..elements(&graph.nodes[id].shape)?].to_vec(),
-					)
-				} else {
-					Ok(storage[id].clone())
-				}
-			})
-			.collect()
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 20. 同じ Plan に新しい重みを渡して、二回目の出力を確認する。
-<!-- todo:09-020 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
-fn reductions_and_rebinding() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![4])?;
-	let w = g.input(1, vec![4])?;
-	let one = g.constant(1., vec![])?;
-	let p = g.binary(Binary::Mul, x, w)?;
-	let p = g.binary(Binary::Add, p, one)?;
-	let y = g.reduce(p, Reduce::Sum, vec![0], false)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[2., 3., 4., 5.])
-		])?[0]
-			.data,
-		[44.]
-	);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[1., 1., 1., 1.])
-		])?[0]
-			.data,
-		[14.]
-	);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 21. body の未束縛 PARAM、自由 RANGE、STORE 先の漏れを拒否する。
-<!-- todo:09-021 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/closure.rs` の `pub fn verify_body(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn verify_body("
-pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
-	let code = tokens(body)?;
-	let mut scopes: Vec<(HashSet<String>, bool)> = vec![(HashSet::new(), false)];
-	let mut pending_for = false;
-	let mut stored = false;
-	let types = [
-		"float", "double", "size_t", "int32_t", "uint32_t", "uint64_t",
-	];
-	let fixed = [
-		"for",
-		"if",
-		"else",
-		"return",
-		"const",
-		"s",
-		"NAN",
-		"INFINITY",
-		"chibi_bits",
-		"chibi_max",
-		"expf",
-		"logf",
-		"sinf",
-		"cosf",
-		"sqrtf",
-		"exp2f",
-		"log2f",
-		"floorf",
-		"isfinite",
-	];
-	for (position, word) in code.iter().enumerate() {
-		if word == "for" {
-			if pending_for {
-				return Err("nested incomplete RANGE header".into());
-			}
-			scopes.push((HashSet::new(), false));
-			pending_for = true;
-		} else if word == "{" {
-			scopes.push((HashSet::new(), pending_for));
-			pending_for = false;
-		} else if word == "}" {
-			let (_, closes_for) = scopes.pop().ok_or("unmatched kernel scope")?;
-			if closes_for {
-				scopes.pop().ok_or("missing RANGE scope")?;
-			}
-			if scopes.is_empty() {
-				return Err("kernel scope escaped body".into());
-			}
-		}
-		if let Some(digits) = word
-			.strip_prefix('b')
-			.filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
-		{
-			let id: usize = digits.parse().map_err(|_| "storage ID overflow")?;
-			if !signature.buffers.contains(&id) {
-				return Err(format!("unbound storage PARAM b{id}"));
-			}
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("storage must be indexed".into());
-			}
-			let mut nesting = 1;
-			let mut end = position + 2;
-			while end < code.len() && nesting != 0 {
-				match code[end].as_str() {
-					"[" => nesting += 1,
-					"]" => nesting -= 1,
-					_ => {}
-				}
-				end += 1;
-			}
-			if nesting != 0 {
-				return Err("unclosed storage index".into());
-			}
-			let (write, assignment) = mutation(&code, position, end);
-			if write {
-				if id != signature.output {
-					return Err("STORE targets a non-output PARAM".into());
-				}
-				if !assignment {
-					return Err("output update reads uninitialized output".into());
-				}
-				stored = true;
-			} else if id == signature.output {
-				return Err("output LOAD is not allowed before its STORE".into());
-			}
-			continue;
-		}
-		if word == "s" {
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("scalar PARAM must use a literal slot".into());
-			}
-			let slot: usize = code
-				.get(position + 2)
-				.ok_or("missing scalar slot")?
-				.parse()
-				.map_err(|_| "nonliteral scalar slot")?;
-			if slot >= signature.scalar_words
-				|| code.get(position + 3).map(String::as_str) != Some("]")
-			{
-				return Err("unbound scalar PARAM".into());
-			}
-			if mutation(&code, position, position + 4).0 {
-				return Err("scalar PARAM is read-only".into());
-			}
-			continue;
-		}
-		let identifier = word.as_bytes()[0].is_ascii_alphabetic() || word.starts_with('_');
-		if !identifier || types.contains(&word.as_str()) || fixed.contains(&word.as_str()) {
-			continue;
-		}
-		let declaration = position > 0 && types.contains(&code[position - 1].as_str());
-		if declaration {
-			if !scopes.last_mut().unwrap().0.insert(word.clone()) {
-				return Err("duplicate local declaration".into());
-			}
-		} else if !scopes.iter().rev().any(|scope| scope.0.contains(word)) {
-			return Err(format!("free or closed RANGE/local {word}"));
-		}
-	}
-	if pending_for || scopes.len() != 1 {
-		return Err("unclosed RANGE or kernel scope".into());
-	}
-	if !stored {
-		return Err("kernel is missing its output STORE".into());
-	}
-	Ok(())
-}
-```
-
-`src/closure.rs` の `fn mutation(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="fn mutation("
-fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
-	let at = |i: usize| code.get(i).map(String::as_str);
-	let assignment = at(end) == Some("=") && at(end + 1) != Some("=");
-	let compound = matches!(at(end), Some("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"))
-		&& at(end + 1) == Some("=");
-	let shift = matches!(
-		(at(end), at(end + 1), at(end + 2)),
-		(Some("<"), Some("<"), Some("=")) | (Some(">"), Some(">"), Some("="))
-	);
-	let suffix = matches!(
-		(at(end), at(end + 1)),
-		(Some("+"), Some("+")) | (Some("-"), Some("-"))
-	);
-	let prefix = position >= 2
-		&& matches!(
-			(at(position - 2), at(position - 1)),
-			(Some("+"), Some("+")) | (Some("-"), Some("-"))
-		);
-	(
-		assignment || compound || shift || suffix || prefix,
-		assignment,
-	)
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 22. 外側 kernel の NodeId が body に直接残った例を拒否する。
-<!-- todo:09-022 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`src/closure.rs` の `pub fn verify_body(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="pub fn verify_body("
-pub fn verify_body(body: &str, signature: &KernelSignature) -> Result<()> {
-	let code = tokens(body)?;
-	let mut scopes: Vec<(HashSet<String>, bool)> = vec![(HashSet::new(), false)];
-	let mut pending_for = false;
-	let mut stored = false;
-	let types = [
-		"float", "double", "size_t", "int32_t", "uint32_t", "uint64_t",
-	];
-	let fixed = [
-		"for",
-		"if",
-		"else",
-		"return",
-		"const",
-		"s",
-		"NAN",
-		"INFINITY",
-		"chibi_bits",
-		"chibi_max",
-		"expf",
-		"logf",
-		"sinf",
-		"cosf",
-		"sqrtf",
-		"exp2f",
-		"log2f",
-		"floorf",
-		"isfinite",
-	];
-	for (position, word) in code.iter().enumerate() {
-		if word == "for" {
-			if pending_for {
-				return Err("nested incomplete RANGE header".into());
-			}
-			scopes.push((HashSet::new(), false));
-			pending_for = true;
-		} else if word == "{" {
-			scopes.push((HashSet::new(), pending_for));
-			pending_for = false;
-		} else if word == "}" {
-			let (_, closes_for) = scopes.pop().ok_or("unmatched kernel scope")?;
-			if closes_for {
-				scopes.pop().ok_or("missing RANGE scope")?;
-			}
-			if scopes.is_empty() {
-				return Err("kernel scope escaped body".into());
-			}
-		}
-		if let Some(digits) = word
-			.strip_prefix('b')
-			.filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
-		{
-			let id: usize = digits.parse().map_err(|_| "storage ID overflow")?;
-			if !signature.buffers.contains(&id) {
-				return Err(format!("unbound storage PARAM b{id}"));
-			}
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("storage must be indexed".into());
-			}
-			let mut nesting = 1;
-			let mut end = position + 2;
-			while end < code.len() && nesting != 0 {
-				match code[end].as_str() {
-					"[" => nesting += 1,
-					"]" => nesting -= 1,
-					_ => {}
-				}
-				end += 1;
-			}
-			if nesting != 0 {
-				return Err("unclosed storage index".into());
-			}
-			let (write, assignment) = mutation(&code, position, end);
-			if write {
-				if id != signature.output {
-					return Err("STORE targets a non-output PARAM".into());
-				}
-				if !assignment {
-					return Err("output update reads uninitialized output".into());
-				}
-				stored = true;
-			} else if id == signature.output {
-				return Err("output LOAD is not allowed before its STORE".into());
-			}
-			continue;
-		}
-		if word == "s" {
-			if code.get(position + 1).map(String::as_str) != Some("[") {
-				return Err("scalar PARAM must use a literal slot".into());
-			}
-			let slot: usize = code
-				.get(position + 2)
-				.ok_or("missing scalar slot")?
-				.parse()
-				.map_err(|_| "nonliteral scalar slot")?;
-			if slot >= signature.scalar_words
-				|| code.get(position + 3).map(String::as_str) != Some("]")
-			{
-				return Err("unbound scalar PARAM".into());
-			}
-			if mutation(&code, position, position + 4).0 {
-				return Err("scalar PARAM is read-only".into());
-			}
-			continue;
-		}
-		let identifier = word.as_bytes()[0].is_ascii_alphabetic() || word.starts_with('_');
-		if !identifier || types.contains(&word.as_str()) || fixed.contains(&word.as_str()) {
-			continue;
-		}
-		let declaration = position > 0 && types.contains(&code[position - 1].as_str());
-		if declaration {
-			if !scopes.last_mut().unwrap().0.insert(word.clone()) {
-				return Err("duplicate local declaration".into());
-			}
-		} else if !scopes.iter().rev().any(|scope| scope.0.contains(word)) {
-			return Err(format!("free or closed RANGE/local {word}"));
-		}
-	}
-	if pending_for || scopes.len() != 1 {
-		return Err("unclosed RANGE or kernel scope".into());
-	}
-	if !stored {
-		return Err("kernel is missing its output STORE".into());
-	}
-	Ok(())
-}
-```
-
-`src/closure.rs` の `fn mutation(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/closure.rs" mode="replace" item="fn mutation("
-fn mutation(code: &[String], position: usize, end: usize) -> (bool, bool) {
-	let at = |i: usize| code.get(i).map(String::as_str);
-	let assignment = at(end) == Some("=") && at(end + 1) != Some("=");
-	let compound = matches!(at(end), Some("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"))
-		&& at(end + 1) == Some("=");
-	let shift = matches!(
-		(at(end), at(end + 1), at(end + 2)),
-		(Some("<"), Some("<"), Some("=")) | (Some(">"), Some(">"), Some("="))
-	);
-	let suffix = matches!(
-		(at(end), at(end + 1)),
-		(Some("+"), Some("+")) | (Some("-"), Some("-"))
-	);
-	let prefix = position >= 2
-		&& matches!(
-			(at(position - 2), at(position - 1)),
-			(Some("+"), Some("+")) | (Some("-"), Some("-"))
-		);
-	(
-		assignment || compound || shift || suffix || prefix,
-		assignment,
-	)
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 23. 二つの違う座標で同じ producer を使う fixture を実行する。
-<!-- todo:09-023 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 24. 元グラフを run の前後で dump し、構造が変わらないことを確認する。
-<!-- todo:09-024 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 25. 入力の長さと dtype が署名と違う場合、実行開始前に拒否する。
-<!-- todo:09-025 -->
-
-`tests/fusion_plan.rs` の `dynamic_metadata` で、この経路の値または拒否条件を確認する。
-
-`src/graph.rs` の `pub fn validate_inputs(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/graph.rs" mode="replace" item="pub fn validate_inputs("
-	pub fn validate_inputs(&self, inputs: &[Buffer], _outputs: &[NodeId]) -> Result<()> {
-		let mut slots = HashMap::new();
-		for id in 0..self.nodes.len() {
-			if let Op::Input { slot } = self.nodes[id].op {
-				if let Some(old) = slots.insert(slot, &self.nodes[id].shape)
-					&& old != &self.nodes[id].shape
-				{
-					return Err("one input slot has inconsistent shapes".into());
-				}
-				let b = inputs.get(slot).ok_or("missing input slot")?;
-				if b.shape != self.nodes[id].shape || b.data.len() != elements(&b.shape)? {
-					return Err(format!("input {slot} shape mismatch"));
-				}
-			}
-		}
-		if slots.len() != inputs.len() || (0..inputs.len()).any(|slot| !slots.contains_key(&slot)) {
-			return Err("input slots must be dense and exact".into());
-		}
-		Ok(())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan dynamic_metadata
-```
-
-## 26. chain は一 kernel、STAGE は二 kernel、fanout は三 kernel になる。
-<!-- todo:09-026 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 27. 非融合と融合の値が `[4,6,8]` で一致する。
-<!-- todo:09-027 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 28. fanout の二出力が `[4,6,8]` と `[5,6,7]` になる。
-<!-- todo:09-028 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 29. 同じ Plan の再実行で `44` から `14` へ変わり、再コンパイルしない。
-<!-- todo:09-029 -->
-
-`tests/fusion_plan.rs` の `reductions_and_rebinding` で、この経路の値または拒否条件を確認する。
-
-`tests/fusion_plan.rs` の `fn reductions_and_rebinding(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn reductions_and_rebinding("
-fn reductions_and_rebinding() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![4])?;
-	let w = g.input(1, vec![4])?;
-	let one = g.constant(1., vec![])?;
-	let p = g.binary(Binary::Mul, x, w)?;
-	let p = g.binary(Binary::Add, p, one)?;
-	let y = g.reduce(p, Reduce::Sum, vec![0], false)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[2., 3., 4., 5.])
-		])?[0]
-			.data,
-		[44.]
-	);
-	assert_eq!(
-		p.run(&[
-			buffer(&[4], &[1., 2., 3., 4.]),
-			buffer(&[4], &[1., 1., 1., 1.])
-		])?[0]
-			.data,
-		[14.]
-	);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan reductions_and_rebinding
-```
-
-## 30. 閉じた body に未束縛の storage と RANGE が残らない。
-<!-- todo:09-030 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 31. dump で各 consumer が producer 完了後の state を読む。
-<!-- todo:09-031 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
-
-## 32. 純粋な元グラフが run 前後で同じ構造を保つ。
-<!-- todo:09-032 -->
-
-`tests/fusion_plan.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/fusion_plan.rs` の `fn arithmetic_fusion(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/fusion_plan.rs" mode="replace" item="fn arithmetic_fusion("
-fn arithmetic_fusion() -> Result<()> {
-	let mut g = Graph::default();
-	let x = g.input(0, vec![3])?;
-	let one = g.constant(1.0, vec![])?;
-	let two = g.constant(2.0, vec![])?;
-	let a = g.binary(Binary::Add, x, one)?;
-	let y = g.binary(Binary::Mul, a, two)?;
-	let p = g.compile(&[y])?;
-	assert_eq!(p.kernel_count, 1);
-	assert_eq!(p.run(&[buffer(&[3], &[1., 2., 3.])])?[0].data, [4., 6., 8.]);
-	let staged = g.stage(a)?;
-	let z = g.binary(Binary::Mul, staged, two)?;
-	assert_eq!(g.compile(&[z])?.kernel_count, 2);
-	let three = g.constant(3., vec![])?;
-	let z = g.binary(Binary::Add, a, three)?;
-	assert_eq!(g.compile(&[y, z])?.kernel_count, 3);
-	let result = compare(&g, &[y, z], &[buffer(&[3], &[1., 2., 3.])])?;
-	assert_eq!(result[1].data, [5., 6., 7.]);
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test fusion_plan
-```
+4 段の STAGE が [28,36,44,52] を返し、重ならない中間バッファだけが同じスロットを共有する。
 
 ## 章末の累積確認
 
-前章までの example と test も同じ checkout で再ビルドする。
+前の章までのテストとexampleも再ビルドします。
 
 ```sh
 # check
 cargo test --quiet --all-targets
 ```
+
+## 要件との対応
+
+### 09-001 元グラフから consumer 数を集める。
+
+<!-- todo:09-001 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-002 単一消費先の ADD と MUL の境界を materialize しない。
+
+<!-- todo:09-002 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-003 lower で同じ出力座標を producer へ伝える。
+
+<!-- todo:09-003 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-004 `(x+1)*2` を単一 kernel で `[4,6,8]` にする。
+
+<!-- todo:09-004 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-005 前章の非融合経路とも出力を比較する。
+
+<!-- todo:09-005 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-006 `sum(x*w+1)` の reduction 座標を要素演算へ伝える。
+
+<!-- todo:09-006 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-007 reduction の外側出力と内側 k のスコープを区別する。
+
+<!-- todo:09-007 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-008 LOAD、MUL、ADD、accumulator 更新を同じ body に作る。
+
+<!-- todo:09-008 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-009 `x=[1,2,3,4]`, `w=[2,3,4,5]` の結果を `44` にする。
+
+<!-- todo:09-009 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-010 入力側の一時配列がなく、一つの reduction kernel になることを確認する。
+
+<!-- todo:09-010 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-011 明示 STAGE を非融合境界として扱う。
+
+<!-- todo:09-011 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-012 producer の出力を ALLOC、STORE、AFTER に変える。
+
+<!-- todo:09-012 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-013 consumer が新しい PARAM から保存済みの値を読むようにする。
+
+<!-- todo:09-013 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-014 `(STAGE(x+1))*2` を二 kernel で `[4,6,8]` にする。
+
+<!-- todo:09-014 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-015 `t=x+1; y=t*2; z=t+3` を三 kernel で実行する。
+
+<!-- todo:09-015 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-016 各 body の外部 storage と scalar を PARAM に正規化する。
+
+<!-- todo:09-016 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-017 kernel の署名、CALL 引数、出力 state を照合する verifier を追加する。
+
+<!-- todo:09-017 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-018 producer と consumer の辺から実行順を作り、循環なら拒否する。
+
+<!-- todo:09-018 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-019 既存の CPU compile と run を Plan の kernel 列へ接続する。
+
+<!-- todo:09-019 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-020 同じ Plan に新しい重みを渡して、二回目の出力を確認する。
+
+<!-- todo:09-020 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-021 body の未束縛 PARAM、自由 RANGE、STORE 先の漏れを拒否する。
+
+<!-- todo:09-021 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-022 外側 kernel の NodeId が body に直接残った例を拒否する。
+
+<!-- todo:09-022 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-023 二つの違う座標で同じ producer を使う fixture を実行する。
+
+<!-- todo:09-023 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-024 元グラフを run の前後で dump し、構造が変わらないことを確認する。
+
+<!-- todo:09-024 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-025 入力の長さと dtype が署名と違う場合、実行開始前に拒否する。
+
+<!-- todo:09-025 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-026 chain は一 kernel、STAGE は二 kernel、fanout は三 kernel になる。
+
+<!-- todo:09-026 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-027 非融合と融合の値が `[4,6,8]` で一致する。
+
+<!-- todo:09-027 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-028 fanout の二出力が `[4,6,8]` と `[5,6,7]` になる。
+
+<!-- todo:09-028 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-029 同じ Plan の再実行で `44` から `14` へ変わり、再コンパイルしない。
+
+<!-- todo:09-029 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-030 閉じた body に未束縛の storage と RANGE が残らない。
+
+<!-- todo:09-030 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-031 dump で各 consumer が producer 完了後の state を読む。
+
+<!-- todo:09-031 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 09-032 純粋な元グラフが run 前後で同じ構造を保つ。
+
+<!-- todo:09-032 -->
+
+関連する実装と確認は本章の `09.01`, `09.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。

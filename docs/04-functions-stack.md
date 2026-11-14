@@ -1,1528 +1,1053 @@
-# 04. 純粋関数を CALL し、STACK と INDEX を UIR から実行する
+# 04. CALL のスコープ、STACK の選択、UIR の保存と復元を実装する
 
-Function は固有 scope、署名、scalar body、同型結果の配列を持つ。CALL は capture を許さず caller の arena へ inline する。STACK は同型の NodeId 配列で、INDEX は静的な番号だけを許す。UIR は関数ごとの PARAM、定数 bits、ALU、return を保存する。CALL を inline してから保存するため、再帰 CALL は UIR parser が未対応演算として拒否する。
+前の節で動かしたコードに、今回使う演算と処理を追加します。各節の確認を実行してから次へ進みます。
 
-`file=... mode=write` はそのファイルの全置換、`mode=append` は末尾への追記である。すべて前章でできたプロジェクトの root で行う。`# check` は実際の検証コマンドであり、ソースファイルには保存しない。
+参照するUOpの構成は [tinygrad c22edff](https://github.com/tinygrad/tinygrad/blob/c22edff14c79310a9b2df62a78819cf77c8289fa/tinygrad/uop/ops.py) です。最初から全機能を実装せず、使う節で増やします。
 
-## 1. `FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。
-<!-- todo:04-001 -->
+## 04.01 CALL と STACK で関数を表す
+
+関数の出力を STACK にまとめ、CALL に本体と実引数を置く。仮引数を呼出しごとの環境で置き換え、定数 INDEX で出力を選ぶ。関数内の同じ番号の仮引数が外側の呼出しへ漏れない。
+
+`src/functions.rs`を保存する。
 
 ```rust
-// file=src/functions.rs mode=write
-use crate::{
-	Result,
-	scalar::{Alu, Bounds, DType, SOp, ScalarGraph, Value},
-};
-use std::{
-	collections::HashMap,
-	sync::atomic::{AtomicUsize, Ordering},
-};
-static NEXT_SCOPE: AtomicUsize = AtomicUsize::new(1);
-#[derive(Clone, Debug)]
+// file="src/functions.rs" mode="write"
+use crate::{Arg, DType, Ops, Result, UOp};
+#[derive(Clone)]
 pub struct Function {
-	pub name: String,
-	pub scope: usize,
-	pub graph: ScalarGraph,
-	pub parameters: Vec<(DType, Option<Bounds>)>,
-	pub outputs: Vec<usize>,
+    body: UOp,
+    parameters: Vec<DType>,
 }
 impl Function {
-	pub fn build(
-		name: &str,
-		parameters: Vec<(DType, Option<Bounds>)>,
-		body: impl FnOnce(&mut ScalarGraph, &[usize]) -> Result<Vec<usize>>,
-	) -> Result<Self> {
-		if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-			return Err("invalid function name".into());
-		}
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let args = parameters
-			.iter()
-			.enumerate()
-			.map(|(slot, &(dtype, bounds))| graph.scoped_param(scope, slot, dtype, bounds))
-			.collect::<Result<Vec<_>>>()?;
-		let outputs = body(&mut graph, &args)?;
-		if outputs.is_empty() {
-			return Err("empty function result".into());
-		}
-		for &root in &outputs {
-			graph.verify(root, scope)?;
-		}
-		let dtype = graph.nodes[outputs[0]].dtype;
-		if outputs.iter().any(|&id| graph.nodes[id].dtype != dtype) {
-			return Err("STACK requires homogeneous scalar results".into());
-		}
-		Ok(Self {
-			name: name.into(),
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
-			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
-			if n.dtype != dtype {
-				return Err("CALL argument dtype".into());
-			}
-			if let Some(expected) = bounds {
-				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
-				if actual.lo < expected.lo || actual.hi > expected.hi {
-					return Err("CALL argument exceeds declared bounds".into());
-				}
-			}
-		}
-		let mut map: HashMap<usize, usize> = HashMap::new();
-		for &root in &self.outputs {
-			self.graph.verify(root, self.scope)?;
-			for id in self.graph.order(root)? {
-				if map.contains_key(&id) {
-					continue;
-				}
-				let node = &self.graph.nodes[id];
-				let value = match node.op {
-					SOp::Const(v) => caller.constant(v),
-					SOp::Param { slot, scope, .. } => {
-						if scope != self.scope {
-							return Err("capture from another scope".into());
-						}
-						*args.get(slot).ok_or("unbound function parameter")?
-					}
-					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
-				};
-				map.insert(id, value);
-			}
-		}
-		Ok(self.outputs.iter().map(|id| map[id]).collect())
-	}
-	pub fn evaluate(&self, args: &[Value]) -> Result<Vec<Value>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		self.outputs
-			.iter()
-			.map(|&id| self.graph.evaluate_scoped(id, args, self.scope))
-			.collect()
-	}
-	pub fn index(results: &[usize], index: isize) -> Result<usize> {
-		usize::try_from(index)
-			.ok()
-			.and_then(|i| results.get(i).copied())
-			.ok_or("STACK INDEX out of bounds".into())
-	}
-	pub fn to_uir(&self) -> String {
-		let mut text = format!("function {}\n", self.name);
-		for node in &self.graph.nodes {
-			let line = match node.op {
-				SOp::Const(v) => format!("const {} {}", dtype_name(v.dtype()), v.pack()),
-				SOp::Param {
-					slot,
-					dtype,
-					bounds,
-					..
-				} => format!(
-					"param {slot} {} {}",
-					dtype_name(dtype),
-					bounds
-						.map(|b| format!("{} {}", b.lo, b.hi))
-						.unwrap_or("none none".into())
-				),
-				SOp::Alu(op) => format!(
-					"alu {} {}",
-					alu_name(op),
-					node.inputs
-						.iter()
-						.map(|i| i.to_string())
-						.collect::<Vec<_>>()
-						.join(" ")
-				),
-			};
-			text.push_str(&line);
-			text.push('\n');
-		}
-		text.push_str(&format!(
-			"return {}\n",
-			self.outputs
-				.iter()
-				.map(|i| i.to_string())
-				.collect::<Vec<_>>()
-				.join(" ")
-		));
-		text
-	}
-	pub fn from_uir(text: &str) -> Result<Self> {
-		let mut lines = text.lines();
-		let header = lines
-			.next()
-			.ok_or("missing function header")?
-			.split_whitespace()
-			.collect::<Vec<_>>();
-		if header.len() != 2 || header[0] != "function" {
-			return Err("invalid function header".into());
-		}
-		let name = header[1].to_string();
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let mut parameters = vec![];
-		let mut outputs = None;
-		for line in lines {
-			if outputs.is_some() {
-				return Err("tokens after return".into());
-			}
-			let fields = line.split_whitespace().collect::<Vec<_>>();
-			if fields.is_empty() {
-				continue;
-			}
-			let parse = |s: &str| {
-				s.parse::<usize>()
-					.map_err(|_| "invalid node number".to_string())
-			};
-			match fields[0] {
-				"const" if fields.len() == 3 => {
-					let t = parse_dtype(fields[1])?;
-					let bits = fields[2]
-						.parse::<u64>()
-						.map_err(|_| "invalid constant bits")?;
-					graph.constant(Value::unpack(t, bits)?);
-				}
-				"param" if fields.len() == 5 => {
-					let slot = parse(fields[1])?;
-					if slot != parameters.len() {
-						return Err("non-dense function parameter".into());
-					}
-					let t = parse_dtype(fields[2])?;
-					let bounds = if fields[3] == "none" && fields[4] == "none" {
-						None
-					} else {
-						Some(Bounds::new(
-							fields[3].parse().map_err(|_| "invalid bound")?,
-							fields[4].parse().map_err(|_| "invalid bound")?,
-						)?)
-					};
-					graph.scoped_param(scope, slot, t, bounds)?;
-					parameters.push((t, bounds));
-				}
-				"alu" if fields.len() >= 3 => {
-					graph.alu(
-						parse_alu(fields[1])?,
-						fields[2..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<_>>()?,
-					)?;
-				}
-				"return" if fields.len() >= 2 => {
-					outputs = Some(
-						fields[1..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<Vec<_>>>()?,
-					);
-				}
-				_ => return Err(format!("invalid UIR instruction {line}")),
-			}
-		}
-		let outputs = outputs.ok_or("missing return")?;
-		for &id in &outputs {
-			graph.verify(id, scope)?;
-		}
-		if outputs
-			.iter()
-			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
-		{
-			return Err("heterogeneous STACK".into());
-		}
-		Ok(Self {
-			name,
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
+    pub fn parameter(index: usize, dtype: DType) -> UOp {
+        UOp::new(Ops::Param, vec![], Arg::ScalarParam { index, dtype })
+    }
+    pub fn new(parameters: &[DType], outputs: &[UOp]) -> Result<Self> {
+        let first = outputs.first().ok_or("function needs an output")?;
+        if outputs.iter().any(|u| u.dtype() != first.dtype()) {
+            return Err("STACK outputs require one dtype".into());
+        }
+        for output in outputs {
+            for u in output.toposort() {
+                if let Arg::ScalarParam { index, dtype } = u.arg {
+                    if parameters.get(index) != Some(&dtype) {
+                        return Err("function parameter signature mismatch".into());
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            body: UOp::new(Ops::Stack, outputs.to_vec(), Arg::None),
+            parameters: parameters.to_vec(),
+        })
+    }
+    pub fn call(&self, arguments: &[UOp]) -> Result<UOp> {
+        if arguments.len() != self.parameters.len()
+            || arguments
+                .iter()
+                .zip(&self.parameters)
+                .any(|(u, d)| u.dtype() != *d)
+        {
+            return Err("function argument signature mismatch".into());
+        }
+        let mut sources = vec![self.body.clone()];
+        sources.extend_from_slice(arguments);
+        Ok(UOp::new(Ops::Call, sources, Arg::Id(self.parameters.len())))
+    }
+    pub fn select(&self, call: &UOp, index: &UOp) -> Result<UOp> {
+        if call.op != Ops::Call || call.src.first() != Some(&self.body) {
+            return Err("call belongs to another function".into());
+        }
+        let bounds = selector_bounds(index)?;
+        if bounds.0 < 0 || bounds.1 >= self.body.src.len() as i64 {
+            return Err("STACK index outside outputs".into());
+        }
+        Ok(UOp::new(
+            Ops::Index,
+            vec![call.clone(), index.clone(), UOp::bool(true)],
+            Arg::None,
+        ))
+    }
 }
-fn dtype_name(t: DType) -> &'static str {
-	match t {
-		DType::Bool => "bool",
-		DType::I32 => "i32",
-		DType::F32 => "f32",
-		DType::Void => "void",
-	}
+pub fn inline_calls(root: &UOp) -> Result<UOp> {
+    if !root
+        .toposort()
+        .iter()
+        .any(|u| u.op == Ops::Call && u.src.first().is_some_and(|b| b.op == Ops::Stack))
+    {
+        return Ok(root.clone());
+    }
+    fn call_outputs(
+        call: &UOp,
+        environment: Option<&[UOp]>,
+        budget: &mut usize,
+    ) -> Result<Vec<UOp>> {
+        let body = call.src.first().ok_or("CALL missing body")?;
+        let Arg::Id(count) = call.arg else {
+            return Err("pure CALL missing parameter count".into());
+        };
+        if body.op != Ops::Stack || call.src.len() != count + 1 {
+            return Err("pure CALL signature".into());
+        }
+        let args = call.src[1..]
+            .iter()
+            .map(|u| visit(u, environment, budget))
+            .collect::<Result<Vec<_>>>()?;
+        body.src
+            .iter()
+            .map(|u| visit(u, Some(&args), budget))
+            .collect()
+    }
+    fn visit(node: &UOp, environment: Option<&[UOp]>, budget: &mut usize) -> Result<UOp> {
+        if *budget == 0 {
+            return Err("function expansion budget exhausted".into());
+        }
+        *budget -= 1;
+        if let (Ops::Param, Arg::ScalarParam { index, dtype }) = (node.op, &node.arg) {
+            if let Some(args) = environment {
+                let argument = args.get(*index).ok_or("missing scoped parameter")?;
+                if argument.dtype() != *dtype {
+                    return Err("scoped parameter dtype mismatch".into());
+                }
+                return Ok(argument.clone());
+            }
+        }
+        if node.op == Ops::Index
+            && node.src.first().is_some_and(|u| {
+                u.op == Ops::Call && u.src.first().is_some_and(|b| b.op == Ops::Stack)
+            })
+        {
+            let outputs = call_outputs(&node.src[0], environment, budget)?;
+            let index = visit(
+                node.src.get(1).ok_or("INDEX missing selector")?,
+                environment,
+                budget,
+            )?;
+            let bounds = selector_bounds(&index)?;
+            if bounds.0 < 0 || bounds.1 >= outputs.len() as i64 {
+                return Err("STACK selector outside outputs".into());
+            }
+            let mut result = outputs[0].clone();
+            for (i, value) in outputs.iter().enumerate().skip(1) {
+                result = index.eq(&UOp::int(i as i64)).where_(value, &result);
+            }
+            return Ok(result);
+        }
+        if node.op == Ops::Call && node.src.first().is_some_and(|body| body.op == Ops::Stack) {
+            let outputs = call_outputs(node, environment, budget)?;
+            if outputs.len() != 1 {
+                return Err("multiple CALL outputs need INDEX".into());
+            }
+            return Ok(outputs[0].clone());
+        }
+        Ok(node.replace(
+            node.src
+                .iter()
+                .map(|u| visit(u, environment, budget))
+                .collect::<Result<Vec<_>>>()?,
+        ))
+    }
+    visit(root, None, &mut 1_000_000)
 }
-fn parse_dtype(s: &str) -> Result<DType> {
-	match s {
-		"bool" => Ok(DType::Bool),
-		"i32" => Ok(DType::I32),
-		"f32" => Ok(DType::F32),
-		_ => Err("invalid scalar dtype".into()),
-	}
-}
-fn alu_name(op: Alu) -> String {
-	match op {
-		Alu::Cast(t) => format!("cast_{}", dtype_name(t)),
-		_ => format!("{op:?}").to_lowercase(),
-	}
-}
-fn parse_alu(s: &str) -> Result<Alu> {
-	Ok(match s {
-		"add" => Alu::Add,
-		"sub" => Alu::Sub,
-		"mul" => Alu::Mul,
-		"neg" => Alu::Neg,
-		"xor" => Alu::Xor,
-		"and" => Alu::And,
-		"or" => Alu::Or,
-		"shl" => Alu::Shl,
-		"shr" => Alu::Shr,
-		"div" => Alu::Div,
-		"mod" => Alu::Mod,
-		"lt" => Alu::Lt,
-		"eq" => Alu::Eq,
-		"ne" => Alu::Ne,
-		"where" => Alu::Where,
-		"recip" => Alu::Recip,
-		"max" => Alu::Max,
-		"cast_bool" => Alu::Cast(DType::Bool),
-		"cast_i32" => Alu::Cast(DType::I32),
-		"cast_f32" => Alu::Cast(DType::F32),
-		_ => return Err("unsupported or recursive UIR operation".into()),
-	})
-}
-pub fn assert_uop(
-	graph: &ScalarGraph,
-	root: usize,
-	inputs: &[Value],
-	expected: Value,
-) -> Result<()> {
-	let actual = graph.compile(root)?.run(inputs)?;
-	if actual == expected {
-		Ok(())
-	} else {
-		Err(format!("assert_uop expected {expected:?}, got {actual:?}"))
-	}
+fn selector_bounds(index: &UOp) -> Result<(i64, i64)> {
+    match index.arg {
+        Arg::Int(n) => Ok((n, n)),
+        _ => Err("STACK selector must be a constant integer".into()),
+    }
 }
 ```
 
+`src/lib.rs`を追記する。
+
 ```rust
-// file=src/lib.rs mode=append
+// file="src/lib.rs" mode="append"
+
 pub mod functions;
 ```
 
+`src/pattern.rs` の `pub struct RewriteOptions`を置き換える。
+
 ```rust
-// file=tests/function_stack.rs mode=write
-use chibigrad::functions::Function;
+// file="src/pattern.rs" mode="replace" item="pub struct RewriteOptions"
+pub struct RewriteOptions {
+    pub order: RewriteOrder,
+    pub walk: bool,
+    pub enter_calls: bool,
+    pub max_steps: usize,
+}
+```
+
+`src/pattern.rs` の `impl Default for RewriteOptions` 内 の `fn default`を置き換える。
+
+```rust
+// file="src/pattern.rs" mode="replace" within="impl Default for RewriteOptions" item="fn default"
+    fn default() -> Self {
+        Self {
+            order: RewriteOrder::BottomUp,
+            walk: true,
+            enter_calls: false,
+            max_steps: 100_000,
+        }
+    }
+```
+
+`src/pattern.rs` の `pub fn graph_rewrite_with_options`を置き換える。
+
+```rust
+// file="src/pattern.rs" mode="replace" item="pub fn graph_rewrite_with_options"
+pub fn graph_rewrite_with_options(
+    root: &UOp,
+    matcher: &PatternMatcher,
+    options: RewriteOptions,
+) -> Result<UOp> {
+    enum Frame {
+        Enter(UOp),
+        Finish(UOp),
+        Alias(UOp, UOp),
+    }
+    let mut stack = vec![Frame::Enter(root.clone())];
+    let mut memo: HashMap<u64, UOp> = HashMap::new();
+    let mut active = HashSet::new();
+    let mut remaining = options.max_steps;
+    let skip_body = |u: &UOp, i: usize| !options.enter_calls && u.op == Ops::Call && i == 0;
+    while let Some(frame) = stack.pop() {
+        match frame {
+            Frame::Enter(u) => {
+                if memo.contains_key(&u.id) {
+                    continue;
+                }
+                if remaining == 0 || !active.insert(u.id) {
+                    return Err("rewrite cycle or budget exhausted".into());
+                }
+                remaining -= 1;
+                if options.order == RewriteOrder::TopDown {
+                    if let Some(next) = matcher.rewrite(&u) {
+                        stack.push(Frame::Alias(u, next.clone()));
+                        stack.push(Frame::Enter(next));
+                        continue;
+                    }
+                }
+                stack.push(Frame::Finish(u.clone()));
+                if options.walk {
+                    for (i, src) in u.src.iter().enumerate().rev() {
+                        if !skip_body(&u, i) {
+                            stack.push(Frame::Enter(src.clone()));
+                        }
+                    }
+                }
+            }
+            Frame::Finish(u) => {
+                let src = u
+                    .src
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        if options.walk && !skip_body(&u, i) {
+                            memo.get(&s.id)
+                                .cloned()
+                                .ok_or("rewrite source missing".to_string())
+                        } else {
+                            Ok(s.clone())
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let rewritten = u.replace(src);
+                if options.order == RewriteOrder::BottomUp {
+                    if let Some(next) = matcher.rewrite(&rewritten) {
+                        stack.push(Frame::Alias(u, next.clone()));
+                        stack.push(Frame::Enter(next));
+                        continue;
+                    }
+                }
+                active.remove(&u.id);
+                memo.insert(u.id, rewritten);
+            }
+            Frame::Alias(original, replacement) => {
+                let result = memo
+                    .get(&replacement.id)
+                    .ok_or("replacement missing")?
+                    .clone();
+                active.remove(&original.id);
+                memo.insert(original.id, result);
+            }
+        }
+    }
+    memo.remove(&root.id)
+        .ok_or("rewrite produced no root".into())
+}
+```
+
+`src/scalar.rs` の `pub fn evaluate`を置き換える。
+
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn evaluate"
+pub fn evaluate(root: &UOp, inputs: &[Value]) -> Result<Value> {
+    let root = crate::functions::inline_calls(root)?;
+    inputs_valid(&verify(&root)?, inputs)?;
+    let mut values = HashMap::new();
+    for u in root.toposort() {
+        let value = if let Some(v) = Value::from_constant(&u) {
+            v
+        } else if let Arg::ScalarParam { index, .. } = u.arg {
+            inputs[index]
+        } else {
+            eval_alu(
+                u.op,
+                &u.arg,
+                &u.src.iter().map(|s| values[&s.id]).collect::<Vec<_>>(),
+            )?
+        };
+        values.insert(u.id, value);
+    }
+    Ok(values[&root.id])
+}
+```
+
+`src/scalar.rs` の `pub fn compile`を置き換える。
+
+```rust
+// file="src/scalar.rs" mode="replace" item="pub fn compile"
+pub fn compile(root: &UOp) -> Result<CompiledScalar> {
+    let root = crate::functions::inline_calls(root)?;
+    let types = verify(&root)?;
+    let mut source = String::from(
+        "static float as_float(unsigned int b){union{unsigned int b;float f;}v;v.b=b;return v.f;}\nstatic unsigned int bits(float f){union{unsigned int b;float f;}v;v.f=f;return v.b;}\nstatic long long floor_div(long long a,long long b){long long q=a/b,r=a%b;return q-((r!=0)&&((r<0)!=(b<0)));}\nstatic long long floor_mod(long long a,long long b){long long r=a%b;return r+(((r!=0)&&((r<0)!=(b<0)))?b:0);}\nvoid chibi_scalar(unsigned char *packed){unsigned long long *args=(unsigned long long*)packed;int *status=(int*)args[0];*status=0;\n",
+    );
+    let mut values: HashMap<u64, String> = HashMap::new();
+    for u in root.toposort() {
+        let at = |i: usize| values[&u.src[i].id].clone();
+        let reject = "{*status=1;return;}";
+        if matches!(u.op, Ops::Div | Ops::Mod)
+            && matches!(u.dtype(), DType::I32 | DType::I64)
+        {
+            let min = if u.dtype() == DType::I32 {
+                "(-2147483647-1)"
+            } else {
+                "(-9223372036854775807ll-1)"
+            };
+            source
+                .push_str(
+                    &format!(
+                        "if({}==0||({}=={}&&{}==-1)){}\n", at(1), at(0), min, at(1),
+                        reject
+                    ),
+                );
+        }
+        if matches!(u.op, Ops::Shl | Ops::Shr) {
+            source
+                .push_str(
+                    &format!(
+                        "if({}<0||{}>={}){}\n", at(1), at(1), if u.dtype() == DType::I32
+                        { 32 } else { 64 }, reject
+                    ),
+                );
+        }
+        if u.op == Ops::Cast && u.src[0].dtype() == DType::F32
+            && matches!(u.dtype(), DType::I32 | DType::I64)
+        {
+            let lim = if u.dtype() == DType::I32 {
+                "2147483648.0f"
+            } else {
+                "9223372036854775808.0f"
+            };
+            source
+                .push_str(
+                    &format!("if(!({}>=-{}&&{}<{})){}\n", at(0), lim, at(0), lim, reject),
+                );
+        }
+        let expression = match (&u.op, &u.arg) {
+            (Ops::Const, Arg::F32(n)) => format!("as_float({n}u)"),
+            (Ops::Const, Arg::I32(n)) => format!("((int){}u)", * n as u32),
+            (Ops::Const, Arg::Int(n)) => format!("((long long){}ull)", * n as u64),
+            (Ops::Const, Arg::Bool(n)) => (*n as u8).to_string(),
+            (Ops::Param, Arg::ScalarParam { index, dtype }) => {
+                if *dtype == DType::F32 {
+                    format!("as_float((unsigned int)args[{}])", index + 2)
+                } else {
+                    format!("(({})args[{}])", ctype(* dtype), index + 2)
+                }
+            }
+            (Ops::Where, _) => format!("({}?{}:{})", at(0), at(1), at(2)),
+            (Ops::Cast, Arg::DType(dt)) => format!("(({}){})", ctype(* dt), at(0)),
+            (Ops::Bitcast, Arg::DType(DType::F32)) => {
+                format!("as_float((unsigned int){})", at(0))
+            }
+            (Ops::Bitcast, Arg::DType(DType::I32)) => format!("((int)bits({}))", at(0)),
+            (Ops::Neg, _) => {
+                if u.dtype() == DType::I64 {
+                    source
+                        .push_str(
+                            &format!(
+                                "if({}==(-9223372036854775807ll-1)){}\n", at(0), reject
+                            ),
+                        );
+                }
+                format!("(-{})", at(0))
+            }
+            (Ops::Max, _) if u.dtype() == DType::F32 => {
+                format!(
+                    "({0}!={0}||{1}!={1}?as_float(2143289344u):({0}==0.0f&&{1}==0.0f?0.0f:({0}>{1}?{0}:{1})))",
+                    at(0), at(1)
+                )
+            }
+            (Ops::Max, _) => format!("({0}>{1}?{0}:{1})", at(0), at(1)),
+            (Ops::Div, _) if u.dtype() != DType::F32 => {
+                format!("floor_div({},{})", at(0), at(1))
+            }
+            (Ops::Mod, _) => format!("floor_mod({},{})", at(0), at(1)),
+            (op, _) => {
+                let symbol = match op {
+                    Ops::Add => "+",
+                    Ops::Sub => "-",
+                    Ops::Mul => "*",
+                    Ops::Div => "/",
+                    Ops::Lt => "<",
+                    Ops::Eq => "==",
+                    Ops::And => "&",
+                    Ops::Or => "|",
+                    Ops::Xor => "^",
+                    Ops::Shl => "<<",
+                    Ops::Shr => ">>",
+                    _ => return Err("unsupported scalar C expression".into()),
+                };
+                if u.dtype() == DType::I64
+                    && matches!(op, Ops::Add | Ops::Sub | Ops::Mul)
+                {
+                    let op = match op {
+                        Ops::Add => "add",
+                        Ops::Sub => "sub",
+                        _ => "mul",
+                    };
+                    source
+                        .push_str(
+                            &format!(
+                                "long long checked{};if(__builtin_{}_overflow({},{},&checked{})){}\n",
+                                u.id, op, at(0), at(1), u.id, reject
+                            ),
+                        );
+                }
+                if u.dtype() == DType::I32
+                    && matches!(op, Ops::Add | Ops::Sub | Ops::Mul | Ops::Shl)
+                {
+                    format!(
+                        "((int)((unsigned int){} {} (unsigned int){}))", at(0), symbol,
+                        at(1)
+                    )
+                } else {
+                    format!("({} {} {})", at(0), symbol, at(1))
+                }
+            }
+        };
+        let name = format!("v{}", u.id);
+        source.push_str(&format!("{} {}={};\n", ctype(u.dtype()), name, expression));
+        values.insert(u.id, name);
+    }
+    let result = &values[&root.id];
+    source
+        .push_str(
+            &format!(
+                "args[1]={};}}\n", if root.dtype() == DType::F32 {
+                format!("bits({result})") } else {
+                format!("(unsigned long long){result}") }
+            ),
+        );
+    let program = unsafe { crate::cpu::CpuProgram::compile(&source, "chibi_scalar") }?;
+    Ok(CompiledScalar {
+        source,
+        program,
+        types,
+        output: root.dtype(),
+    })
+}
+```
+
+`src/uop.rs` の `pub enum Ops`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" item="pub enum Ops"
+pub enum Ops {
+    Invalid,
+    Const,
+    Param,
+    Cast,
+    Bitcast,
+    Shl,
+    Shr,
+    Xor,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Neg,
+    Max,
+    Lt,
+    Eq,
+    And,
+    Or,
+    Where,
+    Stack,
+    Index,
+    Call,
+    Sink,
+}
+```
+
+`src/uop.rs` の `pub enum Arg`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" item="pub enum Arg"
+pub enum Arg {
+    None,
+    F32(u32),
+    I32(i32),
+    Int(i64),
+    Bool(bool),
+    Id(usize),
+    DType(DType),
+    Text(String),
+    ScalarParam { index: usize, dtype: DType },
+}
+```
+
+`src/uop.rs` の `impl UOp` 内 の `fn infer_dtype`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" within="impl UOp" item="fn infer_dtype"
+    fn infer_dtype(&self) -> DType {
+        match self.op {
+            Ops::Const => match self.arg {
+                Arg::F32(_) => DType::F32,
+                Arg::I32(_) => DType::I32,
+                Arg::Int(_) => DType::I64,
+                Arg::Bool(_) => DType::Bool,
+                _ => DType::Void,
+            },
+            Ops::Param => match self.arg {
+                Arg::ScalarParam { dtype, .. } => dtype,
+                _ => DType::Void,
+            },
+            Ops::Index => self.src.first().map_or(DType::Void, |x| x.dtype()),
+            Ops::Lt | Ops::Eq => DType::Bool,
+            Ops::Cast | Ops::Bitcast => {
+                if let Arg::DType(dt) = self.arg {
+                    dt
+                } else {
+                    DType::Void
+                }
+            }
+            Ops::Call => self
+                .src
+                .first()
+                .and_then(|x| x.src.first())
+                .map_or(DType::Void, |x| x.dtype()),
+            Ops::Where => self.src.get(1).map_or(DType::Void, |x| x.dtype()),
+            Ops::Sink | Ops::Invalid => DType::Void,
+            _ => self.src.first().map_or(DType::Void, |x| x.dtype()),
+        }
+    }
+```
+
+`src/uop.rs` の `impl UOp` 内を追記する。
+
+```rust
+// file="src/uop.rs" mode="append" within="impl UOp"
+    pub fn sink(src: Vec<UOp>) -> Self {
+        Self::new(Ops::Sink, src, Arg::None)
+    }
+```
+
+`tests/functions.rs`を保存する。
+
+```rust
+// file="tests/functions.rs" mode="write"
 use chibigrad::{
-	Result,
-	scalar::{Alu, Bounds, DType, ScalarGraph, Value},
+    DType, UOp,
+    functions::Function,
+    scalar::{self, Value},
 };
-
 #[test]
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
+fn nested_calls_and_stack() {
+    let x = Function::parameter(0, DType::F32);
+    let inner =
+        Function::new(&[DType::F32], &[x.mul(&UOp::f32(2.)), x.add(&UOp::f32(3.))]).unwrap();
+    let nested = inner.call(&[x.add(&UOp::f32(1.))]).unwrap();
+    let chosen = inner.select(&nested, &UOp::int(1)).unwrap();
+    let outer = Function::new(&[DType::F32], &[chosen]).unwrap();
+    let value = outer.call(&[UOp::f32(4.)]).unwrap();
+    assert_eq!(scalar::evaluate(&value, &[]).unwrap(), Value::f32(8.));
+    assert_eq!(
+        scalar::compile(&value).unwrap().run(&[]).unwrap(),
+        Value::f32(8.)
+    );
+    assert!(outer.call(&[UOp::int(4)]).is_err());
+    assert!(inner.select(&nested, &UOp::int(2)).is_err());
 }
+```
+
+```sh
+# check step=04.01
+cargo test --offline
+```
+
+入れ子の関数が 8 を返し、引数の型違いと範囲外の出力選択を拒否する。
+
+## 04.02 UIR の往復と検証
+
+DAG を後方参照だけの連番へ変換し、型付き引数を文字列化する。読み込み時に番号・参照・dtype・関数の束縛を検証し、読めただけの不正グラフを受け入れない。
+
+`src/lib.rs`を追記する。
+
+```rust
+// file="src/lib.rs" mode="append"
+
+pub mod uir;
+```
+
+`src/uir.rs`を保存する。
+
+```rust
+// file="src/uir.rs" mode="write"
+//! Canonical UIR v1. Each line is `id=Op DType [source_ids] typed_arg`.
+//! IDs are dense and backward references only. Strings and bytes use hexadecimal
+//! UTF-8/bytes, floats use their exact hexadecimal IEEE bits, and lists use commas.
+use crate::{Arg, DType, Ops, Result, UOp};
+use std::collections::{HashMap, HashSet};
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+fn unhex(s: &str) -> Result<Vec<u8>> {
+    if s.len() % 2 != 0 || !s.is_ascii() {
+        return Err("invalid hex".into());
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| "invalid hex".into()))
+        .collect()
+}
+fn string(s: &str) -> Result<String> {
+    String::from_utf8(unhex(s)?).map_err(|_| "invalid UTF-8".into())
+}
+fn number<T: std::str::FromStr>(s: &str) -> Result<T> {
+    s.parse().map_err(|_| "invalid number".into())
+}
+fn list<T: std::str::FromStr>(s: &str) -> Result<Vec<T>> {
+    if s.is_empty() {
+        Ok(vec![])
+    } else {
+        s.split(',').map(number).collect()
+    }
+}
+fn numbers<T: std::fmt::Display>(v: &[T]) -> String {
+    v.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+fn dtype(s: &str) -> Result<DType> {
+    [DType::F32, DType::I32, DType::I64, DType::Bool, DType::Void]
+        .into_iter()
+        .find(|d| format!("{d:?}") == s)
+        .ok_or("unknown dtype".into())
+}
+fn op(s: &str) -> Result<Ops> {
+    [
+        Ops::Invalid,
+        Ops::Const,
+        Ops::Param,
+        Ops::Cast,
+        Ops::Bitcast,
+        Ops::Shl,
+        Ops::Shr,
+        Ops::Xor,
+        Ops::Add,
+        Ops::Sub,
+        Ops::Mul,
+        Ops::Div,
+        Ops::Mod,
+        Ops::Neg,
+        Ops::Max,
+        Ops::Lt,
+        Ops::Eq,
+        Ops::And,
+        Ops::Or,
+        Ops::Where,
+        Ops::Stack,
+        Ops::Index,
+        Ops::Call,
+        Ops::Sink,
+    ]
+    .into_iter()
+    .find(|o| format!("{o:?}") == s)
+    .ok_or("unknown operation".into())
+}
+fn encode_arg(a: &Arg) -> String {
+    match a {
+        Arg::None => "none".into(),
+        Arg::F32(v) => format!("f32;{v:08x}"),
+        Arg::I32(v) => format!("i32;{v}"),
+        Arg::Int(v) => format!("i64;{v}"),
+        Arg::Bool(v) => format!("bool;{}", *v as u8),
+        Arg::Id(v) => format!("id;{v}"),
+        Arg::DType(dt) => format!("dtype;{dt:?}"),
+        Arg::Text(s) => format!("text;{}", hex(s.as_bytes())),
+        Arg::ScalarParam { index, dtype } => format!("scalar;{index};{dtype:?}"),
+    }
+}
+fn boolean(s: &str) -> Result<bool> {
+    match s {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err("invalid bool".into()),
+    }
+}
+fn decode_arg(s: &str) -> Result<Arg> {
+    let fields: Vec<_> = s.split(';').collect();
+    Ok(match fields.as_slice() {
+        ["none"] => Arg::None,
+        ["f32", v] if v.len() == 8 => {
+            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        }
+        ["i32", v] => Arg::I32(number(v)?),
+        ["i64", v] => Arg::Int(number(v)?),
+        ["bool", v] => Arg::Bool(boolean(v)?),
+        ["id", v] => Arg::Id(number(v)?),
+        ["dtype", dt] => Arg::DType(dtype(dt)?),
+        ["text", v] => Arg::Text(string(v)?),
+        ["scalar", i, dt] => Arg::ScalarParam {
+            index: number(i)?,
+            dtype: dtype(dt)?,
+        },
+        _ => return Err("invalid typed argument".into()),
+    })
+}
+pub fn print(root: &UOp) -> String {
+    let nodes = root.toposort();
+    let ids: HashMap<_, _> = nodes.iter().enumerate().map(|(i, u)| (u.id, i)).collect();
+    let mut text = "UIR 1\n".to_string();
+    for (id, u) in nodes.iter().enumerate() {
+        text.push_str(&format!(
+            "{id}={:?} {:?} [{}] {}\n",
+            u.op,
+            u.dtype(),
+            numbers(&u.src.iter().map(|s| ids[&s.id]).collect::<Vec<_>>()),
+            encode_arg(&u.arg)
+        ));
+    }
+    text.push_str(&format!("root={}\n", ids[&root.id]));
+    text
+}
+pub fn parse(text: &str) -> Result<UOp> {
+    let mut lines = text.lines();
+    if lines.next() != Some("UIR 1") {
+        return Err("missing UIR 1 header".into());
+    }
+    let mut nodes: Vec<UOp> = vec![];
+    let mut root = None;
+    for line in lines {
+        if root.is_some() {
+            return Err("text after root".into());
+        }
+        if let Some(id) = line.strip_prefix("root=") {
+            root = Some(
+                nodes
+                    .get(number::<usize>(id)?)
+                    .ok_or("invalid root")?
+                    .clone(),
+            );
+            continue;
+        }
+        let (id, body) = line.split_once('=').ok_or("missing node id")?;
+        if number::<usize>(id)? != nodes.len() {
+            return Err("node IDs must be dense".into());
+        }
+        let mut parts = body.splitn(4, ' ');
+        let operation = op(parts.next().ok_or("missing op")?)?;
+        let dt = dtype(parts.next().ok_or("missing dtype")?)?;
+        let src = parts.next().ok_or("missing sources")?;
+        let src = src
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .ok_or("invalid sources")?;
+        let sources = list::<usize>(src)?
+            .into_iter()
+            .map(|i| {
+                nodes
+                    .get(i)
+                    .cloned()
+                    .ok_or("forward or missing source".into())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let arg = decode_arg(parts.next().ok_or("missing arg")?)?;
+        let u = UOp::new(operation, sources, arg);
+        if u.dtype() != dt {
+            return Err("declared dtype disagrees with UOp".into());
+        }
+        validate_node(&u)?;
+        nodes.push(u);
+    }
+    let root = root.ok_or("missing root")?;
+    if root.toposort().len() != nodes.len() {
+        return Err("unreachable UIR nodes".into());
+    }
+    validate_scope(&root)?;
+    Ok(root)
+}
+fn validate_node(u: &UOp) -> Result<()> {
+    if crate::uop::is_binary(u.op) || crate::uop::is_unary(u.op) || u.op == Ops::Where {
+        crate::scalar::verify_node(u)?;
+    }
+    match (&u.op, &u.arg) {
+        (Ops::Const, _) => {
+            crate::scalar::verify_node(u)?;
+        }
+        (Ops::Param, Arg::ScalarParam { .. }) => {
+            crate::scalar::verify_node(u)?;
+        }
+        (Ops::Param, _) => return Err("invalid leaf metadata".into()),
+        (Ops::Invalid, Arg::Text(_)) if u.src.is_empty() => {}
+        (Ops::Invalid, _) => return Err("invalid source payload".into()),
+        (Ops::Call, Arg::Id(count))
+            if u.src.first().is_some_and(|b| b.op == Ops::Stack)
+                && u.src.len().checked_sub(1) == Some(*count) => {}
+        (Ops::Call, _) => {
+            return Err("invalid CALL".into());
+        }
+        _ => {}
+    }
+    Ok(())
+}
+fn validate_scope(root: &UOp) -> Result<()> {
+    let mut stack = vec![(root.clone(), None::<Vec<DType>>)];
+    let mut seen = HashSet::new();
+    while let Some((u, signature)) = stack.pop() {
+        if !seen.insert((u.id, signature.clone())) {
+            continue;
+        }
+        if let (Arg::ScalarParam { index, dtype }, Some(params)) = (&u.arg, &signature) {
+            if params.get(*index) != Some(dtype) {
+                return Err("unbound lexical parameter".into());
+            }
+        }
+        if u.op == Ops::Call && u.src.first().is_some_and(|b| b.op == Ops::Stack) {
+            stack.push((
+                u.src[0].clone(),
+                Some(u.src[1..].iter().map(UOp::dtype).collect()),
+            ));
+            for arg in &u.src[1..] {
+                stack.push((arg.clone(), signature.clone()));
+            }
+        } else {
+            for src in &u.src {
+                stack.push((src.clone(), signature.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+pub fn assert_uop(actual: &UOp, expected: &UOp) -> Result<()> {
+    if print(actual) == print(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "UOp mismatch\nactual\n{}expected\n{}",
+            print(actual),
+            print(expected)
+        ))
+    }
+}
+```
+
+`tests/uir.rs`を保存する。
+
+```rust
+// file="tests/uir.rs" mode="write"
+use chibigrad::{
+    DType, UOp,
+    functions::Function,
+    scalar::{self, Value},
+};
 #[test]
-fn scoped_calls_and_assertion_failure() -> Result<()> {
-	let f = Function::build("double_sum", vec![(DType::F32, None); 2], |g, args| {
-		let sum = g.alu(Alu::Add, args.to_vec())?;
-		let two = g.constant(Value::f32(2.));
-		Ok(vec![g.alu(Alu::Mul, vec![sum, two])?])
-	})?;
-	let mut g = ScalarGraph::default();
-	for (a, b, expected) in [(2., 3., 10.), (5., 1., 12.)] {
-		let a = g.constant(Value::f32(a));
-		let b = g.constant(Value::f32(b));
-		let y = f.call(&mut g, &[a, b])?[0];
-		assert_eq!(g.compile(y)?.run(&[])?, Value::f32(expected));
-		assert!(chibigrad::functions::assert_uop(&g, y, &[], Value::f32(expected + 1.)).is_err());
-	}
-	let other = Function::build("other", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![g.alu(Alu::Add, args.to_vec())?])
-	})?;
-	assert_ne!(f.scope, other.scope);
-	let a = g.constant(Value::I32(1));
-	assert!(f.call(&mut g, &[a]).is_err());
-	assert!(f.call(&mut g, &[a, a]).is_err());
-	Ok(())
-}
-```
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 2. PARAM の intern key に所属関数を含める。
-<!-- todo:04-002 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/scalar.rs` の `pub fn scoped_param(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/scalar.rs" mode="replace" item="pub fn scoped_param("
-	pub fn scoped_param(
-		&mut self,
-		scope: usize,
-		slot: usize,
-		dtype: DType,
-		bounds: Option<Bounds>,
-	) -> Result<usize> {
-		if dtype == DType::Void {
-			return Err("void PARAM".into());
-		}
-		if let Some(b) = bounds {
-			if b.lo > b.hi
-				|| dtype == DType::I32 && (b.lo < i32::MIN as i64 || b.hi > i32::MAX as i64)
-			{
-				return Err("invalid parameter bounds".into());
-			}
-		}
-		Ok(self.push(SNode {
-			op: SOp::Param {
-				slot,
-				scope,
-				dtype,
-				bounds,
-			},
-			inputs: vec![],
-			dtype,
-			bounds: bounds.or(if dtype == DType::I32 {
-				Some(Bounds::I32)
-			} else {
-				None
-			}),
-		}))
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 3. interpreter が呼出しごとに引数環境を作るようにする。
-<!-- todo:04-003 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn evaluate(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn evaluate("
-	pub fn evaluate(&self, args: &[Value]) -> Result<Vec<Value>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		self.outputs
-			.iter()
-			.map(|&id| self.graph.evaluate_scoped(id, args, self.scope))
-			.collect()
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 4. C 生成前に body を capture なしで inline する。
-<!-- todo:04-004 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn call("
-	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
-			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
-			if n.dtype != dtype {
-				return Err("CALL argument dtype".into());
-			}
-			if let Some(expected) = bounds {
-				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
-				if actual.lo < expected.lo || actual.hi > expected.hi {
-					return Err("CALL argument exceeds declared bounds".into());
-				}
-			}
-		}
-		let mut map: HashMap<usize, usize> = HashMap::new();
-		for &root in &self.outputs {
-			self.graph.verify(root, self.scope)?;
-			for id in self.graph.order(root)? {
-				if map.contains_key(&id) {
-					continue;
-				}
-				let node = &self.graph.nodes[id];
-				let value = match node.op {
-					SOp::Const(v) => caller.constant(v),
-					SOp::Param { slot, scope, .. } => {
-						if scope != self.scope {
-							return Err("capture from another scope".into());
-						}
-						*args.get(slot).ok_or("unbound function parameter")?
-					}
-					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
-				};
-				map.insert(id, value);
-			}
-		}
-		Ok(self.outputs.iter().map(|id| map[id]).collect())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 5. `f(2,3)=10` と `f(5,1)=12` を CPU まで通す。
-<!-- todo:04-005 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
+fn canonical_roundtrip_rejects_corruption() {
+    let x = Function::parameter(0, DType::F32);
+    let shared = x.add(&UOp::f32(-0.));
+    let f = Function::new(&[DType::F32], &[shared.mul(&shared)]).unwrap();
+    let y = f.call(&[UOp::f32(4.)]).unwrap();
+    let text = chibigrad::uir::print(&y);
+    let parsed = chibigrad::uir::parse(&text).unwrap();
+    chibigrad::uir::assert_uop(&y, &parsed).unwrap();
+    assert_eq!(scalar::evaluate(&parsed, &[]).unwrap(), Value::f32(16.));
+    for bad in [
+        text.replace("root=", "oops="),
+        text.replace("f32;80000000", "f32;gggggggg"),
+        text.replace("0=Param", "7=Param"),
+        text.replace("[0,1]", "[999,1]"),
+        text.replace("F32 [] scalar;0;F32", "I32 [] scalar;0;F32"),
+        format!("{text}extra\n"),
+    ] {
+        assert!(chibigrad::uir::parse(&bad).is_err(), "{bad}");
+    }
 }
 ```
 
 ```sh
-# check
-cargo test --quiet --test function_stack
+# check step=04.02
+cargo test --offline
 ```
 
-## 6. 同型 scalar の STACK を interpreter と型導出へ加える。
-<!-- todo:04-006 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn build("
-	pub fn build(
-		name: &str,
-		parameters: Vec<(DType, Option<Bounds>)>,
-		body: impl FnOnce(&mut ScalarGraph, &[usize]) -> Result<Vec<usize>>,
-	) -> Result<Self> {
-		if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-			return Err("invalid function name".into());
-		}
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let args = parameters
-			.iter()
-			.enumerate()
-			.map(|(slot, &(dtype, bounds))| graph.scoped_param(scope, slot, dtype, bounds))
-			.collect::<Result<Vec<_>>>()?;
-		let outputs = body(&mut graph, &args)?;
-		if outputs.is_empty() {
-			return Err("empty function result".into());
-		}
-		for &root in &outputs {
-			graph.verify(root, scope)?;
-		}
-		let dtype = graph.nodes[outputs[0]].dtype;
-		if outputs.iter().any(|&id| graph.nodes[id].dtype != dtype) {
-			return Err("STACK requires homogeneous scalar results".into());
-		}
-		Ok(Self {
-			name: name.into(),
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 7. 静的 INDEX の型と `0 <= index < len` を検証する。
-<!-- todo:04-007 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn index("
-	pub fn index(results: &[usize], index: isize) -> Result<usize> {
-		usize::try_from(index)
-			.ok()
-			.and_then(|i| results.get(i).copied())
-			.ok_or("STACK INDEX out of bounds".into())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 8. CALL の結果に固定長 STACK を許し、各要素を inline する。
-<!-- todo:04-008 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn call("
-	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
-			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
-			if n.dtype != dtype {
-				return Err("CALL argument dtype".into());
-			}
-			if let Some(expected) = bounds {
-				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
-				if actual.lo < expected.lo || actual.hi > expected.hi {
-					return Err("CALL argument exceeds declared bounds".into());
-				}
-			}
-		}
-		let mut map: HashMap<usize, usize> = HashMap::new();
-		for &root in &self.outputs {
-			self.graph.verify(root, self.scope)?;
-			for id in self.graph.order(root)? {
-				if map.contains_key(&id) {
-					continue;
-				}
-				let node = &self.graph.nodes[id];
-				let value = match node.op {
-					SOp::Const(v) => caller.constant(v),
-					SOp::Param { slot, scope, .. } => {
-						if scope != self.scope {
-							return Err("capture from another scope".into());
-						}
-						*args.get(slot).ok_or("unbound function parameter")?
-					}
-					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
-				};
-				map.insert(id, value);
-			}
-		}
-		Ok(self.outputs.iter().map(|id| map[id]).collect())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 9. `pair(2,3)` から `5` と `-1` を取り出して C まで通す。
-<!-- todo:04-009 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 10. 対応演算だけの printer と parser を追加する。
-<!-- todo:04-010 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn from_uir("
-	pub fn from_uir(text: &str) -> Result<Self> {
-		let mut lines = text.lines();
-		let header = lines
-			.next()
-			.ok_or("missing function header")?
-			.split_whitespace()
-			.collect::<Vec<_>>();
-		if header.len() != 2 || header[0] != "function" {
-			return Err("invalid function header".into());
-		}
-		let name = header[1].to_string();
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let mut parameters = vec![];
-		let mut outputs = None;
-		for line in lines {
-			if outputs.is_some() {
-				return Err("tokens after return".into());
-			}
-			let fields = line.split_whitespace().collect::<Vec<_>>();
-			if fields.is_empty() {
-				continue;
-			}
-			let parse = |s: &str| {
-				s.parse::<usize>()
-					.map_err(|_| "invalid node number".to_string())
-			};
-			match fields[0] {
-				"const" if fields.len() == 3 => {
-					let t = parse_dtype(fields[1])?;
-					let bits = fields[2]
-						.parse::<u64>()
-						.map_err(|_| "invalid constant bits")?;
-					graph.constant(Value::unpack(t, bits)?);
-				}
-				"param" if fields.len() == 5 => {
-					let slot = parse(fields[1])?;
-					if slot != parameters.len() {
-						return Err("non-dense function parameter".into());
-					}
-					let t = parse_dtype(fields[2])?;
-					let bounds = if fields[3] == "none" && fields[4] == "none" {
-						None
-					} else {
-						Some(Bounds::new(
-							fields[3].parse().map_err(|_| "invalid bound")?,
-							fields[4].parse().map_err(|_| "invalid bound")?,
-						)?)
-					};
-					graph.scoped_param(scope, slot, t, bounds)?;
-					parameters.push((t, bounds));
-				}
-				"alu" if fields.len() >= 3 => {
-					graph.alu(
-						parse_alu(fields[1])?,
-						fields[2..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<_>>()?,
-					)?;
-				}
-				"return" if fields.len() >= 2 => {
-					outputs = Some(
-						fields[1..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<Vec<_>>>()?,
-					);
-				}
-				_ => return Err(format!("invalid UIR instruction {line}")),
-			}
-		}
-		let outputs = outputs.ok_or("missing return")?;
-		for &id in &outputs {
-			graph.verify(id, scope)?;
-		}
-		if outputs
-			.iter()
-			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
-		{
-			return Err("heterogeneous STACK".into());
-		}
-		Ok(Self {
-			name,
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-```
-
-`src/functions.rs` の `pub fn to_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn to_uir("
-	pub fn to_uir(&self) -> String {
-		let mut text = format!("function {}\n", self.name);
-		for node in &self.graph.nodes {
-			let line = match node.op {
-				SOp::Const(v) => format!("const {} {}", dtype_name(v.dtype()), v.pack()),
-				SOp::Param {
-					slot,
-					dtype,
-					bounds,
-					..
-				} => format!(
-					"param {slot} {} {}",
-					dtype_name(dtype),
-					bounds
-						.map(|b| format!("{} {}", b.lo, b.hi))
-						.unwrap_or("none none".into())
-				),
-				SOp::Alu(op) => format!(
-					"alu {} {}",
-					alu_name(op),
-					node.inputs
-						.iter()
-						.map(|i| i.to_string())
-						.collect::<Vec<_>>()
-						.join(" ")
-				),
-			};
-			text.push_str(&line);
-			text.push('\n');
-		}
-		text.push_str(&format!(
-			"return {}\n",
-			self.outputs
-				.iter()
-				.map(|i| i.to_string())
-				.collect::<Vec<_>>()
-				.join(" ")
-		));
-		text
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 11. 入力番号、関数名、dtype を検証してから arena へ入れる。
-<!-- todo:04-011 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn from_uir("
-	pub fn from_uir(text: &str) -> Result<Self> {
-		let mut lines = text.lines();
-		let header = lines
-			.next()
-			.ok_or("missing function header")?
-			.split_whitespace()
-			.collect::<Vec<_>>();
-		if header.len() != 2 || header[0] != "function" {
-			return Err("invalid function header".into());
-		}
-		let name = header[1].to_string();
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let mut parameters = vec![];
-		let mut outputs = None;
-		for line in lines {
-			if outputs.is_some() {
-				return Err("tokens after return".into());
-			}
-			let fields = line.split_whitespace().collect::<Vec<_>>();
-			if fields.is_empty() {
-				continue;
-			}
-			let parse = |s: &str| {
-				s.parse::<usize>()
-					.map_err(|_| "invalid node number".to_string())
-			};
-			match fields[0] {
-				"const" if fields.len() == 3 => {
-					let t = parse_dtype(fields[1])?;
-					let bits = fields[2]
-						.parse::<u64>()
-						.map_err(|_| "invalid constant bits")?;
-					graph.constant(Value::unpack(t, bits)?);
-				}
-				"param" if fields.len() == 5 => {
-					let slot = parse(fields[1])?;
-					if slot != parameters.len() {
-						return Err("non-dense function parameter".into());
-					}
-					let t = parse_dtype(fields[2])?;
-					let bounds = if fields[3] == "none" && fields[4] == "none" {
-						None
-					} else {
-						Some(Bounds::new(
-							fields[3].parse().map_err(|_| "invalid bound")?,
-							fields[4].parse().map_err(|_| "invalid bound")?,
-						)?)
-					};
-					graph.scoped_param(scope, slot, t, bounds)?;
-					parameters.push((t, bounds));
-				}
-				"alu" if fields.len() >= 3 => {
-					graph.alu(
-						parse_alu(fields[1])?,
-						fields[2..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<_>>()?,
-					)?;
-				}
-				"return" if fields.len() >= 2 => {
-					outputs = Some(
-						fields[1..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<Vec<_>>>()?,
-					);
-				}
-				_ => return Err(format!("invalid UIR instruction {line}")),
-			}
-		}
-		let outputs = outputs.ok_or("missing return")?;
-		for &id in &outputs {
-			graph.verify(id, scope)?;
-		}
-		if outputs
-			.iter()
-			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
-		{
-			return Err("heterogeneous STACK".into());
-		}
-		Ok(Self {
-			name,
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 12. f32 の特殊値もビット列で往復するようにする。
-<!-- todo:04-012 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`src/functions.rs` の `pub fn from_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn from_uir("
-	pub fn from_uir(text: &str) -> Result<Self> {
-		let mut lines = text.lines();
-		let header = lines
-			.next()
-			.ok_or("missing function header")?
-			.split_whitespace()
-			.collect::<Vec<_>>();
-		if header.len() != 2 || header[0] != "function" {
-			return Err("invalid function header".into());
-		}
-		let name = header[1].to_string();
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let mut parameters = vec![];
-		let mut outputs = None;
-		for line in lines {
-			if outputs.is_some() {
-				return Err("tokens after return".into());
-			}
-			let fields = line.split_whitespace().collect::<Vec<_>>();
-			if fields.is_empty() {
-				continue;
-			}
-			let parse = |s: &str| {
-				s.parse::<usize>()
-					.map_err(|_| "invalid node number".to_string())
-			};
-			match fields[0] {
-				"const" if fields.len() == 3 => {
-					let t = parse_dtype(fields[1])?;
-					let bits = fields[2]
-						.parse::<u64>()
-						.map_err(|_| "invalid constant bits")?;
-					graph.constant(Value::unpack(t, bits)?);
-				}
-				"param" if fields.len() == 5 => {
-					let slot = parse(fields[1])?;
-					if slot != parameters.len() {
-						return Err("non-dense function parameter".into());
-					}
-					let t = parse_dtype(fields[2])?;
-					let bounds = if fields[3] == "none" && fields[4] == "none" {
-						None
-					} else {
-						Some(Bounds::new(
-							fields[3].parse().map_err(|_| "invalid bound")?,
-							fields[4].parse().map_err(|_| "invalid bound")?,
-						)?)
-					};
-					graph.scoped_param(scope, slot, t, bounds)?;
-					parameters.push((t, bounds));
-				}
-				"alu" if fields.len() >= 3 => {
-					graph.alu(
-						parse_alu(fields[1])?,
-						fields[2..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<_>>()?,
-					)?;
-				}
-				"return" if fields.len() >= 2 => {
-					outputs = Some(
-						fields[1..]
-							.iter()
-							.map(|s| parse(s))
-							.collect::<Result<Vec<_>>>()?,
-					);
-				}
-				_ => return Err(format!("invalid UIR instruction {line}")),
-			}
-		}
-		let outputs = outputs.ok_or("missing return")?;
-		for &id in &outputs {
-			graph.verify(id, scope)?;
-		}
-		if outputs
-			.iter()
-			.any(|&id| graph.nodes[id].dtype != graph.nodes[outputs[0]].dtype)
-		{
-			return Err("heterogeneous STACK".into());
-		}
-		Ok(Self {
-			name,
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 13. `pair` の UIR を出力し、読み戻したグラフから C を生成する。
-<!-- todo:04-013 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 14. 読み戻し前後で `5` と `-1` が一致することを assertion で確かめる。
-<!-- todo:04-014 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 15. 未束縛 PARAM と他関数の PARAM の直接参照を拒否する。
-<!-- todo:04-015 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn build(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn build("
-	pub fn build(
-		name: &str,
-		parameters: Vec<(DType, Option<Bounds>)>,
-		body: impl FnOnce(&mut ScalarGraph, &[usize]) -> Result<Vec<usize>>,
-	) -> Result<Self> {
-		if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-			return Err("invalid function name".into());
-		}
-		let scope = NEXT_SCOPE.fetch_add(1, Ordering::Relaxed);
-		let mut graph = ScalarGraph::default();
-		let args = parameters
-			.iter()
-			.enumerate()
-			.map(|(slot, &(dtype, bounds))| graph.scoped_param(scope, slot, dtype, bounds))
-			.collect::<Result<Vec<_>>>()?;
-		let outputs = body(&mut graph, &args)?;
-		if outputs.is_empty() {
-			return Err("empty function result".into());
-		}
-		for &root in &outputs {
-			graph.verify(root, scope)?;
-		}
-		let dtype = graph.nodes[outputs[0]].dtype;
-		if outputs.iter().any(|&id| graph.nodes[id].dtype != dtype) {
-			return Err("STACK requires homogeneous scalar results".into());
-		}
-		Ok(Self {
-			name: name.into(),
-			scope,
-			graph,
-			parameters,
-			outputs,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 16. CALL の引数不足、dtype 不一致、再帰を拒否する。
-<!-- todo:04-016 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`src/functions.rs` の `pub fn call(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn call("
-	pub fn call(&self, caller: &mut ScalarGraph, args: &[usize]) -> Result<Vec<usize>> {
-		if args.len() != self.parameters.len() {
-			return Err("CALL argument count".into());
-		}
-		for (&arg, &(dtype, bounds)) in args.iter().zip(&self.parameters) {
-			let n = caller.nodes.get(arg).ok_or("CALL unknown argument")?;
-			if n.dtype != dtype {
-				return Err("CALL argument dtype".into());
-			}
-			if let Some(expected) = bounds {
-				let actual = n.bounds.ok_or("CALL cannot prove parameter bounds")?;
-				if actual.lo < expected.lo || actual.hi > expected.hi {
-					return Err("CALL argument exceeds declared bounds".into());
-				}
-			}
-		}
-		let mut map: HashMap<usize, usize> = HashMap::new();
-		for &root in &self.outputs {
-			self.graph.verify(root, self.scope)?;
-			for id in self.graph.order(root)? {
-				if map.contains_key(&id) {
-					continue;
-				}
-				let node = &self.graph.nodes[id];
-				let value = match node.op {
-					SOp::Const(v) => caller.constant(v),
-					SOp::Param { slot, scope, .. } => {
-						if scope != self.scope {
-							return Err("capture from another scope".into());
-						}
-						*args.get(slot).ok_or("unbound function parameter")?
-					}
-					SOp::Alu(op) => caller.alu(op, node.inputs.iter().map(|x| map[x]).collect())?,
-				};
-				map.insert(id, value);
-			}
-		}
-		Ok(self.outputs.iter().map(|id| map[id]).collect())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 17. INDEX の負数と長さ以上の値を拒否する。
-<!-- todo:04-017 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`src/functions.rs` の `pub fn index(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/functions.rs" mode="replace" item="pub fn index("
-	pub fn index(results: &[usize], index: isize) -> Result<usize> {
-		usize::try_from(index)
-			.ok()
-			.and_then(|i| results.get(i).copied())
-			.ok_or("STACK INDEX out of bounds".into())
-	}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 18. `assert_uop` が意図的に誤った予定値で失敗することを確認する。
-<!-- todo:04-018 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 19. 二つの呼出しで値を混同せず、`10` と `12` を返す。
-<!-- todo:04-019 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 20. STACK の選択結果が `5` と `-1` になる。
-<!-- todo:04-020 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 21. UIR の出力、入力、実行が一往復する。
-<!-- todo:04-021 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 22. 異なる関数の PARAM が同じ NodeId に共有されない。
-<!-- todo:04-022 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
-
-## 23. 誤った予定値と不正な UIR の assertion が実際に失敗する。
-<!-- todo:04-023 -->
-
-`tests/function_stack.rs` の `function_stack_uir` で、この経路の値または拒否条件を確認する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack function_stack_uir
-```
-
-## 24. scalar の前章までの例も同じ pipeline で成功する。
-<!-- todo:04-024 -->
-
-`tests/function_stack.rs` の正常系と境界系をまとめて再実行する。
-
-`tests/function_stack.rs` の `fn function_stack_uir(`の定義を次の全体で置き換えます。
-
-```rust
-// file="tests/function_stack.rs" mode="replace" item="fn function_stack_uir("
-fn function_stack_uir() -> Result<()> {
-	let f = Function::build("pair", vec![(DType::F32, None); 2], |g, args| {
-		Ok(vec![
-			g.alu(Alu::Add, args.to_vec())?,
-			g.alu(Alu::Sub, args.to_vec())?,
-		])
-	})?;
-	let restored = Function::from_uir(&f.to_uir())?;
-	let mut g = ScalarGraph::default();
-	let a = g.constant(Value::f32(2.));
-	let b = g.constant(Value::f32(3.));
-	for f in [&f, &restored] {
-		let results = f.call(&mut g, &[a, b])?;
-		assert_eq!(g.compile(results[0])?.run(&[])?, Value::f32(5.));
-		assert_eq!(g.compile(results[1])?.run(&[])?, Value::f32(-1.));
-		assert!(Function::index(&results, -1).is_err());
-	}
-	assert!(Function::from_uir("function f\ncall f\nreturn 0\n").is_err());
-	Ok(())
-}
-```
-
-```sh
-# check
-cargo test --quiet --test function_stack
-```
+共有を保った往復、正しい関数結果、壊れた浮動小数点ビット列や前方参照の拒否を確認する。
 
 ## 章末の累積確認
 
-前章までの example と test も同じ checkout で再ビルドする。
+前の章までのテストとexampleも再ビルドします。
 
 ```sh
 # check
 cargo test --quiet --all-targets
 ```
+
+## 要件との対応
+
+### 04-001 `FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。
+
+<!-- todo:04-001 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-002 PARAM の intern key に所属関数を含める。
+
+<!-- todo:04-002 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-003 interpreter が呼出しごとに引数環境を作るようにする。
+
+<!-- todo:04-003 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-004 C 生成前に body を capture なしで inline する。
+
+<!-- todo:04-004 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-005 `f(2,3)=10` と `f(5,1)=12` を CPU まで通す。
+
+<!-- todo:04-005 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-006 同型 scalar の STACK を interpreter と型導出へ加える。
+
+<!-- todo:04-006 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-007 静的 INDEX の型と `0 <= index < len` を検証する。
+
+<!-- todo:04-007 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-008 CALL の結果に固定長 STACK を許し、各要素を inline する。
+
+<!-- todo:04-008 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-009 `pair(2,3)` から `5` と `-1` を取り出して C まで通す。
+
+<!-- todo:04-009 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-010 対応演算だけの printer と parser を追加する。
+
+<!-- todo:04-010 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-011 入力番号、関数名、dtype を検証してから arena へ入れる。
+
+<!-- todo:04-011 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-012 f32 の特殊値もビット列で往復するようにする。
+
+<!-- todo:04-012 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-013 `pair` の UIR を出力し、読み戻したグラフから C を生成する。
+
+<!-- todo:04-013 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-014 読み戻し前後で `5` と `-1` が一致することを assertion で確かめる。
+
+<!-- todo:04-014 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-015 未束縛 PARAM と他関数の PARAM の直接参照を拒否する。
+
+<!-- todo:04-015 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-016 CALL の引数不足、dtype 不一致、再帰を拒否する。
+
+<!-- todo:04-016 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-017 INDEX の負数と長さ以上の値を拒否する。
+
+<!-- todo:04-017 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-018 `assert_uop` が意図的に誤った予定値で失敗することを確認する。
+
+<!-- todo:04-018 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-019 二つの呼出しで値を混同せず、`10` と `12` を返す。
+
+<!-- todo:04-019 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-020 STACK の選択結果が `5` と `-1` になる。
+
+<!-- todo:04-020 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-021 UIR の出力、入力、実行が一往復する。
+
+<!-- todo:04-021 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-022 異なる関数の PARAM が同じ NodeId に共有されない。
+
+<!-- todo:04-022 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-023 誤った予定値と不正な UIR の assertion が実際に失敗する。
+
+<!-- todo:04-023 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
+
+### 04-024 scalar の前章までの例も同じ pipeline で成功する。
+
+<!-- todo:04-024 -->
+
+関連する実装と確認は本章の `04.01`, `04.02` にある。`tests/uir.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。

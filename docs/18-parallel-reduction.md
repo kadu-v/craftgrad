@@ -1,2629 +1,1049 @@
-# 18. LOCAL と一様な barrier で並列縮約する
+# 18. local buffer と barrier で並列縮約する
 
-この章は前章までの `chibigrad` に追加する。掲載順に `file=` のパスへ保存する。`mode=write` はそのファイル全体を置き換え、`mode=append` は末尾へ追記する。既存の別ファイルは残す。各コードは省略なしの実装である。
+前の節で動かしたコードに、今回使う演算と処理を追加します。各節の確認を実行してから次へ進みます。
 
-CPU の実行結果と GPU の実機結果を別に記録する。`requires=metal` と `requires=opencl` の確認は、その device がある環境で実行する。機器がなければ `NOT_RUN` と記録し、source 検査の成功へ置き換えない。
+参照するUOpの構成は [tinygrad c22edff](https://github.com/tinygrad/tinygrad/blob/c22edff14c79310a9b2df62a78819cf77c8289fa/tinygrad/uop/ops.py) です。最初から全機能を実装せず、使う節で増やします。
 
-`LocalOp` は barrier の条件分岐を表現しない。一様な命令列から Metal と OpenCL の source を生成する。tree の一回の加算後に全 lane が barrier を通る。全 GPU の同期は二つの kernel と runtime の完了待ちで表す。後続 program は `compile_next` で同じ device と queue を使う。OpenCL では context も共有する。実機 test は `shares_queue` で同じ API object を確認してから、部分和を次の入力へ bind する。
+## 18.01 shared memory と barrier で一行を縮約する
 
-<a id="local-implementation"></a>
+まず幅とlocal sizeが同じ2の冪の一行を扱う。各laneが一要素を共有領域へ書き、全laneでbarrierを通してから半分ずつ足す。
 
-## 実装を保存する
-
-```rust
-// file=src/lib.rs mode=append
-pub mod collective;
-pub mod gpu_kernels;
-```
+`src/gpu.rs` の `pub(crate) struct Builder`を置き換える。
 
 ```rust
-// file=src/collective.rs mode=write
-use crate::Result;
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LocalOp {
-	WritePartial,
-	Barrier,
-	Tree { stride: usize },
-	SerialFinish,
-	StoreLaneZero,
-}
-#[derive(Clone, Debug)]
-pub struct Collective {
-	pub lanes: usize,
-	pub local_elements: usize,
-	pub ops: Vec<LocalOp>,
-}
-impl Collective {
-	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
-		if !lanes.is_power_of_two() {
-			return Err("local must be power of two".into());
-		}
-		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
-		if tree {
-			let mut stride = lanes / 2;
-			while stride > 0 {
-				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
-				stride /= 2;
-			}
-		} else {
-			ops.push(LocalOp::SerialFinish);
-		}
-		ops.push(LocalOp::StoreLaneZero);
-		let program = Self {
-			lanes,
-			local_elements: lanes,
-			ops,
-		};
-		program.verify()?;
-		Ok(program)
-	}
-	pub fn verify(&self) -> Result<()> {
-		if self.lanes == 0 || self.local_elements < self.lanes {
-			return Err("LOCAL allocation shorter than lane stores".into());
-		}
-		let mut written = false;
-		let mut visible = false;
-		let mut final_store = false;
-		for op in &self.ops {
-			match *op {
-				LocalOp::WritePartial => {
-					if written && !visible {
-						return Err("LOCAL reuse before barrier".into());
-					}
-					written = true;
-					visible = false;
-				}
-				LocalOp::Barrier => {
-					if !written {
-						return Err("barrier without LOCAL write".into());
-					}
-					visible = true;
-				}
-				LocalOp::Tree { stride } => {
-					if !visible
-						|| stride == 0 || stride
-						.checked_mul(2)
-						.is_none_or(|n| n > self.local_elements)
-					{
-						return Err("LOCAL tree read before barrier or outside allocation".into());
-					}
-					visible = false;
-				}
-				LocalOp::SerialFinish => {
-					if !visible {
-						return Err("serial LOCAL read before barrier".into());
-					}
-				}
-				LocalOp::StoreLaneZero => {
-					if !visible {
-						return Err("global store before LOCAL results visible".into());
-					}
-					final_store = true;
-				}
-			}
-		}
-		if !final_store {
-			return Err("missing lane0 output".into());
-		}
-		Ok(())
-	}
-	pub fn linearize(&self) -> Result<Vec<LocalOp>> {
-		self.verify()?;
-		Ok(self.ops.clone())
-	}
+// file="src/gpu.rs" mode="replace" item="pub(crate) struct Builder"
+pub(crate) struct Builder {
+    ops: Vec<UOp>,
+    seen: HashSet<u64>,
+    pub(crate) next: usize,
 }
 ```
 
+`src/gpu.rs` の `impl Builder` 内 の `pub(crate) fn new`を置き換える。
+
 ```rust
-// file=src/gpu_kernels.rs mode=write
-use crate::gpu::{Dialect, Kernel, groups, header};
-fn shared(d: Dialect) -> &'static str {
-	match d {
-		Dialect::Metal => "threadgroup",
-		Dialect::OpenCl => "__local",
-	}
+// file="src/gpu.rs" mode="replace" within="impl Builder" item="pub(crate) fn new"
+    pub(crate) fn new() -> Self {
+        Self {
+            ops: vec![],
+            seen: HashSet::new(),
+            next: 0,
+        }
+    }
+```
+
+`src/gpu.rs` の `impl Builder` 内を追記する。
+
+```rust
+// file="src/gpu.rs" mode="append" within="impl Builder"
+    pub(crate) fn alloc(&mut self, size: usize) -> UOp {
+        let id = self.next;
+        self.next += 1;
+        self.emit(UOp::new(
+            Ops::Alloc,
+            vec![],
+            Arg::Allocation {
+                id,
+                dtype: DType::F32,
+                size,
+            },
+        ))
+    }
+
+    pub(crate) fn barrier(&mut self, dep: UOp) -> UOp {
+        self.emit(UOp::new(Ops::Barrier, vec![dep], Arg::None))
+    }
+
+    pub(crate) fn load(&mut self, b: &UOp, index: UOp, valid: UOp) -> UOp {
+        self.emit(b.index(index, valid).load())
+    }
+
+    pub(crate) fn store(&mut self, b: &UOp, index: UOp, value: UOp, valid: UOp) -> UOp {
+        self.emit(b.index(index, valid).store(value))
+    }
+```
+
+`src/gpu.rs`を追記する。
+
+```rust
+// file="src/gpu.rs" mode="append"
+
+
+pub fn local_reduction(rows:usize,width:usize,local:usize)->Result<(UOp,Launch),String>{
+    if rows!=1 || width!=local || !local.is_power_of_two(){return Err("one row with power-of-two width equal to local size is required".into());}
+    let mut b=Builder::new();let input=b.param(0,width);let output=b.param(1,1);let lane=b.special("lid0");
+    let shared=b.alloc(local);let value=b.load(&input,lane.clone(),UOp::bool(true));
+    let stored=b.store(&shared,lane.clone(),value,UOp::bool(true));let mut dep=b.barrier(stored);
+    for step in (0..local.ilog2()).rev().map(|s|1usize<<s){let valid=lane.lt(&UOp::int(step as i64));
+        let a=b.load(&shared.after(vec![dep.clone()]),lane.clone(),valid.clone());
+        let rhs=b.load(&shared.after(vec![dep]),lane.add(&UOp::int(step as i64)),valid.clone());
+        let stored=b.store(&shared,lane.clone(),a.add(&rhs),valid);dep=b.barrier(stored);}
+    let value=b.load(&shared.after(vec![dep]),UOp::int(0),UOp::bool(true));b.store(&output,UOp::int(0),value,lane.eq(&UOp::int(0)));
+    Ok((b.finish(),Launch{groups:[1,1,1],local:[local,1,1]}))
 }
-fn barrier(d: Dialect) -> &'static str {
-	match d {
-		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
-		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
-	}
-}
-fn spec(
-	d: Dialect,
-	lengths: Vec<usize>,
-	body: String,
-	group_count: usize,
-	local: usize,
-	bytes: usize,
+```
+
+`src/renderers.rs` の `pub fn render`を置き換える。
+
+```rust
+// file="src/renderers.rs" mode="replace" item="pub fn render"
+pub fn render(
+    linear: &UOp,
+    entry: &str,
+    dialect: Dialect,
+    launch: Launch,
 ) -> Result<Kernel, String> {
-	if local == 0 {
-		return Err("local=0".into());
-	}
-	group_count.checked_mul(local).ok_or("launch overflow")?;
-	let output = lengths.len() - 1;
-	Ok(Kernel {
-		scalars: vec![],
-		source: header(d, lengths.len(), &body),
-		entry: "chibi".into(),
-		lengths,
-		output,
-		groups: group_count,
-		local,
-		shared_bytes: bytes,
-	})
-}
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-#[derive(Clone, Debug)]
-pub struct ReductionSchedule {
-	pub first: Kernel,
-	pub second: Kernel,
-}
-pub fn two_stage_sum(
-	d: Dialect,
-	n: usize,
-	chunk: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if chunk == 0 {
-		return Err("chunk=0".into());
-	}
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = n;
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	Ok(ReductionSchedule {
-		first,
-		second: row_sum(d, 1, count, local, true)?,
-	})
-}
-pub fn dynamic_sum(
-	d: Dialect,
-	n: usize,
-	capacity: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if n > capacity {
-		return Err("logical reduction length exceeds capacity".into());
-	}
-	if !local.is_power_of_two() {
-		return Err("reduction local must be power of two".into());
-	}
-	let chunk = local.checked_mul(4).ok_or("chunk overflow")?;
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = capacity;
-	first.scalars = vec![n as u64];
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<s[0]){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	let mut second = row_sum(d, 1, count, local, true)?;
-	second.scalars = vec![count as u64];
-	second.source = second
-		.source
-		.replace(&format!("c<{count};"), "c<s[0];")
-		.replace(&format!("g*{count}+c"), "g*s[0]+c");
-	Ok(ReductionSchedule { first, second })
+    ident(entry)?;
+    if linear.op != Ops::Linear {
+        return Err("GPU renderer requires lowered LINEAR UOps".into());
+    }
+    let mut params = BTreeMap::new();
+    let mut values = HashMap::<u64, String>::new();
+    let mut ranges = HashSet::new();
+    let mut body = String::new();
+    let mut declarations = String::new();
+    let mut shared_bytes = 0usize;
+    let core_signature = crate::codegen::signature(linear)?;
+    let buffer_slots = core_signature
+        .buffers
+        .iter()
+        .map(|(slot, u)| (u.id, *slot))
+        .collect::<HashMap<_, _>>();
+    for (slot, _) in &core_signature.buffers {
+        params.insert(*slot, format!("p{slot}"));
+    }
+    for u in &linear.src {
+        if let Arg::Slot { index, .. } = u.arg {
+            if u.op == Ops::Param {
+                params.insert(index, format!("p{index}"));
+            }
+        }
+    }
+    let mut source = match dialect {
+        Dialect::Metal => "#include <metal_stdlib>\nusing namespace metal;\n".to_owned(),
+        Dialect::OpenCl => String::new(),
+    };
+    source
+        .push_str(
+            "inline long chibi_div(long a,long b){long q=a/b,r=a%b;return q-((r!=0)&&((r<0)!=(b<0)));}\ninline long chibi_mod(long a,long b){long r=a%b;return r+(((r!=0)&&((r<0)!=(b<0)))?b:0);}\n",
+        );
+    {}
+    let mut signature = params
+        .iter()
+        .map(|(idx, name)| match dialect {
+            Dialect::Metal => format!("device float* {name} [[buffer({idx})]]"),
+            Dialect::OpenCl => format!("__global float* {name}"),
+        })
+        .collect::<Vec<_>>();
+    if dialect == Dialect::Metal {
+        signature
+            .extend([
+                "uint3 gid [[thread_position_in_grid]]".into(),
+                "uint3 lid [[thread_position_in_threadgroup]]".into(),
+                "uint3 group [[threadgroup_position_in_grid]]".into(),
+            ]);
+    }
+    for u in &linear.src {
+        let name = format!("v{}", u.id);
+        let get = |i: usize| -> Result<String, String> {
+            let s = u
+                .src
+                .get(i)
+                .ok_or_else(|| format!("missing {:?} source {i}", u.op))?;
+            values
+                .get(&s.id)
+                .cloned()
+                .ok_or_else(|| {
+                    format!("GPU UOp {:?} source {} not linearized", u.op, s.id)
+                })
+        };
+        let expr = match u.op {
+            Ops::Const => {
+                match u.arg {
+                    Arg::F32(bits) => {
+                        match dialect {
+                            Dialect::Metal => format!("as_type<float>((uint){bits})"),
+                            Dialect::OpenCl => format!("as_float((uint){bits})"),
+                        }
+                    }
+                    Arg::I32(x) => format!("{x}"),
+                    Arg::Int(x) => format!("{x}L"),
+                    Arg::Bool(b) => if b { "true" } else { "false" }.into(),
+                    _ => return Err("unsupported GPU constant".into()),
+                }
+            }
+            Ops::Alloc => {
+                if let Arg::Allocation { dtype, size, .. } = u.arg {
+                    let address = if size > 1 {
+                        shared_bytes = shared_bytes
+                            .checked_add(
+                                size
+                                    * match dtype {
+                                        DType::I64 => 8,
+                                        _ => 4,
+                                    },
+                            )
+                            .ok_or("GPU shared memory overflow")?;
+                        match dialect {
+                            Dialect::Metal => "threadgroup ",
+                            Dialect::OpenCl => "__local ",
+                        }
+                    } else {
+                        ""
+                    };
+                    declarations
+                        .push_str(&format!("{address}{} {name}[{size}];\n", ty(dtype)));
+                    values.insert(u.id, name);
+                    continue;
+                } else {
+                    return Err("GPU allocation missing layout".into());
+                }
+            }
+            Ops::Param | Ops::Buffer => {
+                format!(
+                    "p{}", buffer_slots.get(& u.id).ok_or("GPU buffer missing slot") ?
+                )
+            }
+            Ops::Index => {
+                if let Arg::DType(DType::F32x4) = u.arg {
+                    let address = if dialect == Dialect::Metal {
+                        "device "
+                    } else {
+                        "__global "
+                    };
+                    format!("((({address}float4*){})+({}))", get(0) ?, get(1) ?)
+                } else {
+                    format!("({}+({}))", get(0) ?, get(1) ?)
+                }
+            }
+            Ops::Load => {
+                {}
+                let index = &u.src[0];
+                let ptr = get(0)?;
+                let cast = match u.arg {
+                    Arg::DType(dt) => format!("{}*", ty(dt)),
+                    _ => "float*".into(),
+                };
+                let addr = if dialect == Dialect::Metal {
+                    "device "
+                } else {
+                    "__global "
+                };
+                let typed = if matches!(u.arg, Arg::DType(_)) {
+                    format!("(({addr}{cast}){ptr})")
+                } else {
+                    ptr
+                };
+                if index.op == Ops::Index && index.src.len() > 2
+                    && index.src[2] != UOp::bool(true)
+                {
+                    let valid = values
+                        .get(&index.src[2].id)
+                        .ok_or("missing GPU load mask")?;
+                    format!("({valid}?*{typed}:0)")
+                } else {
+                    format!("*{typed}")
+                }
+            }
+            Ops::Store => {
+                let ptr = get(0)?;
+                let value = get(1)?;
+                {}
+                let index = &u.src[0];
+                if index.op == Ops::Index && index.src.len() > 2
+                    && index.src[2] != UOp::bool(true)
+                {
+                    let valid = values
+                        .get(&index.src[2].id)
+                        .ok_or("missing GPU store mask")?;
+                    body.push_str(&format!("if({valid}) *{ptr}={value};\n"));
+                } else {
+                    body.push_str(&format!("*{ptr}={value};\n"));
+                }
+                String::new()
+            }
+            Ops::Range => {
+                let (id, axis) = if let Arg::Range { id, axis } = u.arg {
+                    (id, axis)
+                } else {
+                    return Err("range missing axis".into());
+                };
+                match axis {
+                    Axis::Global | Axis::Local => {
+                        let dim = id % 3;
+                        let hw = match (dialect, axis) {
+                            (Dialect::Metal, Axis::Global) => format!("gid[{}]", dim),
+                            (Dialect::Metal, _) => format!("lid[{}]", dim),
+                            (Dialect::OpenCl, Axis::Global) => {
+                                format!("get_global_id({dim})")
+                            }
+                            _ => format!("get_local_id({dim})"),
+                        };
+                        declarations.push_str(&format!("long {name};\n"));
+                        body.push_str(&format!("{name}={hw};\n"));
+                    }
+                    _ => {
+                        declarations.push_str(&format!("long {name};\n"));
+                        body.push_str(
+                            &format!(
+                                "for({name}={};{name}<{};{name}++){{\n", get(0) ?, get(1) ?
+                            ),
+                        );
+                        ranges.insert(u.id);
+                    }
+                }
+                values.insert(u.id, name);
+                continue;
+            }
+            Ops::End => {
+                if u.src.last().is_some_and(|r| ranges.contains(&r.id)) {
+                    body.push_str("}\n");
+                }
+                String::new()
+            }
+            Ops::Special => {
+                let text = if let Arg::Text(ref t) = u.arg {
+                    t.as_str()
+                } else {
+                    return Err("SPECIAL requires gid/lid/group and dimension".into());
+                };
+                let (kind, dim) = text.split_at(text.len().saturating_sub(1));
+                let dim = dim.parse::<usize>().map_err(|_| "invalid SPECIAL dimension")?;
+                if dim > 2 {
+                    return Err("SPECIAL dimension outside grid".into());
+                }
+                match (dialect, kind) {
+                    (Dialect::Metal, "gid") => format!("gid[{dim}]"),
+                    (Dialect::Metal, "lid") => format!("lid[{dim}]"),
+                    (Dialect::Metal, "group") => format!("group[{dim}]"),
+                    (Dialect::OpenCl, "gid") => format!("get_global_id({dim})"),
+                    (Dialect::OpenCl, "lid") => format!("get_local_id({dim})"),
+                    (Dialect::OpenCl, "group") => format!("get_group_id({dim})"),
+                    _ => return Err("invalid SPECIAL builtin".into()),
+                }
+            }
+            Ops::Barrier => {
+                body.push_str(
+                    match dialect {
+                        Dialect::Metal => {
+                            "threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+                        }
+                        Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);\n",
+                    },
+                );
+                String::new()
+            }
+            Ops::Div if matches!(u.dtype(), DType::I32 | DType::I64) => {
+                format!("chibi_div({},{})", get(0) ?, get(1) ?)
+            }
+            Ops::Mod => format!("chibi_mod({},{})", get(0) ?, get(1) ?),
+            Ops::Add
+            | Ops::Sub
+            | Ops::Mul
+            | Ops::Div
+            | Ops::Lt
+            | Ops::Eq
+            | Ops::And
+            | Ops::Or => {
+                let op = match u.op {
+                    Ops::Add => "+",
+                    Ops::Sub => "-",
+                    Ops::Mul => "*",
+                    Ops::Div => "/",
+                    Ops::Mod => "%",
+                    Ops::Lt => "<",
+                    Ops::Eq => "==",
+                    Ops::And => "&&",
+                    _ => "||",
+                };
+                format!("({} {op} {})", get(0) ?, get(1) ?)
+            }
+            Ops::Max => format!("max({},{})", get(0) ?, get(1) ?),
+            Ops::Neg => format!("(-{})", get(0) ?),
+            Ops::Exp
+            | Ops::Log
+            | Ops::Sin
+            | Ops::Cos
+            | Ops::Sqrt
+            | Ops::Exp2
+            | Ops::Log2 => {
+                let fun = match u.op {
+                    Ops::Exp => "exp",
+                    Ops::Log => "log",
+                    Ops::Sin => "sin",
+                    Ops::Cos => "cos",
+                    Ops::Sqrt => "sqrt",
+                    Ops::Exp2 => "exp2",
+                    _ => "log2",
+                };
+                format!("{fun}({})", get(0) ?)
+            }
+            Ops::Where => format!("({}?{}:{})", get(0) ?, get(1) ?, get(2) ?),
+            Ops::Cast => format!("(({}){})", ty(u.dtype()), get(0) ?),
+            Ops::After => get(0)?,
+            Ops::Sink | Ops::Linear => String::new(),
+            _ => return Err(format!("unsupported lowered GPU UOp {:?}", u.op)),
+        };
+        if !expr.is_empty() {
+            if matches!(u.op, Ops::Index | Ops::Param | Ops::Buffer | Ops::After) {
+                values.insert(u.id, expr);
+            } else {
+                declarations.push_str(&format!("{} {name};\n", ty(u.dtype())));
+                body.push_str(&format!("{name}={expr};\n"));
+                values.insert(u.id, name);
+            }
+        }
+    }
+    let mut declared = HashSet::new();
+    let declarations = declarations
+        .lines()
+        .filter(|line| declared.insert(*line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    source
+        .push_str(
+            &format!(
+                "{} void {entry}({}){{\n{declarations}{body}}}\n", match dialect {
+                Dialect::Metal => "kernel", Dialect::OpenCl => "__kernel", }, signature
+                .join(",")
+            ),
+        );
+    Ok(Kernel {
+        source,
+        entry: entry.into(),
+        launch,
+        shared_bytes,
+    })
 }
 ```
 
+`src/uir.rs` の `fn op`を置き換える。
+
 ```rust
-// file=src/gpu_graph.rs mode=append
-impl GpuPlan {
-	pub fn compile_parallel(
-		graph: &Graph,
-		outputs: &[usize],
-		backend: Backend,
-		local: usize,
-	) -> Result<Self> {
-		let mut lowered = lower(graph, outputs, backend.dialect(), local)?;
-		for (kernel, slots) in &mut lowered {
-			let out = *slots.last().ok_or("output")?;
-			if let Op::Reduce {
-				op: crate::Reduce::Sum,
-				x,
-				ref axes,
-				..
-			} = graph.nodes[out].op
-			{
-				let shape = graph.shape(x);
-				if shape.len() == 2 && axes == &[1] && matches!(graph.nodes[x].op, Op::Input { .. })
-				{
-					*kernel = crate::gpu_kernels::row_sum(
-						backend.dialect(),
-						shape[0],
-						shape[1],
-						local,
-						true,
-					)?;
-					*slots = vec![x, out];
-				}
-			}
-		}
-		Self::from_lowered(graph, outputs, backend, lowered, true)
-	}
+// file="src/uir.rs" mode="replace" item="fn op"
+fn op(s: &str) -> Result<Ops> {
+    [
+        Ops::Invalid,
+        Ops::Const,
+        Ops::Barrier,
+        Ops::Special,
+        Ops::Buffer,
+        Ops::Alloc,
+        Ops::Param,
+        Ops::Cast,
+        Ops::Bitcast,
+        Ops::Shl,
+        Ops::Shr,
+        Ops::Xor,
+        Ops::Add,
+        Ops::Sub,
+        Ops::Mul,
+        Ops::Div,
+        Ops::Mod,
+        Ops::Neg,
+        Ops::Exp,
+        Ops::Log,
+        Ops::Sin,
+        Ops::Cos,
+        Ops::Sqrt,
+        Ops::Exp2,
+        Ops::Log2,
+        Ops::Max,
+        Ops::Lt,
+        Ops::Eq,
+        Ops::And,
+        Ops::Or,
+        Ops::Where,
+        Ops::Reshape,
+        Ops::Permute,
+        Ops::Expand,
+        Ops::Shrink,
+        Ops::Pad,
+        Ops::Flip,
+        Ops::Stack,
+        Ops::Gather,
+        Ops::ScatterAdd,
+        Ops::Reduce,
+        Ops::Detach,
+        Ops::Stage,
+        Ops::Range,
+        Ops::Index,
+        Ops::Load,
+        Ops::Store,
+        Ops::End,
+        Ops::After,
+        Ops::Call,
+        Ops::Sink,
+        Ops::Linear,
+        Ops::Program,
+        Ops::Source,
+        Ops::Binary,
+        Ops::CustomFunction,
+    ]
+    .into_iter()
+    .find(|o| format!("{o:?}") == s)
+    .ok_or("unknown operation".into())
 }
 ```
 
+`src/uir.rs` の `fn decode_arg`を置き換える。
+
 ```rust
-// file=tests/collective.rs mode=write
+// file="src/uir.rs" mode="replace" item="fn decode_arg"
+fn decode_arg(s: &str) -> Result<Arg> {
+    let fields: Vec<_> = s.split(';').collect();
+    Ok(match fields.as_slice() {
+        ["none"] => Arg::None,
+        ["f32", v] if v.len() == 8 => {
+            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        }
+        ["i32", v] => Arg::I32(number(v)?),
+        ["i64", v] => Arg::Int(number(v)?),
+        ["bool", v] => Arg::Bool(boolean(v)?),
+        ["shape", v] => Arg::Shape(list(v)?),
+        ["axes", v] => Arg::Axes(list(v)?),
+        ["pairs", v] => {
+            let v: Vec<usize> = list(v)?;
+            if v.len() % 2 != 0 {
+                return Err("odd pairs list".into());
+            }
+            Arg::Pairs(v.chunks_exact(2).map(|p| (p[0], p[1])).collect())
+        }
+        ["axis", v] => Arg::Axis(number(v)?),
+        ["reduction", o, v, k] => Arg::Reduction {
+            op: op(o)?,
+            axes: list(v)?,
+            keepdim: boolean(k)?,
+        },
+        ["buffer", n, v, d] => Arg::Buffer {
+            name: string(n)?,
+            shape: list(v)?,
+            data: if *d == "-" { None } else { Some(list(d)?) },
+        },
+        ["range", id, a] => Arg::Range {
+            id: number(id)?,
+            axis: match *a {
+                "Loop" => Axis::Loop,
+                "Local" => Axis::Local,
+                        "Global" => Axis::Global,
+                "Reduce" => Axis::Reduce,
+                _ => return Err("unknown axis".into()),
+            },
+        },
+        ["allocation", id, dt, size] => Arg::Allocation {
+            id: number(id)?,
+            dtype: dtype(dt)?,
+            size: number(size)?,
+        },
+        ["id", v] => Arg::Id(number(v)?),
+        ["dtype", dt] => Arg::DType(dtype(dt)?),
+        ["text", v] => Arg::Text(string(v)?),
+        ["bytes", v] => Arg::Bytes(unhex(v)?),
+        ["slot", i, v] => Arg::Slot {
+            index: number(i)?,
+            shape: list(v)?,
+        },
+        ["function",name,dt] => Arg::Function{name:string(name)?,dtype:dtype(dt)?},
+        ["scalar", i, dt] => Arg::ScalarParam {
+            index: number(i)?,
+            dtype: dtype(dt)?,
+        },
+        _ => return Err("invalid typed argument".into()),
+    })
+}
+```
+
+`src/uop.rs` の `pub enum Ops`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" item="pub enum Ops"
+pub enum Ops {
+    Invalid,
+    Const,
+    Buffer,
+    Alloc,
+    Param,
+    Cast,
+    Bitcast,
+    Shl,
+    Shr,
+    Xor,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Neg,
+    Exp,
+    Log,
+    Sin,
+    Cos,
+    Sqrt,
+    Exp2,
+    Log2,
+    Max,
+    Lt,
+    Eq,
+    And,
+    Or,
+    Where,
+    Reshape,
+    Permute,
+    Expand,
+    Shrink,
+    Pad,
+    Flip,
+    Stack,
+    Gather,
+    ScatterAdd,
+    Reduce,
+    Detach,
+    Stage,
+    Range,
+    Index,
+    Load,
+    Store,
+    End,
+    After,
+    Call,
+    Sink,
+    Linear,
+    Program,
+    Source,
+    Binary,
+    CustomFunction,
+    Special,
+    Barrier,
+}
+```
+
+`src/uop.rs` の `pub enum Axis`を置き換える。
+
+```rust
+// file="src/uop.rs" mode="replace" item="pub enum Axis"
+pub enum Axis {
+    Loop,
+    Reduce,
+    Global,
+    Local,
+}
+```
+
+`tests/gpu_reduction.rs`を保存する。
+
+```rust
+// file="tests/gpu_reduction.rs" mode="write"
+#![cfg(any(all(feature="metal",target_os="macos"),feature="opencl"))]
+mod support;
+use chibigrad::{gpu,UOp};
+fn check(run:fn(&UOp,gpu::Launch,&[Vec<f32>])->Vec<f32>) {
+ let (linear,launch)=gpu::local_reduction(1,16,16).unwrap();
+ let values=(0..16).map(|i|i as f32/10.).collect::<Vec<_>>();
+ let result=run(&linear,launch,&[values.clone(),vec![0.;1]]);
+ for row in 0..1 {assert!((result[row]-values[row*16..(row+1)*16].iter().sum::<f32>()).abs()<1e-3);}
+}
+
+#[cfg(all(feature="metal",target_os="macos"))]
+#[test]
+fn metal_native(){check(support::run_metal);}
+#[cfg(feature="opencl")]
+#[test]
+fn opencl_native(){check(support::run_cl);}
+```
+
+`tests/support/mod.rs`を保存する。
+
+```rust
+// file="tests/support/mod.rs" mode="write"
 use chibigrad::{
-	collective::{Collective, LocalOp},
-	gpu::Dialect,
-	gpu_kernels::*,
+    gpu,
+    renderers::{self, Dialect},
 };
-#[test]
-fn barriers_and_shader_compile() {
-	assert!(
-		Collective {
-			lanes: 64,
-			local_elements: 63,
-			ops: vec![]
-		}
-		.verify()
-		.is_err()
-	);
-	assert!(
-		Collective {
-			lanes: 64,
-			local_elements: 64,
-			ops: vec![
-				LocalOp::WritePartial,
-				LocalOp::Tree { stride: 32 },
-				LocalOp::Barrier,
-				LocalOp::StoreLaneZero
-			]
-		}
-		.verify()
-		.is_err()
-	);
-	assert!(row_sum(Dialect::OpenCl, 3, 257, 3, true).is_err());
-	let mut sources = vec![];
-	for cols in [1, 63, 64, 65, 257] {
-		sources.push(row_sum(Dialect::OpenCl, 2, cols, 64, true).unwrap().source);
-		sources.push(row_sum(Dialect::OpenCl, 2, cols, 64, false).unwrap().source);
-	}
-	for (i, source) in sources.into_iter().enumerate() {
-		let path = std::env::temp_dir().join(format!(
-			"chibi-local-{}-{:?}-{i}.cl",
-			std::process::id(),
-			std::thread::current().id()
-		));
-		std::fs::write(&path, source).unwrap();
-		let output = std::process::Command::new("clang")
-			.args(["-x", "cl", "-cl-std=CL1.2", "-fsyntax-only"])
-			.arg(&path)
-			.output()
-			.unwrap();
-		let _ = std::fs::remove_file(path);
-		assert!(
-			output.status.success(),
-			"{}",
-			String::from_utf8_lossy(&output.stderr)
-		);
-	}
+fn words(values: &[f32]) -> Vec<u8> {
+    values.iter().flat_map(|v| v.to_ne_bytes()).collect()
 }
-```
-
-```rust
-// file=tests/reduction_hardware.rs mode=write
-use chibigrad::{
-	gpu::{Dialect, Kernel},
-	gpu_kernels::{dynamic_sum, row_sum},
-};
-fn compare(actual: &[f32], reference: &[f64]) {
-	for (&a, &b) in actual.iter().zip(reference) {
-		assert!(a.is_finite() && (a as f64 - b).abs() <= 1e-5 + 1e-5 * b.abs());
-	}
+fn floats(bytes: Vec<u8>) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_ne_bytes(b.try_into().unwrap()))
+        .collect()
 }
-fn cases(d: Dialect, run: impl Fn(&Kernel, &[Vec<f32>]) -> Result<Vec<f32>, String>) {
-	for n in [1, 63, 64, 65, 257] {
-		for tree in [false, true] {
-			let k = row_sum(d, 2, n, 64, tree).unwrap();
-			let x = (0..2 * n).map(|i| (i % 7) as f32 - 3.).collect::<Vec<_>>();
-			let reference = x
-				.chunks(n)
-				.map(|s| s.iter().map(|&x| x as f64).sum())
-				.collect::<Vec<_>>();
-			for _ in 0..3 {
-				compare(&run(&k, &[x.clone(), vec![0.; 2]]).unwrap(), &reference);
-			}
-		}
-	}
-	for n in [0, 1, 3, 17] {
-		let p = dynamic_sum(d, n, 17, 8).unwrap();
-		let x = (0..17).map(|i| if i < n { 1. } else { f32::NAN }).collect();
-		let part = run(&p.first, &[x, vec![0.; p.first.lengths[1]]]).unwrap();
-		let out = run(&p.second, &[part, vec![0.]]).unwrap();
-		assert_eq!(out, [n as f32]);
-	}
+#[cfg(all(feature = "metal", target_os = "macos"))]
+pub fn run_metal(linear: &chibigrad::UOp, launch: gpu::Launch, inputs: &[Vec<f32>]) -> Vec<f32> {
+    use chibigrad::{backends::metal::MetalDevice, queue::HWQueue};
+    let device = MetalDevice::open().unwrap();
+    eprintln!("Metal device: {:?}",device.capabilities());
+    let spec = renderers::render(linear, "test_kernel", Dialect::Metal, launch.clone()).unwrap();
+    let program = device
+        .compile(&spec)
+        .unwrap_or_else(|e| panic!("{e}\n{}", spec.source));
+    let buffers = inputs
+        .iter()
+        .map(|input| {
+            let b = device.allocate(input.len() * 4).unwrap();
+            b.write(0, &words(input)).unwrap();
+            b
+        })
+        .collect::<Vec<_>>();
+    let commands = device
+        .command_buffer(&[(program, launch, buffers.clone())])
+        .unwrap();
+    let mut queue = HWQueue::new();
+    queue.metal(commands, chibigrad::UOp::int(0), HWQueue::runtime_slot(0));
+    let source = chibigrad::codegen::render(queue.linear(), "runtime_entry").unwrap();
+    let cpu = chibigrad::cpu::CpuProgram::compile_with_symbols(
+        &source,
+        "runtime_entry",
+        &chibigrad::queue::foreign_symbols(),
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{source}"));
+    let mut signal = [1i64];
+    let mut args = (signal.as_mut_ptr() as u64).to_ne_bytes();
+    unsafe { cpu.run(&mut args) }.unwrap();
+    assert_eq!(chibigrad::queue::take_error(), None);
+    assert_eq!(
+        floats(
+            buffers
+                .last()
+                .unwrap()
+                .read(0, inputs.last().unwrap().len() * 4)
+                .unwrap()
+        )
+        .len(),
+        inputs.last().unwrap().len()
+    );
+    signal[0] = 2;
+    std::hint::black_box(&signal);
+    unsafe { cpu.run(&mut args) }.unwrap();
+    assert_eq!(chibigrad::queue::take_error(), None);
+    floats(
+        buffers
+            .last()
+            .unwrap()
+            .read(0, inputs.last().unwrap().len() * 4)
+            .unwrap(),
+    )
 }
-#[test]
-#[ignore = "requires Metal"]
-#[cfg(all(target_os = "macos", feature = "metal"))]
-fn metal() {
-	let seed = chibigrad::backends::metal::MetalProgram::compile(
-		&row_sum(Dialect::Metal, 1, 1, 64, true).unwrap(),
-	)
-	.unwrap();
-	cases(Dialect::Metal, |k, b| {
-		let p = seed.compile_next(k)?;
-		assert!(seed.shares_queue(&p));
-		Ok(unsafe { p.run(k, b) }?.output)
-	});
-}
-
-#[test]
-#[ignore = "requires OpenCL"]
 #[cfg(feature = "opencl")]
-fn opencl() {
-	let seed = chibigrad::backends::opencl::OpenClProgram::compile(
-		&row_sum(Dialect::OpenCl, 1, 1, 64, true).unwrap(),
-		0,
-		0,
-	)
-	.unwrap();
-	cases(Dialect::OpenCl, |k, b| {
-		let p = seed.compile_next(k)?;
-		assert!(seed.shares_queue(&p));
-		Ok(unsafe { p.run(k, b) }?.output)
-	});
+pub fn run_cl(linear: &chibigrad::UOp, launch: gpu::Launch, inputs: &[Vec<f32>]) -> Vec<f32> {
+    use chibigrad::{
+        backends::opencl::{Argument, OpenClDevice},
+        queue::HWQueue,
+    };
+    let device = OpenClDevice::open(0).unwrap();
+    eprintln!("OpenCL device: {:?}",device.capabilities());
+    let spec = renderers::render(linear, "test_kernel", Dialect::OpenCl, launch.clone()).unwrap();
+    let program = device
+        .compile(&spec)
+        .unwrap_or_else(|e| panic!("{e}\n{}", spec.source));
+    let buffers = inputs
+        .iter()
+        .map(|input| {
+            let b = device.allocate(input.len() * 4).unwrap();
+            b.write(0, &words(input)).unwrap();
+            b
+        })
+        .collect::<Vec<_>>();
+    let command = program
+        .command(
+            launch,
+            buffers.iter().cloned().map(Argument::Buffer).collect(),
+        )
+        .unwrap();
+    let mut queue = HWQueue::new();
+    queue.opencl(command);
+    let source = chibigrad::codegen::render(queue.linear(), "runtime_entry").unwrap();
+    let cpu = chibigrad::cpu::CpuProgram::compile_with_symbols(
+        &source,
+        "runtime_entry",
+        &chibigrad::queue::foreign_symbols(),
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{source}"));
+    unsafe { cpu.run(&mut []) }.unwrap();
+    unsafe { cpu.run(&mut []) }.unwrap();
+    assert_eq!(chibigrad::queue::take_error(), None);
+    floats(
+        buffers
+            .last()
+            .unwrap()
+            .read(0, inputs.last().unwrap().len() * 4)
+            .unwrap(),
+    )
 }
 ```
 
 ```sh
-# check requires=metal
-cargo test --test reduction_hardware --features metal metal -- --ignored --exact
+# check step=18.01 requires=metal,opencl
+cargo test --offline --features metal,opencl --test gpu_reduction -- --nocapture
 ```
 
-```sh
-# check requires=opencl
-cargo test --test reduction_hardware --features opencl opencl -- --ignored --exact
-```
+MetalとOpenCLで16要素の和が参照値と一致する。
+
+## 18.02 行数と端数のある幅を扱う
+
+workgroupごとに行を割り当て、各laneが複数要素を累積する。最後のtileではLOADをマスクし、全laneが同じbarrierを通る。Builderへ局所ループとENDを追加する。
+
+`src/gpu.rs` の `impl Builder` 内を追記する。
 
 ```rust
-// file=tests/book_18.rs mode=write
-mod suite0 {
-	use chibigrad::{
-		collective::{Collective, LocalOp},
-		gpu::Dialect,
-		gpu_kernels::*,
-	};
-	#[test]
-	pub(super) fn barriers_and_shader_compile() {
-		assert!(
-			Collective {
-				lanes: 64,
-				local_elements: 63,
-				ops: vec![]
-			}
-			.verify()
-			.is_err()
-		);
-		assert!(
-			Collective {
-				lanes: 64,
-				local_elements: 64,
-				ops: vec![
-					LocalOp::WritePartial,
-					LocalOp::Tree { stride: 32 },
-					LocalOp::Barrier,
-					LocalOp::StoreLaneZero
-				]
-			}
-			.verify()
-			.is_err()
-		);
-		assert!(row_sum(Dialect::OpenCl, 3, 257, 3, true).is_err());
-		let mut sources = vec![];
-		for cols in [1, 63, 64, 65, 257] {
-			sources.push(row_sum(Dialect::OpenCl, 2, cols, 64, true).unwrap().source);
-			sources.push(row_sum(Dialect::OpenCl, 2, cols, 64, false).unwrap().source);
-		}
-		for (i, source) in sources.into_iter().enumerate() {
-			let path = std::env::temp_dir().join(format!(
-				"chibi-local-{}-{:?}-{i}.cl",
-				std::process::id(),
-				std::thread::current().id()
-			));
-			std::fs::write(&path, source).unwrap();
-			let output = std::process::Command::new("clang")
-				.args(["-x", "cl", "-cl-std=CL1.2", "-fsyntax-only"])
-				.arg(&path)
-				.output()
-				.unwrap();
-			let _ = std::fs::remove_file(path);
-			assert!(
-				output.status.success(),
-				"{}",
-				String::from_utf8_lossy(&output.stderr)
-			);
-		}
-	}
+// file="src/gpu.rs" mode="append" within="impl Builder"
+    pub(crate) fn range(&mut self, end: usize) -> UOp {
+        let id = self.next;
+        self.next += 1;
+        self.emit(UOp::range(UOp::int(end as i64), id, Axis::Reduce))
+    }
+
+    pub(crate) fn end(&mut self, r: &UOp) -> UOp {
+        self.emit(UOp::new(Ops::End, vec![r.clone()], Arg::None))
+    }
+```
+
+`src/gpu.rs` の `pub fn local_reduction`を置き換える。
+
+```rust
+// file="src/gpu.rs" mode="replace" item="pub fn local_reduction"
+pub fn local_reduction(rows: usize, width: usize, local: usize) -> Result<(UOp, Launch), String> {
+    if rows == 0 || width == 0 || !local.is_power_of_two() {
+        return Err("reduction requires nonzero shape and power-of-two local size".into());
+    }
+    let mut b = Builder::new();
+    let input = b.param(0, rows.checked_mul(width).ok_or("reduction overflow")?);
+    let output = b.param(1, rows);
+    let lane = b.special("lid0");
+    let row = b.special("group0");
+    let shared = b.alloc(local);
+    let acc = b.alloc(1);
+    let init = b.store(&acc, UOp::int(0), UOp::f32(0.), UOp::bool(true));
+    let r = b.range(width.div_ceil(local));
+    let col = r.mul(&UOp::int(local as i64)).add(&lane);
+    let value = b.load(
+        &input,
+        row.mul(&UOp::int(width as i64)).add(&col),
+        col.lt(&UOp::int(width as i64)),
+    );
+    let old = b.load(&acc.after(vec![init]), UOp::int(0), UOp::bool(true));
+    b.store(&acc, UOp::int(0), old.add(&value), UOp::bool(true));
+    let end = b.end(&r);
+    let acc = b.load(&acc.after(vec![end]), UOp::int(0), UOp::bool(true));
+    let stored = b.store(&shared, lane.clone(), acc, UOp::bool(true));
+    let mut dep = b.barrier(stored);
+    for step in (0..local.ilog2()).rev().map(|s| 1usize << s) {
+        let valid = lane.lt(&UOp::int(step as i64));
+        let a = b.load(
+            &shared.after(vec![dep.clone()]),
+            lane.clone(),
+            valid.clone(),
+        );
+        let v = b.load(
+            &shared.after(vec![dep]),
+            lane.add(&UOp::int(step as i64)),
+            valid.clone(),
+        );
+        let s = b.store(&shared, lane.clone(), a.add(&v), valid);
+        dep = b.barrier(s);
+    }
+    let result = b.load(&shared.after(vec![dep]), UOp::int(0), UOp::bool(true));
+    b.store(&output, row, result, lane.eq(&UOp::int(0)));
+    Ok((
+        b.finish(),
+        Launch {
+            groups: [rows, 1, 1],
+            local: [local, 1, 1],
+        },
+    ))
 }
 ```
 
-## LOCAL storage と BARRIER を verifier、linearize、renderer に追加する。
+`src/gpu.rs`を追記する。
+
+```rust
+// file="src/gpu.rs" mode="append"
+
+use crate::Axis;
+```
+
+`tests/gpu_reduction.rs` の `fn check`を置き換える。
+
+```rust
+// file="tests/gpu_reduction.rs" mode="replace" item="fn check"
+fn check(run:fn(&UOp,gpu::Launch,&[Vec<f32>])->Vec<f32>) {
+ let (linear,launch)=gpu::local_reduction(3,37,16).unwrap();
+ let values=(0..111).map(|i|i as f32/10.).collect::<Vec<_>>();
+ let result=run(&linear,launch,&[values.clone(),vec![0.;3]]);
+ for row in 0..3 {assert!((result[row]-values[row*37..(row+1)*37].iter().sum::<f32>()).abs()<1e-3);}
+}
+```
+
+```sh
+# check step=18.02 requires=metal,opencl
+cargo test --offline --features metal,opencl --test gpu_reduction -- --nocapture
+```
+
+3行37列をlocal size16で縮約し、3つの行和が参照値と一致する。
+
+## 章末の累積確認
+
+前の章までのテストとexampleも再ビルドします。
+
+```sh
+# check
+cargo test --quiet --all-targets
+```
+
+## 要件との対応
+
+### 18-001 LOCAL storage と BARRIER を verifier、linearize、renderer に追加する。
 
 <!-- todo:18-001 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_001() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn verify("
-	pub fn verify(&self) -> Result<()> {
-		if self.lanes == 0 || self.local_elements < self.lanes {
-			return Err("LOCAL allocation shorter than lane stores".into());
-		}
-		let mut written = false;
-		let mut visible = false;
-		let mut final_store = false;
-		for op in &self.ops {
-			match *op {
-				LocalOp::WritePartial => {
-					if written && !visible {
-						return Err("LOCAL reuse before barrier".into());
-					}
-					written = true;
-					visible = false;
-				}
-				LocalOp::Barrier => {
-					if !written {
-						return Err("barrier without LOCAL write".into());
-					}
-					visible = true;
-				}
-				LocalOp::Tree { stride } => {
-					if !visible
-						|| stride == 0 || stride
-						.checked_mul(2)
-						.is_none_or(|n| n > self.local_elements)
-					{
-						return Err("LOCAL tree read before barrier or outside allocation".into());
-					}
-					visible = false;
-				}
-				LocalOp::SerialFinish => {
-					if !visible {
-						return Err("serial LOCAL read before barrier".into());
-					}
-				}
-				LocalOp::StoreLaneZero => {
-					if !visible {
-						return Err("global store before LOCAL results visible".into());
-					}
-					final_store = true;
-				}
-			}
-		}
-		if !final_store {
-			return Err("missing lane0 output".into());
-		}
-		Ok(())
-	}
-```
-
-`src/collective.rs` の `pub fn linearize(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn linearize("
-	pub fn linearize(&self) -> Result<Vec<LocalOp>> {
-		self.verify()?;
-		Ok(self.ops.clone())
-	}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_001 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 各 lane が `col=chunk*L+lane` の部分和を逐次計算する。
+### 18-002 各 lane が `col=chunk*L+lane` の部分和を逐次計算する。
 
 <!-- todo:18-002 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_002() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_002 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 全 lane が LOCAL の自分の位置に一つ書く。
+### 18-003 全 lane が LOCAL の自分の位置に一つ書く。
 
 <!-- todo:18-003 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_003() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_003 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## barrier 後だけ LOCAL を読み、lane 0 が一出力を書く。
+### 18-004 barrier 後だけ LOCAL を読み、lane 0 が一出力を書く。
 
 <!-- todo:18-004 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_004() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_004 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## Metal と OpenCL の両方に同じ IR を下げる。
+### 18-005 Metal と OpenCL の両方に同じ IR を下げる。
 
 <!-- todo:18-005 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_005() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-`src/gpu_kernels.rs` の `fn shared(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="fn shared("
-fn shared(d: Dialect) -> &'static str {
-	match d {
-		Dialect::Metal => "threadgroup",
-		Dialect::OpenCl => "__local",
-	}
-}
-```
-
-`src/gpu_kernels.rs` の `fn barrier(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="fn barrier("
-fn barrier(d: Dialect) -> &'static str {
-	match d {
-		Dialect::Metal => "threadgroup_barrier(mem_flags::mem_threadgroup);",
-		Dialect::OpenCl => "barrier(CLK_LOCAL_MEM_FENCE);",
-	}
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_005 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## stride を L/2、L/4、…、1 として LOCAL の二要素を足す。
+### 18-006 stride を L/2、L/4、…、1 として LOCAL の二要素を足す。
 
 <!-- todo:18-006 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_006() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn row_sum("
-	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
-		if !lanes.is_power_of_two() {
-			return Err("local must be power of two".into());
-		}
-		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
-		if tree {
-			let mut stride = lanes / 2;
-			while stride > 0 {
-				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
-				stride /= 2;
-			}
-		} else {
-			ops.push(LocalOp::SerialFinish);
-		}
-		ops.push(LocalOp::StoreLaneZero);
-		let program = Self {
-			lanes,
-			local_elements: lanes,
-			ops,
-		};
-		program.verify()?;
-		Ok(program)
-	}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_006 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## `lane<stride` の分岐では加算と LOCAL STORE だけを行う。
+### 18-007 `lane<stride` の分岐では加算と LOCAL STORE だけを行う。
 
 <!-- todo:18-007 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_007() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_007 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 各 stride の後の barrier は全 lane が実行する位置に置く。
+### 18-008 各 stride の後の barrier は全 lane が実行する位置に置く。
 
 <!-- todo:18-008 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_008() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn row_sum("
-	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
-		if !lanes.is_power_of_two() {
-			return Err("local must be power of two".into());
-		}
-		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
-		if tree {
-			let mut stride = lanes / 2;
-			while stride > 0 {
-				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
-				stride /= 2;
-			}
-		} else {
-			ops.push(LocalOp::SerialFinish);
-		}
-		ops.push(LocalOp::StoreLaneZero);
-		let program = Self {
-			lanes,
-			local_elements: lanes,
-			ops,
-		};
-		program.verify()?;
-		Ok(program)
-	}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_008 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 最終結果の global STORE は lane 0 だけに限定する。
+### 18-009 最終結果の global STORE は lane 0 だけに限定する。
 
 <!-- todo:18-009 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_009() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_009 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## LOCAL の read-after-write と write-after-read の依存を保つ。
+### 18-010 LOCAL の read-after-write と write-after-read の依存を保つ。
 
 <!-- todo:18-010 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_010() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn verify("
-	pub fn verify(&self) -> Result<()> {
-		if self.lanes == 0 || self.local_elements < self.lanes {
-			return Err("LOCAL allocation shorter than lane stores".into());
-		}
-		let mut written = false;
-		let mut visible = false;
-		let mut final_store = false;
-		for op in &self.ops {
-			match *op {
-				LocalOp::WritePartial => {
-					if written && !visible {
-						return Err("LOCAL reuse before barrier".into());
-					}
-					written = true;
-					visible = false;
-				}
-				LocalOp::Barrier => {
-					if !written {
-						return Err("barrier without LOCAL write".into());
-					}
-					visible = true;
-				}
-				LocalOp::Tree { stride } => {
-					if !visible
-						|| stride == 0 || stride
-						.checked_mul(2)
-						.is_none_or(|n| n > self.local_elements)
-					{
-						return Err("LOCAL tree read before barrier or outside allocation".into());
-					}
-					visible = false;
-				}
-				LocalOp::SerialFinish => {
-					if !visible {
-						return Err("serial LOCAL read before barrier".into());
-					}
-				}
-				LocalOp::StoreLaneZero => {
-					if !visible {
-						return Err("global store before LOCAL results visible".into());
-					}
-					final_store = true;
-				}
-			}
-		}
-		if !final_store {
-			return Err("missing lane0 output".into());
-		}
-		Ok(())
-	}
-```
-
-`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn row_sum("
-	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
-		if !lanes.is_power_of_two() {
-			return Err("local must be power of two".into());
-		}
-		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
-		if tree {
-			let mut stride = lanes / 2;
-			while stride > 0 {
-				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
-				stride /= 2;
-			}
-		} else {
-			ops.push(LocalOp::SerialFinish);
-		}
-		ops.push(LocalOp::StoreLaneZero);
-		let program = Self {
-			lanes,
-			local_elements: lanes,
-			ops,
-		};
-		program.verify()?;
-		Ok(program)
-	}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_010 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## N=1、L-1、L、L+1、257 の部分和を同じ規則で作る。
+### 18-011 N=1、L-1、L、L+1、257 の部分和を同じ規則で作る。
 
 <!-- todo:18-011 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_011() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_011 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 二次元の行和では group ID を row として使う。
+### 18-012 二次元の行和では group ID を row として使う。
 
 <!-- todo:18-012 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_012() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_012 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## input の無効 LOAD と output の無効 STORE を別々に guard する。
+### 18-013 input の無効 LOAD と output の無効 STORE を別々に guard する。
 
 <!-- todo:18-013 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_013() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
-pub fn two_stage_sum(
-	d: Dialect,
-	n: usize,
-	chunk: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if chunk == 0 {
-		return Err("chunk=0".into());
-	}
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = n;
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	Ok(ReductionSchedule {
-		first,
-		second: row_sum(d, 1, count, local, true)?,
-	})
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_013 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## LOCAL を同じ kernel のループで再利用する場合、次の書込み前に barrier を入れる。
+### 18-014 LOCAL を同じ kernel のループで再利用する場合、次の書込み前に barrier を入れる。
 
 <!-- todo:18-014 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_014() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/collective.rs` の `pub fn verify(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn verify("
-	pub fn verify(&self) -> Result<()> {
-		if self.lanes == 0 || self.local_elements < self.lanes {
-			return Err("LOCAL allocation shorter than lane stores".into());
-		}
-		let mut written = false;
-		let mut visible = false;
-		let mut final_store = false;
-		for op in &self.ops {
-			match *op {
-				LocalOp::WritePartial => {
-					if written && !visible {
-						return Err("LOCAL reuse before barrier".into());
-					}
-					written = true;
-					visible = false;
-				}
-				LocalOp::Barrier => {
-					if !written {
-						return Err("barrier without LOCAL write".into());
-					}
-					visible = true;
-				}
-				LocalOp::Tree { stride } => {
-					if !visible
-						|| stride == 0 || stride
-						.checked_mul(2)
-						.is_none_or(|n| n > self.local_elements)
-					{
-						return Err("LOCAL tree read before barrier or outside allocation".into());
-					}
-					visible = false;
-				}
-				LocalOp::SerialFinish => {
-					if !visible {
-						return Err("serial LOCAL read before barrier".into());
-					}
-				}
-				LocalOp::StoreLaneZero => {
-					if !visible {
-						return Err("global store before LOCAL results visible".into());
-					}
-					final_store = true;
-				}
-			}
-		}
-		if !final_store {
-			return Err("missing lane0 output".into());
-		}
-		Ok(())
-	}
-```
-
-`src/collective.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/collective.rs" mode="replace" item="pub fn row_sum("
-	pub fn row_sum(lanes: usize, tree: bool) -> Result<Self> {
-		if !lanes.is_power_of_two() {
-			return Err("local must be power of two".into());
-		}
-		let mut ops = vec![LocalOp::WritePartial, LocalOp::Barrier];
-		if tree {
-			let mut stride = lanes / 2;
-			while stride > 0 {
-				ops.extend([LocalOp::Tree { stride }, LocalOp::Barrier]);
-				stride /= 2;
-			}
-		} else {
-			ops.push(LocalOp::SerialFinish);
-		}
-		ops.push(LocalOp::StoreLaneZero);
-		let program = Self {
-			lanes,
-			local_elements: lanes,
-			ops,
-		};
-		program.verify()?;
-		Ok(program)
-	}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_014 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 非 2 冪の local を明示的に拒否し、無言で誤った tree を作らない。
+### 18-015 非 2 冪の local を明示的に拒否し、無言で誤った tree を作らない。
 
 <!-- todo:18-015 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_015() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn row_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn row_sum("
-pub fn row_sum(
-	d: Dialect,
-	rows: usize,
-	cols: usize,
-	local: usize,
-	tree: bool,
-) -> Result<Kernel, String> {
-	if !local.is_power_of_two() {
-		return Err("reduction local must be a power of two".into());
-	}
-	let len = rows.checked_mul(cols).ok_or("shape overflow")?;
-	let program = crate::collective::Collective::row_sum(local, tree)?;
-	let mut body = format!("{} float tmp[{local}];", shared(d));
-	for op in program.linearize()? {
-		match op {
-			crate::collective::LocalOp::WritePartial => {
-				body += &format!(
-					"float acc=0.0f;for(size_t c=l;c<{cols};c+={local}){{acc+=b0[g*{cols}+c];}}tmp[l]=acc;"
-				)
-			}
-			crate::collective::LocalOp::Barrier => body += barrier(d),
-			crate::collective::LocalOp::Tree { stride } => {
-				body += &format!("if(l<{stride}){{tmp[l]+=tmp[l+{stride}];}}")
-			}
-			crate::collective::LocalOp::SerialFinish => {
-				body += &format!(
-					"if(l==0){{float sum=0.0f;for(size_t c=0;c<{local};c++){{sum+=tmp[c];}}tmp[0]=sum;}}"
-				)
-			}
-			crate::collective::LocalOp::StoreLaneZero => body += "if(l==0){b1[g]=tmp[0];}",
-		}
-	}
-	spec(
-		d,
-		vec![len, rows],
-		body,
-		rows,
-		local,
-		local.checked_mul(4).ok_or("local byte overflow")?,
-	)
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_015 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 大きな入力を固定 chunk に分け、各 group の部分和を GLOBAL に保存する。
+### 18-016 大きな入力を固定 chunk に分け、各 group の部分和を GLOBAL に保存する。
 
 <!-- todo:18-016 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_016() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
-pub fn two_stage_sum(
-	d: Dialect,
-	n: usize,
-	chunk: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if chunk == 0 {
-		return Err("chunk=0".into());
-	}
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = n;
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	Ok(ReductionSchedule {
-		first,
-		second: row_sum(d, 1, count, local, true)?,
-	})
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_016 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 部分和バッファを次 kernel の PARAM slot に bind する。
+### 18-017 部分和バッファを次 kernel の PARAM slot に bind する。
 
 <!-- todo:18-017 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_017() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
-pub fn two_stage_sum(
-	d: Dialect,
-	n: usize,
-	chunk: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if chunk == 0 {
-		return Err("chunk=0".into());
-	}
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = n;
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	Ok(ReductionSchedule {
-		first,
-		second: row_sum(d, 1, count, local, true)?,
-	})
-}
-```
-
-`src/gpu_graph.rs` の `pub fn run_with_shapes(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_graph.rs" mode="replace" item="pub fn run_with_shapes("
-	pub fn run_with_shapes(&self, inputs: &[Buffer], shapes: &[Vec<usize>]) -> Result<Vec<Buffer>> {
-		if self.specialized && self.graph.nodes.iter().map(|n| &n.shape).ne(shapes.iter()) {
-			return Err("optimized GPU plan shape mismatch".into());
-		}
-		if shapes.len() != self.graph.nodes.len() {
-			return Err("GPU shape table".into());
-		}
-		let mut graph = self.graph.clone();
-		for (node, shape) in graph.nodes.iter_mut().zip(shapes) {
-			if node.shape.len() != shape.len() {
-				return Err("GPU rank change".into());
-			}
-			elements(shape)?;
-			node.shape = shape.clone();
-		}
-		graph.verify(&self.outputs)?;
-		let mut logical_inputs = inputs.to_vec();
-		for (id, node) in graph.nodes.iter().enumerate() {
-			if let Op::Input { slot } = node.op {
-				let n = elements(graph.shape(id))?;
-				let input = inputs.get(slot).ok_or("missing GPU input")?;
-				if input.shape.len() != graph.shape(id).len() || input.data.len() < n {
-					return Err("GPU input rank/capacity".into());
-				}
-				logical_inputs[slot] =
-					Buffer::new(graph.shape(id).to_vec(), input.data[..n].to_vec())?;
-			}
-		}
-		graph.validate_inputs(&logical_inputs, &self.outputs)?;
-		graph.validate_indices(&logical_inputs, &self.outputs)?;
-		let mut values = graph
-			.nodes
-			.iter()
-			.map(|n| Buffer::zeros(n.shape.clone()))
-			.collect::<Result<Vec<_>>>()?;
-		for id in graph.topology(&self.outputs)? {
-			if let Op::Input { slot } = graph.nodes[id].op {
-				values[id] = inputs[slot].clone();
-			}
-		}
-		for step in &self.steps {
-			let mut kernel = step.kernel.clone();
-			kernel.lengths = step
-				.slots
-				.iter()
-				.enumerate()
-				.map(|(index, &id)| {
-					if id == usize::MAX {
-						step.kernel.lengths[index]
-					} else {
-						values[id].data.len()
-					}
-				})
-				.collect();
-			if !self.specialized {
-				kernel.scalars = shapes.iter().flatten().map(|&n| n as u64).collect();
-			}
-			if !self.specialized {
-				kernel.groups = groups(kernel.lengths[kernel.output], kernel.local)?;
-			}
-			if kernel.lengths[kernel.output] == 0 {
-				continue;
-			}
-			let buffers = step
-				.slots
-				.iter()
-				.enumerate()
-				.map(|(index, &id)| {
-					if id == usize::MAX {
-						vec![1.; kernel.lengths[index]]
-					} else {
-						values[id].data.clone()
-					}
-				})
-				.collect::<Vec<_>>();
-			let run = step.program.run(&kernel, &buffers)?;
-			values[*step.slots.last().unwrap()].data = run.output;
-		}
-		Ok(self.outputs.iter().map(|&id| values[id].clone()).collect())
-	}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_017 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 二つの kernel の依存を schedule に明示する。
+### 18-018 二つの kernel の依存を schedule に明示する。
 
 <!-- todo:18-018 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_018() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/gpu_kernels.rs` の `pub fn two_stage_sum(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_kernels.rs" mode="replace" item="pub fn two_stage_sum("
-pub fn two_stage_sum(
-	d: Dialect,
-	n: usize,
-	chunk: usize,
-	local: usize,
-) -> Result<ReductionSchedule, String> {
-	if chunk == 0 {
-		return Err("chunk=0".into());
-	}
-	let count = groups(n, chunk)?;
-	let mut first = row_sum(d, count, chunk, local, true)?;
-	first.lengths[0] = n;
-	first.source = first.source.replace(
-		&format!("acc+=b0[g*{chunk}+c];"),
-		&format!("if(g*{chunk}+c<{n}){{acc+=b0[g*{chunk}+c];}}"),
-	);
-	Ok(ReductionSchedule {
-		first,
-		second: row_sum(d, 1, count, local, true)?,
-	})
-}
-```
-
-`src/gpu_graph.rs` の `fn from_lowered(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/gpu_graph.rs" mode="replace" item="fn from_lowered("
-	fn from_lowered(
-		graph: &Graph,
-		outputs: &[usize],
-		backend: Backend,
-		lowered: Vec<(Kernel, Vec<usize>)>,
-		specialized: bool,
-	) -> Result<Self> {
-		let mut steps: Vec<Step> = vec![];
-		let mut sources = vec![];
-		for (kernel, slots) in lowered {
-			sources.push(kernel.source.clone());
-			let program = if kernel.lengths[kernel.output] == 0 {
-				Program::Unavailable
-			} else if let Some(seed) = steps
-				.iter()
-				.find(|step| !matches!(step.program, Program::Unavailable))
-			{
-				seed.program.compile_next(&kernel)?
-			} else {
-				match backend {
-					Backend::Metal => {
-						#[cfg(all(target_os = "macos", feature = "metal"))]
-						{
-							Program::Metal(crate::backends::metal::MetalProgram::compile(&kernel)?)
-						}
-						#[cfg(not(all(target_os = "macos", feature = "metal")))]
-						{
-							return Err("Metal feature/macOS required".into());
-						}
-					}
-					Backend::OpenCl => {
-						#[cfg(feature = "opencl")]
-						{
-							Program::OpenCl(crate::backends::opencl::OpenClProgram::compile(
-								&kernel, 0, 0,
-							)?)
-						}
-						#[cfg(not(feature = "opencl"))]
-						{
-							return Err("OpenCL feature required".into());
-						}
-					}
-				}
-			};
-			steps.push(Step {
-				kernel,
-				slots,
-				program,
-			});
-		}
-		Ok(Self {
-			graph: graph.clone(),
-			outputs: outputs.to_vec(),
-			sources,
-			specialized,
-			steps,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_018 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 同じ queue 上の順序と最後の読出し完了を runtime で保証する。
+### 18-019 同じ queue 上の順序と最後の読出し完了を runtime で保証する。
 
 <!-- todo:18-019 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_019() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-`src/backends/metal.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/backends/metal.rs" mode="replace" item="pub fn compile_next("
-	pub fn compile_next(&self, kernel: &Kernel) -> Result<Self, String> {
-		Self::compile_on(kernel, self.device.clone(), self.queue.clone())
-	}
-```
-
-`src/backends/opencl.rs` の `pub fn compile_next(`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/backends/opencl.rs" mode="replace" item="pub fn compile_next("
-	pub fn compile_next(&self, spec: &Spec) -> Result<Self, String> {
-		Self::compile_on(
-			spec,
-			Device::new(self.device.id()),
-			self.context.clone(),
-			self.queue.clone(),
-		)
-	}
-```
-
-`src/backends/metal.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/backends/metal.rs" mode="replace" item="pub unsafe fn run(&self,"
-	pub unsafe fn run(&self, kernel: &Kernel, inputs: &[Vec<f32>]) -> Result<Run, String> {
-		kernel.validate(inputs)?;
-		if self.contract
-			!= (
-				kernel.source.clone(),
-				kernel.entry.clone(),
-				kernel.lengths.len(),
-				kernel.scalars.len().max(1),
-				kernel.local,
-			) {
-			return Err("compiled GPU contract mismatch".into());
-		}
-		let total = Instant::now();
-		let mut timings = Timings::default();
-		if kernel.lengths[kernel.output] == 0 {
-			return Ok(Run {
-				output: vec![],
-				device: self.device.name().to_string(),
-				timings,
-			});
-		}
-		let (_, max_threads, max_shared) = self.limits();
-		if kernel.local > max_threads {
-			return Err(format!(
-				"Metal local {} exceeds {max_threads}",
-				kernel.local
-			));
-		}
-		if kernel.shared_bytes > max_shared
-			|| self.pipeline.staticThreadgroupMemoryLength() > max_shared
-		{
-			return Err("Metal threadgroup memory limit".into());
-		}
-		if kernel.groups == 0 {
-			return Err("nonempty output with zero groups".into());
-		}
-		autoreleasepool(|_| {
-			let allocation = Instant::now();
-			let buffers: Vec<_> = inputs
-				.iter()
-				.map(|input| {
-					let bytes = input
-						.len()
-						.checked_mul(4)
-						.ok_or("Metal byte overflow")?
-						.max(4);
-					if bytes > self.device.maxBufferLength() {
-						return Err("Metal buffer limit".to_owned());
-					}
-					self.device
-						.newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
-						.ok_or_else(|| "Metal buffer allocation failed".to_owned())
-				})
-				.collect::<Result<_, _>>()?;
-			let scalar_words = if kernel.scalars.is_empty() {
-				vec![0u64]
-			} else {
-				kernel.scalars.clone()
-			};
-			let scalar_buffer = self
-				.device
-				.newBufferWithLength_options(
-					scalar_words.len() * 8,
-					MTLResourceOptions::StorageModeShared,
-				)
-				.ok_or("Metal scalar allocation")?;
-			if kernel.source.contains("device const float4")
-				&& buffers
-					.iter()
-					.any(|buffer| !(buffer.contents().as_ptr() as usize).is_multiple_of(16))
-			{
-				return Err("Metal vector buffer alignment".into());
-			}
-			timings.allocation = allocation.elapsed();
-			let transfer = Instant::now();
-			for (input, buffer) in inputs.iter().zip(&buffers) {
-				unsafe {
-					std::ptr::copy_nonoverlapping(
-						input.as_ptr(),
-						buffer.contents().as_ptr().cast::<f32>(),
-						input.len(),
-					);
-				}
-			}
-			unsafe {
-				std::ptr::copy_nonoverlapping(
-					scalar_words.as_ptr(),
-					scalar_buffer.contents().as_ptr().cast::<u64>(),
-					scalar_words.len(),
-				);
-			}
-			timings.transfer = transfer.elapsed();
-			let command = self
-				.queue
-				.commandBuffer()
-				.ok_or("Metal commandBuffer returned nil")?;
-			let encoder = command
-				.computeCommandEncoder()
-				.ok_or("Metal encoder returned nil")?;
-			encoder.setComputePipelineState(&self.pipeline);
-			for (index, buffer) in buffers.iter().enumerate() {
-				unsafe {
-					encoder.setBuffer_offset_atIndex(Some(buffer), 0, index);
-				}
-			}
-			unsafe {
-				encoder.setBuffer_offset_atIndex(Some(&scalar_buffer), 0, buffers.len());
-			}
-			encoder.dispatchThreadgroups_threadsPerThreadgroup(
-				MTLSize {
-					width: kernel.groups,
-					height: 1,
-					depth: 1,
-				},
-				MTLSize {
-					width: kernel.local,
-					height: 1,
-					depth: 1,
-				},
-			);
-			encoder.endEncoding();
-			command.commit();
-			let synchronization = Instant::now();
-			command.waitUntilCompleted();
-			timings.synchronization = synchronization.elapsed();
-			if command.status() != MTLCommandBufferStatus::Completed {
-				return Err(format!("Metal command execution: {:?}", command.error()));
-			}
-			let elapsed = command.GPUEndTime() - command.GPUStartTime();
-			if elapsed.is_finite() && elapsed >= 0.0 {
-				timings.kernel = Some(Duration::from_secs_f64(elapsed));
-			}
-			let transfer = Instant::now();
-			let output = unsafe {
-				std::slice::from_raw_parts(
-					buffers[kernel.output].contents().as_ptr().cast::<f32>(),
-					kernel.lengths[kernel.output],
-				)
-			}
-			.to_vec();
-			timings.transfer += transfer.elapsed();
-			timings.total = total.elapsed();
-			Ok(Run {
-				output,
-				device: self.device.name().to_string(),
-				timings,
-			})
-		})
-	}
-```
-
-`src/backends/opencl.rs` の `pub unsafe fn run(&self,`の定義を次の全体で置き換えます。
-
-```rust
-// file="src/backends/opencl.rs" mode="replace" item="pub unsafe fn run(&self,"
-	pub unsafe fn run(&self, spec: &Spec, inputs: &[Vec<f32>]) -> Result<Run, String> {
-		spec.validate(inputs)?;
-		if self.contract
-			!= (
-				spec.source.clone(),
-				spec.entry.clone(),
-				spec.lengths.len(),
-				spec.scalars.len().max(1),
-				spec.local,
-			) {
-			return Err("compiled GPU contract mismatch".into());
-		}
-		let _execution = self
-			.execution
-			.lock()
-			.map_err(|_| "OpenCL execution mutex poisoned")?;
-		let total = Instant::now();
-		let mut timings = Timings::default();
-		if spec.lengths[spec.output] == 0 {
-			return Ok(Run {
-				output: vec![],
-				device: api("clGetDeviceInfo(name)", self.device.name())?,
-				timings,
-			});
-		}
-		let max = api(
-			"clGetDeviceInfo(workgroup)",
-			self.device.max_work_group_size(),
-		)?
-		.min(api(
-			"clGetKernelWorkGroupInfo",
-			self.kernel.get_work_group_size(self.device.id()),
-		)?);
-		let axes = api(
-			"clGetDeviceInfo(workitems)",
-			self.device.max_work_item_sizes(),
-		)?;
-		if spec.local > max || spec.local > axes[0] {
-			return Err(format!("OpenCL local {} exceeds limit {max}", spec.local));
-		}
-		let local_mem = api("clGetDeviceInfo(local)", self.device.local_mem_size())?;
-		if spec.shared_bytes as u64 > local_mem
-			|| api(
-				"clGetKernelWorkGroupInfo(local)",
-				self.kernel.get_local_mem_size(self.device.id()),
-			)? > local_mem
-		{
-			return Err("OpenCL local memory limit".into());
-		}
-		if spec.groups == 0 {
-			return Err("nonempty output with zero groups".into());
-		}
-		let allocation = Instant::now();
-		let mut buffers: Vec<_> = inputs
-			.iter()
-			.map(|b| unsafe {
-				api(
-					"clCreateBuffer",
-					Buffer::<f32>::create(
-						&self.context,
-						CL_MEM_READ_WRITE,
-						b.len().max(1),
-						ptr::null_mut(),
-					),
-				)
-			})
-			.collect::<Result<_, _>>()?;
-		let scalar_words = if spec.scalars.is_empty() {
-			vec![0u64]
-		} else {
-			spec.scalars.clone()
-		};
-		let mut scalar_buffer = unsafe {
-			api(
-				"clCreateBuffer(scalars)",
-				Buffer::<u64>::create(
-					&self.context,
-					CL_MEM_READ_WRITE,
-					scalar_words.len(),
-					ptr::null_mut(),
-				),
-			)?
-		};
-		timings.allocation = allocation.elapsed();
-		let transfer = Instant::now();
-		for (input, buffer) in inputs.iter().zip(&mut buffers) {
-			if !input.is_empty() {
-				unsafe {
-					api(
-						"clEnqueueWriteBuffer",
-						self.queue
-							.enqueue_write_buffer(buffer, CL_BLOCKING, 0, input, &[]),
-					)?;
-				}
-			}
-		}
-		unsafe {
-			api(
-				"clEnqueueWriteBuffer(scalars)",
-				self.queue.enqueue_write_buffer(
-					&mut scalar_buffer,
-					CL_BLOCKING,
-					0,
-					&scalar_words,
-					&[],
-				),
-			)?;
-			api(
-				"clSetKernelArg(scalars)",
-				self.kernel.set_arg(buffers.len() as u32, &scalar_buffer),
-			)?;
-		}
-		timings.transfer = transfer.elapsed();
-		for (index, buffer) in buffers.iter().enumerate() {
-			unsafe {
-				api("clSetKernelArg", self.kernel.set_arg(index as u32, buffer))?;
-			}
-		}
-		let global = [spec
-			.groups
-			.checked_mul(spec.local)
-			.ok_or("launch overflow")?];
-		let local = [spec.local];
-		let event = unsafe {
-			api(
-				"clEnqueueNDRangeKernel",
-				self.queue.enqueue_nd_range_kernel(
-					self.kernel.get(),
-					1,
-					ptr::null(),
-					global.as_ptr(),
-					local.as_ptr(),
-					&[],
-				),
-			)?
-		};
-		let sync = Instant::now();
-		api("clWaitForEvents", event.wait())?;
-		timings.synchronization = sync.elapsed();
-		if let (Ok(start), Ok(end)) = (
-			event.profiling_command_start(),
-			event.profiling_command_end(),
-		) {
-			timings.kernel = Some(Duration::from_nanos(end - start));
-		}
-		let transfer = Instant::now();
-		let mut output = vec![0.; spec.lengths[spec.output]];
-		unsafe {
-			api(
-				"clEnqueueReadBuffer",
-				self.queue.enqueue_read_buffer(
-					&buffers[spec.output],
-					CL_BLOCKING,
-					0,
-					&mut output,
-					&[],
-				),
-			)?;
-		}
-		timings.transfer += transfer.elapsed();
-		timings.total = total.elapsed();
-		Ok(Run {
-			output,
-			device: api("clGetDeviceInfo(name)", self.device.name())?,
-			timings,
-		})
-	}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_019 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 単一 workgroup の barrier を全 GPU の barrier として扱わない。
+### 18-020 単一 workgroup の barrier を全 GPU の barrier として扱わない。
 
 <!-- todo:18-020 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_020() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_020 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 整数として正確に表せる小例は、期待値と厳密に一致する。
+### 18-021 整数として正確に表せる小例は、期待値と厳密に一致する。
 
 <!-- todo:18-021 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_021() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_021 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 通常の f32 は加算順序の差を考慮し、`1e-5+1e-5*abs(reference)` を初期目標にする。
+### 18-022 通常の f32 は加算順序の差を考慮し、`1e-5+1e-5*abs(reference)` を初期目標にする。
 
 <!-- todo:18-022 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_022() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_022 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 正負が相殺する入力と大小が混在する入力も比較する。
+### 18-023 正負が相殺する入力と大小が混在する入力も比較する。
 
 <!-- todo:18-023 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_023() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_023 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## barrier を通る回数が lane の ID と入力の有効性で変わらない。
+### 18-024 barrier を通る回数が lane の ID と入力の有効性で変わらない。
 
 <!-- todo:18-024 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_024() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_024 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 同じ入力を繰り返して偶然の一回の成功に依存していないことを確認する。
+### 18-025 同じ入力を繰り返して偶然の一回の成功に依存していないことを確認する。
 
 <!-- todo:18-025 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。
 
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_025() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_025 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 実機未実施の backend を数値一致済みとして報告しない。
+### 18-026 実機未実施の backend を数値一致済みとして報告しない。
 
 <!-- todo:18-026 -->
 
-実装は[この章の `Collective::verify、Collective::linearize、gpu_kernels::row_sum、two_stage_sum、dynamic_sum、GpuPlan::compile_parallel`](#local-implementation) にある。次の確認を同じファイルへ追記する。
-
-```rust
-// file=tests/book_18.rs mode=append
-#[test]
-fn todo_18_026() {
-	suite0::barriers_and_shader_compile();
-}
-```
-
-```sh
-# check
-cargo test --test book_18 todo_18_026 -- --exact
-```
-
-assertion がすべて通れば、この入力の期待値と拒否条件を確認できる。
-
-## 確認記録
-
-```sh
-# check
-cargo test
-```
-
-GPU の source は CPU の numerical test と分けて扱う。上の CPU 成功は GPU の実機確認を意味しない。
-
+関連する実装と確認は本章の `18.01`, `18.02` にある。`tests/vector_cpu.rs` と各節の確認コマンドで実行する。対応付けだけで個別要件を検証済みとは扱わない。

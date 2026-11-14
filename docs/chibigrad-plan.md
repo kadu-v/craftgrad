@@ -1,52 +1,37 @@
-# chibigrad の全体構成
+# chibigradの段階的な実装
 
-この教材は、Rustでグラフを構築し、計算コードを生成して実行するMLコンパイラを作ります。[入口](00-roadmap.md)から01〜25章を順に進めます。各章の指定付きコードが実装全体であり、別の完成ソースをダウンロードする手順にはしません。
+この教材は、共通UOpを最小形から拡張します。[入口](00-roadmap.md)から各節のコード変更と確認を順に進めます。Markdownに掲載したコードが正本です。
 
-## フロントエンドと実行経路
+## 序盤の実行経路
 
-最初に小さいscalar compilerを作り、用途に応じた表現へ広げます。型付きscalarとscopeは `ScalarGraph`、明示的なメモリ効果と有限ループは `kernel`、shape付きの純粋なTensor式は `Graph` が扱います。異なる表現を一つのenumへ無理に詰めず、共通のnative backendへ接続します。
+01.01のUOpはRc<Node>で、Nodeはop・src・argを保持します。OpsはConstだけです。依存順の走査と恒等rewriteを通してCを出力し、Clangが作った実行ファイルから7を受け取ります。その後にAddとMulを追加します。
 
-```mermaid
-flowchart TD
-  A[型付きScalarGraph] --> C[生成C]
-  B[メモリとループのKernel AST] --> K[KernelBody]
-  T[Tensorと純粋Graph] --> K
-  K --> C
-  C --> N[ClangとNativeLibrary]
-  K --> G[MetalまたはOpenCL source]
-  G --> D[コンパイルとdevice dispatch]
-```
+02章でParamと実行時入力を追加します。共有ライブラリからpacked引数を読む関数を呼び、コンパイル結果を保ったまま20と12を得ます。ライブラリの初期化・終了処理も生コードを実行するため、raw compileとrunはunsafeです。教材内部の呼出し元が生成したCと引数領域を保証します。
 
-05〜07章のKernel ASTと08章以降のGraphは `native::KernelBody` とCのentry rendererを共有します。Graphはshapeを実行時metadataへ変換し、構造化したCのloopとindexを出します。Kernel ASTは書込み順、viewの範囲、初期化状態、RANGEのscopeを検証してから同じbackendへ渡します。有限の確認量を超えた場合は未検証として拒否します。
+03章で同じ構造のUOpをWeak参照の表で共有し、dtype、scalar interpreter、パターン書換えを追加します。04章でCALL、STACK、UIRを追加します。型や演算の追加時には、検証・renderer・codecの対応も同じ節で増やします。
 
-`Tensor` はGraphの所有先とNodeIdを持つ入口です。演算構築時には数値計算を実行しません。`Graph::compile` が `Plan` を作り、`Plan::run` へ実行時の `Buffer` を束縛します。matmulとconvはmovement、乗算、縮約の合成です。
+## Tensorと実行計画を追加する
 
-## 署名、所有権、検証
+05章のINDEX・LOAD・STORE・AFTER、06章のRANGE・END、07章の局所蓄積を先に動かします。08章で初めてTensorと具体的なshapeを追加し、既存の添字とループへ下げます。ここでは一つのkernelを直接コンパイルします。
 
-CPUの論理ABIはbuffer pointer配列とu64 scalar word配列です。f32の実行時scalarはビット列としてpackし、Tensorの実行では各ノードのshape metadataをwordへ入れます。CPU entryは整数statusを返します。これは入力を検証してから呼ぶための、02章で示すABIです。
+09章で共有式のmaterialization、kernel間の依存、bufferの寿命と再利用を追加します。10章のmovementは添字変換、11章のmatmulとconvは既存Tensor演算の合成です。12章で数学関数、13章で固定shapeの逆伝播、14章でSGD・NN・IDXデータを追加します。勾配も更新式も同じコンパイラで実行します。
 
-scalarの署名は到達するPARAMから検証します。shape付きGraphのPlanは宣言された全入力slotを署名へ残します。これにより定数になった勾配にも、元のparameterと入力を同じslotで渡せます。個数、rank、shape、容量、添字を呼出し前に検査します。コンパイル後の公開metadataを変更しても、所有するbinaryの契約は変わりません。
+## backendと最適化を拡張する
 
-`NativeLibrary` はロード済みhandleと一時ディレクトリを所有します。Dropで先にlibraryを閉じ、続いて一時ファイルを削除します。raw Cのコンパイル・ロードとraw symbolの取得にはunsafe契約があり、通常のGraph利用者は検証済みのPlanを使います。GPUのraw program実行も、生成source、binding、scalar、geometryに対するunsafe契約を持ちます。
+15章のMetalと16章のOpenCLは、まずRust hostから直接転送・送信・読戻しを行います。kernelは同じlowering済みUOpから描画します。
 
-GPUはGraphと同じ `KernelBody` の座標・maskを使い、出力位置をgroupとlaneへ変換します。deviceとpipelineの資源制限、引数設定、完了待ち、status、読出しまでruntimeが所有します。数値がCPUと一致しても、GPUを実行していなければ実機確認は未実行です。
+17章ではELF objectの生成、sectionとsymbolの解析、実行領域の配置、relocationと外部symbolの解決を別々の節で作ります。共有ライブラリ版を置き換え、旧経路を削除します。ELFのロードではCの初期化・終了関数を呼びません。raw entryの実行はunsafeのままです。
 
-## 学習、モデル、実行時shape
+host queueもCALLとAFTERのUOpへ移し、CPU ELFからMetal/OpenCLのcallbackを呼びます。同じ章でloop分割・並替え・unroll、CPU worker、vectorを追加します。18章でshared memoryとbarrierによる縮約、19章でGPUのGEMM・畳込みとcompile cacheを追加します。
 
-逆伝播は元のGraphへ勾配の純粋な式を追加します。共有値の寄与を加算し、broadcastやmovementを逆向きに戻します。勾配も同じcompilerで実行し、有限差分は比較先に使います。SGDとAdamWの更新は実行時parameterを入力に持つgraphです。
+20章でVariable・Bind・boundsとscalarの再束縛を追加し、その後にsymbolicなbuffer次元とN=16の特化版を追加します。最大容量のshapeと実行時のlogical_shapeを区別し、入力と次元の条件を実行前に検査します。可変長shapeは推論で利用し、逆伝播は明示的に拒否します。
 
-`Registry` は名前と一意のparameter ID、alias、入力slotを管理します。保存state、optimizer、乱数状態、datasetの位置を検証してから採用します。公開重みは固定revision、長さ、SHA-256を検証して読みます。Qwenは小fixtureから、全24層、tokenizer、prefill、KV cache、全parameterの学習へ広げます。
+## モデルと確認
 
-20章の `ShapeProgram` は既存Graphにshape式を対応させます。scopeを持つ変数・式のIDを使い、一回のBindingsを変更不能なsnapshotにします。logical shapeと物理容量を分け、generic binaryを再利用します。固定条件を満たす場合だけ別にcompileした特化版を選びます。
+21章はstate・safetensors・検証付き取得を追加します。22章はQwenの設定・parameter登録、通常attention、forward、tokenizer、KV cacheを順に追加します。23章でonline attention、協調GPU kernel、Tensorからのcustom CALLを追加します。
 
-## 最適化と確認の境界
+24章はAdamWとclipping、全parameterのTrainingPlan、checkpointと別processでの再開を順に追加します。25章でRMSNormとmatrix dtype・WMMAを追加します。対応deviceで実際の命令を実行し、OpenCLとCPUではmatrix kernelを明示的に拒否します。
 
-09章のfusionは単一消費先の要素演算をinline化し、STAGEとfanoutをmaterializeします。17〜19章ではloop分割、ベクトル化、CPU thread、local reduction、GEMM tile、workspaceとcacheを追加します。23章は学習用の通常attentionを残して推論用FlashAttentionを選び、25章は実際のcapability probeで行列命令を有効にします。
+各節の確認と各章の累積テストを別々に実行します。検証ツールはMarkdownから再現し、未来の機能が先に入っていないかを検査します。公開データ、実機実行、source生成、性能改善は別の確認です。性能値を測っていない箇所では高速化を実証済みと扱いません。
 
-性能値はcompile、転送、実行、同期を分けて記録します。sourceを生成できること、bindingがビルドできること、実機で正しい値を返すこと、性能が改善することは別の確認です。
-
-## 参照と再現
-
-元の697項目は [requirements.json](requirements.json) に原文とIDを保存します。[入口に掲載した検証スクリプト](00-roadmap.md#写経確認用スクリプト) が見出し、コード配置、保存操作、確認コマンドを検査します。最終的な実装はMarkdownからのみ展開し、章順に実行できます。
-
-比較対象となるtinygradは隣のcheckoutへの各章のリンクから読めます。tinygradの実装をそのまま転写するのではなく、教育用に表現とbackendの責務を分けています。特に独自ELF loader、HCQ全体、任意のsymbolic方程式、可変rankは対象に含めません。
+参照版はtinygrad `c22edff14c79310a9b2df62a78819cf77c8289fa` です。CPU・Metal・OpenCLと必要な共通queueを対象にします。Pythonのweak scalar型、matcherのPythonコード生成、CUDA・AMD・RDMA・追加の分散実行は移植範囲に含めません。
