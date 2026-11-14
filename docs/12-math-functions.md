@@ -188,7 +188,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }

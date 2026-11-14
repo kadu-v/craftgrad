@@ -6,6 +6,8 @@
 
 01.01のUOpはRc<Node>で、Nodeはop・src・argを保持します。OpsはConstだけです。依存順の走査と恒等rewriteを通してCを出力し、Clangが作った実行ファイルから7を受け取ります。その後にAddとMulを追加します。
 
+浮動小数点の引数は`Arg::Float(ConstFloat)`で、非公開のf64を保持します。NaNを正規化し、値の比較では正負のゼロを等しく扱います。03章のUOp共有はビット列で区別してゼロの符号を保ちます。RustのEqとHashの契約に合わせ、引数のHashではゼロを正規化します。f32への変換はコンストラクタと実行backendの境界で行い、bufferとscalar interpreterのf32表現は維持します。04章のUIR v2は引数を64bitの16進数で保存します。
+
 02章でParamと実行時入力を追加します。共有ライブラリからpacked引数を読む関数を呼び、コンパイル結果を保ったまま20と12を得ます。ライブラリの初期化・終了処理も生コードを実行するため、raw compileとrunはunsafeです。教材内部の呼出し元が生成したCと引数領域を保証します。
 
 03章で同じ構造のUOpをWeak参照の表で共有し、dtype、scalar interpreter、パターン書換えを追加します。04章でCALL、STACK、UIRを追加します。型や演算の追加時には、検証・renderer・codecの対応も同じ節で増やします。

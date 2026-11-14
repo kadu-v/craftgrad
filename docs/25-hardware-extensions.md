@@ -323,7 +323,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }
@@ -828,7 +829,8 @@ pub fn render(
         let expr = match u.op {
             Ops::Const => {
                 match u.arg {
-                    Arg::F32(bits) => {
+                    Arg::Float(bits) => {
+                        let bits = (bits.value() as f32).to_bits();
                         match dialect {
                             Dialect::Metal => format!("as_type<float>((uint){bits})"),
                             Dialect::OpenCl => format!("as_float((uint){bits})"),

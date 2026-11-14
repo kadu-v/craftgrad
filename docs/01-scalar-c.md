@@ -6,7 +6,9 @@
 
 ## 01.01 定数を C にして実行する
 
-まず値ひとつだけを表す。UOp は Rc<Node> を包み、Node は op、src、arg を持つ。Const は有限の f32 をビット列で保持する。postorder は入力から親の順にたどり、rewrite はその順序で入力を置き換えてから規則を適用する。ここでは何も置き換えない規則を通し、同じノードを保つ。コード生成も同じ走査順を使い、clang が作った実行ファイルから 7 を受け取る。 コンパイラは CC で指定できる。未指定なら macOS では /usr/bin/clang、それ以外では clang を使う。
+まず値ひとつだけを表す。UOp は Rc<Node> を包み、Node は op、src、arg を持つ。浮動小数点の引数は `Arg::Float(ConstFloat)` とし、`ConstFloat` は非公開の `f64` を保持する。これは [tinygradのConstFloatとDType.const](https://github.com/tinygrad/tinygrad/blob/c22edff14c79310a9b2df62a78819cf77c8289fa/tinygrad/dtype.py) に沿う。`UOp::f32` は f32 へ丸め済みの値を f64 に広げて保存する。NaN は構築時に正規化し、値の比較では NaN 同士と正負のゼロを等しく扱う。ゼロの符号は保持する。
+
+postorder は入力から親の順にたどり、rewrite はその順序で入力を置き換えてから規則を適用する。ここでは何も置き換えない規則を通し、同じノードを保つ。コード生成時に値を f32 のビット列へ変換し、C の小さなヘルパーで復元する。有限値、無限大、NaN、負のゼロを同じ方法で出力できる。clang が作った実行ファイルから 7 を受け取る。コンパイラは CC で指定できる。未指定なら macOS では /usr/bin/clang、それ以外では clang を使う。
 
 `Cargo.toml`を保存する。
 
@@ -30,7 +32,7 @@ pub fn expression(root: &UOp) -> String {
     for node in root.postorder() {
         let term = match node.op {
             Ops::Const => match node.arg {
-                Arg::F32(bits) => format!("{:e}f", f32::from_bits(bits)),
+                Arg::Float(value) => format!("chibi_float({}u)", (value.value() as f32).to_bits()),
             },
         };
         terms.push((node, term));
@@ -45,7 +47,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn source(root: &UOp) -> String {
     format!(
-        "#include <stdio.h>\nint main(void) {{ printf(\"%.9g\\n\", (double)({})); }}\n",
+        "#include <stdint.h>\n#include <string.h>\nstatic float chibi_float(uint32_t bits) {{ float value; memcpy(&value, &bits, 4); return value; }}\n#include <stdio.h>\nint main(void) {{ printf(\"%.9g\\n\", (double)({})); }}\n",
         expression(root)
     )
 }
@@ -93,9 +95,27 @@ use std::{ops::Deref, rc::Rc};
 pub enum Ops {
     Const,
 }
+#[derive(Clone, Copy, Debug)]
+pub struct ConstFloat(f64);
+impl ConstFloat {
+    pub fn new(value: f64) -> Self {
+        Self(if value.is_nan() {
+            f64::from_bits(0x7ff8_0000_0000_0000)
+        } else {
+            value
+        })
+    }
+    pub fn value(self) -> f64 { self.0 }
+}
+impl PartialEq for ConstFloat {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 || (self.0.is_nan() && other.0.is_nan())
+    }
+}
+impl Eq for ConstFloat {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Arg {
-    F32(u32),
+    Float(ConstFloat),
 }
 #[derive(Debug)]
 pub struct Node {
@@ -140,8 +160,7 @@ impl UOp {
         rewritten.pop().unwrap().1
     }
     pub fn f32(value: f32) -> Self {
-        assert!(value.is_finite());
-        Self::new(Ops::Const, vec![], Arg::F32(value.to_bits()))
+        Self::new(Ops::Const, vec![], Arg::Float(ConstFloat::new(f64::from(value))))
     }
 }
 ```
@@ -156,6 +175,11 @@ use chibigrad::codegen::run;
 #[test]
 fn constant_runs_native_code() {
     assert_eq!(run(&(UOp::f32(7.0))).unwrap(), 7.0);
+    for value in [0.0, -0.0, f32::INFINITY, f32::NEG_INFINITY, 1.1, f32::from_bits(1), f32::MAX] {
+        assert_eq!(run(&UOp::f32(value)).unwrap().to_bits(), value.to_bits());
+    }
+    let value = f32::NAN;
+    assert!(run(&UOp::f32(value)).unwrap().is_nan());
 }
 
 #[test]
@@ -169,6 +193,34 @@ fn postorder_and_identity_rewrite() {
         }
     }
     assert!(root.rewrite(|_| None).ptr_eq(&root));
+}
+```
+
+`tests/const_float.rs`を保存する。
+
+```rust
+// file="tests/const_float.rs" mode="write"
+use chibigrad::{Arg, uop::ConstFloat};
+
+#[test]
+fn arguments_compare_values_and_keep_signed_zero() {
+    let positive = ConstFloat::new(0.0);
+    let negative = ConstFloat::new(-0.0);
+    assert_eq!(positive, negative);
+    assert_eq!(Arg::Float(positive), Arg::Float(negative));
+    assert_ne!(positive.value().to_bits(), negative.value().to_bits());
+    assert_eq!(ConstFloat::new(1.1).value(), 1.1);
+    assert_ne!(ConstFloat::new(f64::INFINITY), ConstFloat::new(f64::NEG_INFINITY));
+}
+
+#[test]
+fn all_nan_payloads_are_canonical() {
+    let canonical = ConstFloat::new(f64::NAN);
+    for bits in [0x7ff0_0000_0000_0001, 0xfff8_0000_0000_0042] {
+        let value = ConstFloat::new(f64::from_bits(bits));
+        assert_eq!(value, canonical);
+        assert_eq!(value.value().to_bits(), 0x7ff8_0000_0000_0000);
+    }
 }
 ```
 
@@ -196,7 +248,7 @@ pub fn expression(root: &UOp) -> String {
         };
         let term = match node.op {
             Ops::Const => match node.arg {
-                Arg::F32(bits) => format!("{:e}f", f32::from_bits(bits)),
+                Arg::Float(value) => format!("chibi_float({}u)", (value.value() as f32).to_bits()),
                 _ => unreachable!(),
             },
             Ops::Add => format!("({} + {})", source(0), source(1)),
@@ -223,7 +275,7 @@ pub enum Ops {
 // file="src/uop.rs" mode="replace" item="pub enum Arg"
 pub enum Arg {
     None,
-    F32(u32),
+    Float(ConstFloat),
 }
 ```
 
@@ -289,7 +341,7 @@ pub fn expression(root: &UOp) -> String {
         };
         let term = match node.op {
             Ops::Const => match node.arg {
-                Arg::F32(bits) => format!("{:e}f", f32::from_bits(bits)),
+                Arg::Float(value) => format!("chibi_float({}u)", (value.value() as f32).to_bits()),
                 _ => unreachable!(),
             },
             Ops::Add => format!("({} + {})", source(0), source(1)),

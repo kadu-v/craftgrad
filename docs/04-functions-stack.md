@@ -356,7 +356,7 @@ pub fn compile(root: &UOp) -> Result<CompiledScalar> {
                 );
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(n)) => format!("as_float({n}u)"),
+            (Ops::Const, Arg::Float(n)) => format!("as_float({}u)", (n.value() as f32).to_bits()),
             (Ops::Const, Arg::I32(n)) => format!("((int){}u)", * n as u32),
             (Ops::Const, Arg::Int(n)) => format!("((long long){}ull)", * n as u64),
             (Ops::Const, Arg::Bool(n)) => (*n as u8).to_string(),
@@ -499,7 +499,7 @@ pub enum Ops {
 // file="src/uop.rs" mode="replace" item="pub enum Arg"
 pub enum Arg {
     None,
-    F32(u32),
+    Float(ConstFloat),
     I32(i32),
     Int(i64),
     Bool(bool),
@@ -517,7 +517,7 @@ pub enum Arg {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,
@@ -608,7 +608,7 @@ pub mod uir;
 
 ```rust
 // file="src/uir.rs" mode="write"
-//! Canonical UIR v1. Each line is `id=Op DType [source_ids] typed_arg`.
+//! Canonical UIR v2. Each line is `id=Op DType [source_ids] typed_arg`.
 //! IDs are dense and backward references only. Strings and bytes use hexadecimal
 //! UTF-8/bytes, floats use their exact hexadecimal IEEE bits, and lists use commas.
 use crate::{Arg, DType, Ops, Result, UOp};
@@ -684,7 +684,7 @@ fn op(s: &str) -> Result<Ops> {
 fn encode_arg(a: &Arg) -> String {
     match a {
         Arg::None => "none".into(),
-        Arg::F32(v) => format!("f32;{v:08x}"),
+        Arg::Float(v) => format!("float;{:016x}", v.value().to_bits()),
         Arg::I32(v) => format!("i32;{v}"),
         Arg::Int(v) => format!("i64;{v}"),
         Arg::Bool(v) => format!("bool;{}", *v as u8),
@@ -705,8 +705,10 @@ fn decode_arg(s: &str) -> Result<Arg> {
     let fields: Vec<_> = s.split(';').collect();
     Ok(match fields.as_slice() {
         ["none"] => Arg::None,
-        ["f32", v] if v.len() == 8 => {
-            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        ["float", v] if v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Arg::Float(crate::uop::ConstFloat::new(f64::from_bits(
+                u64::from_str_radix(v, 16).map_err(|_| "invalid float bits")?
+            )))
         }
         ["i32", v] => Arg::I32(number(v)?),
         ["i64", v] => Arg::Int(number(v)?),
@@ -724,7 +726,7 @@ fn decode_arg(s: &str) -> Result<Arg> {
 pub fn print(root: &UOp) -> String {
     let nodes = root.toposort();
     let ids: HashMap<_, _> = nodes.iter().enumerate().map(|(i, u)| (u.id, i)).collect();
-    let mut text = "UIR 1\n".to_string();
+    let mut text = "UIR 2\n".to_string();
     for (id, u) in nodes.iter().enumerate() {
         text.push_str(&format!(
             "{id}={:?} {:?} [{}] {}\n",
@@ -739,8 +741,8 @@ pub fn print(root: &UOp) -> String {
 }
 pub fn parse(text: &str) -> Result<UOp> {
     let mut lines = text.lines();
-    if lines.next() != Some("UIR 1") {
-        return Err("missing UIR 1 header".into());
+    if lines.next() != Some("UIR 2") {
+        return Err("missing UIR 2 header".into());
     }
     let mut nodes: Vec<UOp> = vec![];
     let mut root = None;
@@ -879,7 +881,7 @@ fn canonical_roundtrip_rejects_corruption() {
     assert_eq!(scalar::evaluate(&parsed, &[]).unwrap(), Value::f32(16.));
     for bad in [
         text.replace("root=", "oops="),
-        text.replace("f32;80000000", "f32;gggggggg"),
+        text.replace("float;8000000000000000", "float;gggggggggggggggg"),
         text.replace("0=Param", "7=Param"),
         text.replace("[0,1]", "[999,1]"),
         text.replace("F32 [] scalar;0;F32", "I32 [] scalar;0;F32"),
@@ -887,6 +889,37 @@ fn canonical_roundtrip_rejects_corruption() {
     ] {
         assert!(chibigrad::uir::parse(&bad).is_err(), "{bad}");
     }
+}
+```
+
+`tests/uir.rs`を追記する。
+
+```rust
+// file="tests/uir.rs" mode="append"
+#[test]
+fn float_arguments_roundtrip_all_64_bits() {
+    use chibigrad::{Arg, Ops, uop::ConstFloat};
+    for value in [0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY, 1.1, f64::MAX, f64::from_bits(1), f64::NAN] {
+        let constant = ConstFloat::new(value);
+        let root = UOp::new(Ops::Const, vec![], Arg::Float(constant));
+        let text = chibigrad::uir::print(&root);
+        assert!(text.starts_with("UIR 2\n"));
+        assert!(text.contains(&format!("float;{:016x}", constant.value().to_bits())));
+        let parsed = chibigrad::uir::parse(&text).unwrap();
+        assert_eq!(parsed, root);
+        assert_eq!(chibigrad::uir::print(&parsed), text);
+        match parsed.arg {
+            Arg::Float(v) => assert_eq!(v.value().to_bits(), constant.value().to_bits()),
+            _ => panic!("float argument lost"),
+        }
+    }
+    for bad in ["float;00000000", "float;00000000000000000", "float;+000000000000000", "float;gggggggggggggggg", "f32;00000000"] {
+        let text = format!("UIR 2\n0=Const F32 [] {bad}\nroot=0\n");
+        assert!(chibigrad::uir::parse(&text).is_err(), "{text}");
+    }
+    assert!(chibigrad::uir::parse("UIR 1\n0=Const F32 [] f32;00000000\nroot=0\n").is_err());
+    let nan = "UIR 2\n0=Const F32 [] float;fff8000000000042\nroot=0\n";
+    assert!(chibigrad::uir::print(&chibigrad::uir::parse(nan).unwrap()).contains("float;7ff8000000000000"));
 }
 ```
 

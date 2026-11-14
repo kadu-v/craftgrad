@@ -6,7 +6,7 @@
 
 ## 03.01 共有する不変ノードと型付きスカラー
 
-Rc と Weak のインターン表で同じ op・src・arg を一つにする。F32 のビット表現、I32 の巡回演算、I64 の検査、Bool、Cast を加える。入力の型と個数を境界で確かめ、Rust の参照評価と C の実行を照合する。前章の CLI はこの型付き実行器に移し、7、20、二回の入力差替えを保つ。
+Rc と Weak のインターン表で同じ op・src・arg を一つにする。`ConstFloat` の値の比較では正負のゼロが等しいため、引数の Hash もゼロを正規化する。共有用の Key は浮動小数点のビット列で比較し、正負のゼロを別ノードに保つ。正規化済みの NaN は共有する。実行器には F32 のビット表現、I32 の巡回演算、I64 の検査、Bool、Cast を加える。入力の型と個数を境界で確かめ、Rust の参照評価と C の実行を照合する。前章の CLI はこの型付き実行器に移し、7、20、二回の入力差替えを保つ。
 
 `Cargo.toml`を保存する。
 
@@ -332,7 +332,7 @@ impl Value {
                 Arg::Bool(v) => Self::Bool(v),
                 Arg::I32(v) => Self::I32(v),
                 Arg::Int(v) => Self::I64(v),
-                Arg::F32(v) => Self::F32Bits(v),
+                Arg::Float(v) => Self::F32Bits((v.value() as f32).to_bits()),
                 _ => return None,
             },
         )
@@ -732,7 +732,7 @@ pub fn compile(root: &UOp) -> Result<CompiledScalar> {
                 );
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(n)) => format!("as_float({n}u)"),
+            (Ops::Const, Arg::Float(n)) => format!("as_float({}u)", (n.value() as f32).to_bits()),
             (Ops::Const, Arg::I32(n)) => format!("((int){}u)", * n as u32),
             (Ops::Const, Arg::Int(n)) => format!("((long long){}ull)", * n as u64),
             (Ops::Const, Arg::Bool(n)) => (*n as u8).to_string(),
@@ -904,10 +904,34 @@ pub enum Ops {
     Or,
     Where,
 }
+#[derive(Clone, Copy, Debug)]
+pub struct ConstFloat(f64);
+impl ConstFloat {
+    pub fn new(value: f64) -> Self {
+        Self(if value.is_nan() {
+            f64::from_bits(0x7ff8_0000_0000_0000)
+        } else {
+            value
+        })
+    }
+    pub fn value(self) -> f64 { self.0 }
+}
+impl PartialEq for ConstFloat {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 || (self.0.is_nan() && other.0.is_nan())
+    }
+}
+impl Eq for ConstFloat {}
+impl Hash for ConstFloat {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let bits = if self.0 == 0.0 { 0 } else { self.0.to_bits() };
+        bits.hash(state);
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Arg {
     None,
-    F32(u32),
+    Float(ConstFloat),
     I32(i32),
     Int(i64),
     Bool(bool),
@@ -925,11 +949,31 @@ pub struct Node {
 }
 #[derive(Clone, Debug)]
 pub struct UOp(Rc<Node>);
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 struct Key {
     op: Ops,
     src: Vec<u64>,
     arg: Arg,
+}
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.op == other.op && self.src == other.src && match (&self.arg, &other.arg) {
+            (Arg::Float(a), Arg::Float(b)) => a.value().to_bits() == b.value().to_bits(),
+            (a, b) => a == b,
+        }
+    }
+}
+impl Eq for Key {}
+impl Hash for Key {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.op.hash(state);
+        self.src.hash(state);
+        std::mem::discriminant(&self.arg).hash(state);
+        match &self.arg {
+            Arg::Float(value) => value.value().to_bits().hash(state),
+            other => other.hash(state),
+        }
+    }
 }
 #[derive(Default)]
 struct Interner {
@@ -1034,7 +1078,7 @@ impl UOp {
         Self::new(self.op, src, self.arg.clone())
     }
     pub fn f32(x: f32) -> Self {
-        Self::new(Ops::Const, vec![], Arg::F32(x.to_bits()))
+        Self::new(Ops::Const, vec![], Arg::Float(ConstFloat::new(f64::from(x))))
     }
     pub fn i32(x: i32) -> Self {
         Self::new(Ops::Const, vec![], Arg::I32(x))
@@ -1096,7 +1140,7 @@ impl UOp {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,
@@ -1302,6 +1346,57 @@ fn native_matches_oracle_200_cases() -> chibigrad::Result<()> {
         }
     }
     Ok(())
+}
+```
+
+`tests/const_float.rs`を追記する。
+
+```rust
+// file="tests/const_float.rs" mode="append"
+#[test]
+fn argument_hash_agrees_with_numeric_equality() {
+    use std::{collections::HashSet, hash::{DefaultHasher, Hash, Hasher}};
+    let hash = |value: &Arg| {
+        let mut state = DefaultHasher::new();
+        value.hash(&mut state);
+        state.finish()
+    };
+    let pair = [Arg::Float(ConstFloat::new(0.0)), Arg::Float(ConstFloat::new(-0.0))];
+    assert_eq!(hash(&pair[0]), hash(&pair[1]));
+    assert_eq!(HashSet::from(pair).len(), 1);
+    let nan = [Arg::Float(ConstFloat::new(f64::NAN)),
+               Arg::Float(ConstFloat::new(f64::from_bits(0xfff8_0000_0000_0042)))];
+    assert_eq!(hash(&nan[0]), hash(&nan[1]));
+    assert_eq!(HashSet::from(nan).len(), 1);
+}
+
+#[test]
+fn interning_keeps_zero_sign_and_shares_canonical_nan() {
+    use chibigrad::{Ops, UOp};
+    let positive = UOp::f32(0.0);
+    let negative = UOp::f32(-0.0);
+    assert_eq!(positive.arg, negative.arg);
+    assert_ne!(positive, negative);
+    assert_eq!(positive, UOp::f32(0.0));
+    assert_eq!(negative, UOp::f32(-0.0));
+    let nan = |bits| UOp::new(Ops::Const, vec![], Arg::Float(ConstFloat::new(f64::from_bits(bits))));
+    assert_eq!(nan(0x7ff0_0000_0000_0001), nan(0xfff8_0000_0000_0042));
+    assert_eq!(UOp::f32(1.1).arg, Arg::Float(ConstFloat::new(f64::from(1.1f32))));
+    assert_ne!(UOp::f32(1.1).arg, Arg::Float(ConstFloat::new(1.1f64)));
+}
+
+#[test]
+fn native_f32_constants_match_the_oracle() {
+    use chibigrad::{Ops, UOp, scalar::{self, Value}};
+    for value in [0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY, 1.1, f64::from(f32::from_bits(1)), f64::from(f32::MAX)] {
+        let root = UOp::new(Ops::Const, vec![], Arg::Float(ConstFloat::new(value)));
+        let expected = Value::f32(value as f32);
+        assert_eq!(scalar::evaluate(&root, &[]).unwrap(), expected);
+        assert_eq!(scalar::compile(&root).unwrap().run(&[]).unwrap(), expected);
+    }
+    let root = UOp::f32(f32::NAN);
+    assert!(scalar::evaluate(&root, &[]).unwrap().number().is_nan());
+    assert!(scalar::compile(&root).unwrap().run(&[]).unwrap().number().is_nan());
 }
 ```
 
@@ -1660,6 +1755,20 @@ fn deep_graph_rewrite_and_drop_are_iterative() {
     assert_eq!(graph_rewrite(&u, &PatternMatcher::new()).unwrap(), u);
     drop(u);
     assert_eq!(UOp::interner_len(), before);
+}
+```
+
+`tests/const_float.rs`を追記する。
+
+```rust
+// file="tests/const_float.rs" mode="append"
+#[test]
+fn patterns_use_argument_equality_instead_of_interner_identity() {
+    use chibigrad::{UOp, pattern::UPat};
+    let positive = UPat::constant(Arg::Float(ConstFloat::new(0.0)));
+    assert!(positive.matches(&UOp::f32(-0.0)).is_some());
+    let nan = UPat::constant(Arg::Float(ConstFloat::new(f64::NAN)));
+    assert!(nan.matches(&UOp::f32(f32::NAN)).is_some());
 }
 ```
 

@@ -9,37 +9,43 @@
         "title": "01.01 定数を C にして実行する",
         "operations": [
           {
-            "line": 13,
+            "line": 15,
             "language": "toml",
             "file": "Cargo.toml",
             "mode": "write"
           },
           {
-            "line": 23,
+            "line": 25,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "write"
           },
           {
-            "line": 78,
+            "line": 80,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "write"
           },
           {
-            "line": 88,
+            "line": 90,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "write"
           },
           {
-            "line": 151,
+            "line": 170,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "write"
+          },
+          {
+            "line": 201,
+            "language": "rust",
+            "file": "tests/const_float.rs",
+            "mode": "write"
           }
         ],
-        "check_line": 175,
+        "check_line": 227,
         "requires": "",
         "command": "cargo test -- --nocapture"
       },
@@ -48,48 +54,48 @@
         "title": "01.02 Add と二つの入力",
         "operations": [
           {
-            "line": 188,
+            "line": 240,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "pub fn expression"
           },
           {
-            "line": 212,
+            "line": 264,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 222,
+            "line": 274,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 232,
+            "line": 284,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 241,
+            "line": 293,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "replace",
             "item": "fn postorder_and_identity_rewrite"
           },
           {
-            "line": 258,
+            "line": 310,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "append"
           }
         ],
-        "check_line": 268,
+        "check_line": 320,
         "requires": "",
         "command": "cargo test -- --nocapture"
       },
@@ -98,41 +104,41 @@
         "title": "01.03 Mul を加えて式を組む",
         "operations": [
           {
-            "line": 281,
+            "line": 333,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "pub fn expression"
           },
           {
-            "line": 306,
+            "line": 358,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 317,
+            "line": 369,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 326,
+            "line": 378,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "replace",
             "item": "fn postorder_and_identity_rewrite"
           },
           {
-            "line": 343,
+            "line": 395,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "append"
           }
         ],
-        "check_line": 354,
+        "check_line": 406,
         "requires": "",
         "command": "cargo test -- --nocapture"
       },
@@ -141,19 +147,19 @@
         "title": "01.04 生成した C とグラフを表示する",
         "operations": [
           {
-            "line": 367,
+            "line": 419,
             "language": "rust",
             "file": "examples/scalar_arithmetic.rs",
             "mode": "write"
           },
           {
-            "line": 391,
+            "line": 443,
             "language": "rust",
             "file": "examples/scalar_const.rs",
             "mode": "write"
           }
         ],
-        "check_line": 413,
+        "check_line": 465,
         "requires": "",
         "command": "cargo test -- --nocapture\ncargo run --example scalar_const -- --dump-source --dump-graph\ncargo run --example scalar_arithmetic -- --dump-source --dump-graph"
       }
@@ -232,27 +238,27 @@
             "item": "fn constant_runs_native_code"
           },
           {
-            "line": 169,
+            "line": 174,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "replace",
             "item": "fn addition_runs_native_code"
           },
           {
-            "line": 178,
+            "line": 183,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "replace",
             "item": "fn multiplication_runs_native_code"
           },
           {
-            "line": 188,
+            "line": 193,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "append"
           }
         ],
-        "check_line": 199,
+        "check_line": 204,
         "requires": "",
         "command": "cargo test -- --nocapture\ncargo run --example scalar_const -- --dump-source --dump-graph\ncargo run --example scalar_arithmetic -- --dump-source --dump-graph"
       },
@@ -261,45 +267,45 @@
         "title": "02.02 共有ライブラリと packed ABI",
         "operations": [
           {
-            "line": 214,
+            "line": 219,
             "language": "rust",
             "file": "examples/scalar_arithmetic.rs",
             "mode": "replace",
             "item": "fn main"
           },
           {
-            "line": 243,
+            "line": 248,
             "language": "rust",
             "file": "examples/scalar_const.rs",
             "mode": "replace",
             "item": "fn main"
           },
           {
-            "line": 272,
+            "line": 277,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "write"
           },
           {
-            "line": 313,
+            "line": 318,
             "language": "rust",
             "file": "src/cpu.rs",
             "mode": "write"
           },
           {
-            "line": 405,
+            "line": 410,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 413,
+            "line": 418,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "write"
           }
         ],
-        "check_line": 469,
+        "check_line": 479,
         "requires": "",
         "command": "cargo test -- --nocapture\ncargo run --example scalar_const -- --dump-source --dump-graph\ncargo run --example scalar_arithmetic -- --dump-source --dump-graph\ncargo test --offline --doc"
       },
@@ -308,19 +314,19 @@
         "title": "02.03 同じバイナリを二度呼ぶ",
         "operations": [
           {
-            "line": 485,
+            "line": 495,
             "language": "rust",
             "file": "examples/scalar_inputs.rs",
             "mode": "write"
           },
           {
-            "line": 524,
+            "line": 534,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "append"
           }
         ],
-        "check_line": 550,
+        "check_line": 560,
         "requires": "",
         "command": "cargo test -- --nocapture\ncargo run --example scalar_const -- --dump-source --dump-graph\ncargo run --example scalar_arithmetic -- --dump-source --dump-graph\ncargo run --example scalar_inputs -- --stats"
       }
@@ -462,13 +468,19 @@
             "mode": "write"
           },
           {
-            "line": 1171,
+            "line": 1215,
             "language": "rust",
             "file": "tests/scalar.rs",
             "mode": "write"
+          },
+          {
+            "line": 1354,
+            "language": "rust",
+            "file": "tests/const_float.rs",
+            "mode": "append"
           }
         ],
-        "check_line": 1308,
+        "check_line": 1403,
         "requires": "",
         "command": "cargo test --offline\ncargo run --offline --example scalar_inputs -- --stats"
       },
@@ -477,25 +489,31 @@
         "title": "03.02 パターンで共有グラフを書き換える",
         "operations": [
           {
-            "line": 1322,
+            "line": 1417,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 1330,
+            "line": 1425,
             "language": "rust",
             "file": "src/pattern.rs",
             "mode": "write"
           },
           {
-            "line": 1622,
+            "line": 1717,
             "language": "rust",
             "file": "tests/pattern.rs",
             "mode": "write"
+          },
+          {
+            "line": 1763,
+            "language": "rust",
+            "file": "tests/const_float.rs",
+            "mode": "append"
           }
         ],
-        "check_line": 1666,
+        "check_line": 1775,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -615,13 +633,19 @@
             "mode": "write"
           },
           {
-            "line": 863,
+            "line": 865,
             "language": "rust",
             "file": "tests/uir.rs",
             "mode": "write"
+          },
+          {
+            "line": 897,
+            "language": "rust",
+            "file": "tests/uir.rs",
+            "mode": "append"
           }
         ],
-        "check_line": 893,
+        "check_line": 926,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -643,75 +667,75 @@
             "mode": "write"
           },
           {
-            "line": 421,
+            "line": 422,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 429,
+            "line": 430,
             "language": "rust",
             "file": "src/scalar.rs",
             "mode": "write"
           },
           {
-            "line": 933,
+            "line": 934,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn dtype"
           },
           {
-            "line": 952,
+            "line": 953,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 995,
+            "line": 996,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 1016,
+            "line": 1017,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 1047,
+            "line": 1050,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 1092,
+            "line": 1095,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum DType"
           },
           {
-            "line": 1106,
+            "line": 1109,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 1144,
+            "line": 1147,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 1163,
+            "line": 1166,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -719,20 +743,20 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 1219,
+            "line": 1222,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 1240,
+            "line": 1243,
             "language": "rust",
             "file": "tests/memory.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1272,
+        "check_line": 1275,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -741,28 +765,28 @@
         "title": "05.02 AFTER で書込み後の値を読む",
         "operations": [
           {
-            "line": 1285,
+            "line": 1288,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "fn render_impl"
           },
           {
-            "line": 1585,
+            "line": 1589,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 1629,
+            "line": 1633,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 1668,
+            "line": 1672,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -770,20 +794,20 @@
             "item": "pub fn ordered_sources"
           },
           {
-            "line": 1681,
+            "line": 1685,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 1692,
+            "line": 1696,
             "language": "rust",
             "file": "tests/memory.rs",
             "mode": "append"
           }
         ],
-        "check_line": 1706,
+        "check_line": 1710,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -820,75 +844,75 @@
             "item": "fn render_impl"
           },
           {
-            "line": 410,
+            "line": 411,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "fn index_bounds"
           },
           {
-            "line": 427,
+            "line": 428,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 435,
+            "line": 436,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "use crate::"
           },
           {
-            "line": 442,
+            "line": 443,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 488,
+            "line": 489,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 510,
+            "line": 511,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 548,
+            "line": 551,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 600,
+            "line": 603,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "append"
           },
           {
-            "line": 636,
+            "line": 639,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 677,
+            "line": 680,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 697,
+            "line": 700,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -896,32 +920,32 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 755,
+            "line": 758,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 764,
+            "line": 767,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append"
           },
           {
-            "line": 775,
+            "line": 778,
             "language": "rust",
             "file": "tests/loop_memory.rs",
             "mode": "write"
           },
           {
-            "line": 802,
+            "line": 805,
             "language": "rust",
             "file": "tests/loops_uop.rs",
             "mode": "write"
           }
         ],
-        "check_line": 822,
+        "check_line": 825,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -930,26 +954,26 @@
         "title": "06.02 ループの値の寿命を検証する",
         "operations": [
           {
-            "line": 835,
+            "line": 838,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "pub fn verify_lowered"
           },
           {
-            "line": 880,
+            "line": 883,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "write"
           },
           {
-            "line": 1216,
+            "line": 1221,
             "language": "rust",
             "file": "tests/scope.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1228,
+        "check_line": 1233,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -972,56 +996,56 @@
             "item": "fn render_impl"
           },
           {
-            "line": 366,
+            "line": 367,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 413,
+            "line": 414,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 438,
+            "line": 439,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 482,
+            "line": 485,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 535,
+            "line": 538,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 577,
+            "line": 580,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Axis"
           },
           {
-            "line": 587,
+            "line": 590,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 621,
+            "line": 624,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1029,13 +1053,13 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 680,
+            "line": 683,
             "language": "rust",
             "file": "tests/reduction.rs",
             "mode": "write"
           }
         ],
-        "check_line": 731,
+        "check_line": 734,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -1044,25 +1068,25 @@
         "title": "07.02 最大値と空集合の単位元",
         "operations": [
           {
-            "line": 744,
+            "line": 747,
             "language": "rust",
             "file": "src/kernels.rs",
             "mode": "write"
           },
           {
-            "line": 784,
+            "line": 787,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 793,
+            "line": 796,
             "language": "rust",
             "file": "tests/reduction_max.rs",
             "mode": "write"
           }
         ],
-        "check_line": 815,
+        "check_line": 818,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -1106,94 +1130,94 @@
             "item": "fn render_impl"
           },
           {
-            "line": 435,
+            "line": 436,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "fn pointer_size"
           },
           {
-            "line": 448,
+            "line": 449,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "append"
           },
           {
-            "line": 604,
+            "line": 605,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 618,
+            "line": 619,
             "language": "rust",
             "file": "src/runtime.rs",
             "mode": "write"
           },
           {
-            "line": 776,
+            "line": 777,
             "language": "rust",
             "file": "src/scalar.rs",
             "mode": "replace",
             "item": "pub fn compile_with_guards"
           },
           {
-            "line": 864,
+            "line": 865,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "write"
           },
           {
-            "line": 995,
+            "line": 996,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 1043,
+            "line": 1044,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 1076,
+            "line": 1077,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 1125,
+            "line": 1128,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 1196,
+            "line": 1199,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 1239,
+            "line": 1242,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 1278,
+            "line": 1281,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub struct Node"
           },
           {
-            "line": 1292,
+            "line": 1295,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1201,7 +1225,7 @@
             "item": "pub fn new"
           },
           {
-            "line": 1325,
+            "line": 1328,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1209,61 +1233,61 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 1384,
+            "line": 1387,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 1434,
+            "line": 1437,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append"
           },
           {
-            "line": 1481,
+            "line": 1484,
             "language": "rust",
             "file": "tests/loop_memory.rs",
             "mode": "replace",
             "item": "fn masked_vector_load_and_store_execute_real_ranges"
           },
           {
-            "line": 1520,
+            "line": 1523,
             "language": "rust",
             "file": "tests/loops_uop.rs",
             "mode": "replace",
             "item": "fn scope_and_unconditional_memory_bounds_are_checked"
           },
           {
-            "line": 1547,
+            "line": 1550,
             "language": "rust",
             "file": "tests/memory.rs",
             "mode": "replace",
             "item": "fn ptr"
           },
           {
-            "line": 1556,
+            "line": 1559,
             "language": "rust",
             "file": "tests/reduction.rs",
             "mode": "replace",
             "item": "fn row_sum"
           },
           {
-            "line": 1610,
+            "line": 1613,
             "language": "rust",
             "file": "tests/reduction_max.rs",
             "mode": "replace",
             "item": "fn max_reduction_and_empty_identity"
           },
           {
-            "line": 1634,
+            "line": 1637,
             "language": "rust",
             "file": "tests/tensor.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1656,
+        "check_line": 1659,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -1272,14 +1296,14 @@
         "title": "08.02 Tensor の軸を畳み込む",
         "operations": [
           {
-            "line": 1669,
+            "line": 1672,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "struct Lower"
           },
           {
-            "line": 1682,
+            "line": 1685,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
@@ -1287,63 +1311,63 @@
             "item": "fn scalar"
           },
           {
-            "line": 1766,
+            "line": 1769,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "append",
             "within": "impl Lower"
           },
           {
-            "line": 1787,
+            "line": 1790,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "pub fn rangeify"
           },
           {
-            "line": 1826,
+            "line": 1829,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "append",
             "within": "impl Tensor"
           },
           {
-            "line": 1871,
+            "line": 1874,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 1920,
+            "line": 1923,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 1956,
+            "line": 1959,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 2010,
+            "line": 2015,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 2054,
+            "line": 2059,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 2098,
+            "line": 2103,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1351,13 +1375,13 @@
             "item": "fn infer_shape"
           },
           {
-            "line": 2156,
+            "line": 2161,
             "language": "rust",
             "file": "tests/tensor_native.rs",
             "mode": "write"
           }
         ],
-        "check_line": 2206,
+        "check_line": 2211,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -1520,21 +1544,21 @@
             "item": "fn decode_arg"
           },
           {
-            "line": 392,
+            "line": 394,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 443,
+            "line": 445,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 491,
+            "line": 493,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1542,20 +1566,20 @@
             "item": "fn infer_shape"
           },
           {
-            "line": 620,
+            "line": 622,
             "language": "rust",
             "file": "tests/movement.rs",
             "mode": "write"
           },
           {
-            "line": 647,
+            "line": 649,
             "language": "rust",
             "file": "tests/tensor_native.rs",
             "mode": "replace",
             "item": "fn fused_reduction_rebinds_native_inputs"
           }
         ],
-        "check_line": 687,
+        "check_line": 689,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -1564,7 +1588,7 @@
         "title": "10.02 実行時の gather と scatter-add",
         "operations": [
           {
-            "line": 700,
+            "line": 702,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
@@ -1572,42 +1596,42 @@
             "item": "fn scalar"
           },
           {
-            "line": 885,
+            "line": 887,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "append",
             "within": "impl Lower"
           },
           {
-            "line": 913,
+            "line": 915,
             "language": "rust",
             "file": "src/schedule.rs",
             "mode": "replace",
             "item": "pub fn create_schedule"
           },
           {
-            "line": 1093,
+            "line": 1095,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "append",
             "within": "impl Tensor"
           },
           {
-            "line": 1114,
+            "line": 1116,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 1172,
+            "line": 1174,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 1225,
+            "line": 1227,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1615,7 +1639,7 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 1285,
+            "line": 1287,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -1623,13 +1647,13 @@
             "item": "fn infer_shape"
           },
           {
-            "line": 1440,
+            "line": 1442,
             "language": "rust",
             "file": "tests/tensor_native.rs",
             "mode": "append"
           }
         ],
-        "check_line": 1463,
+        "check_line": 1465,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -1724,62 +1748,62 @@
             "item": "fn render_impl"
           },
           {
-            "line": 413,
+            "line": 414,
             "language": "rust",
             "file": "src/scalar.rs",
             "mode": "replace",
             "item": "pub fn verify_node"
           },
           {
-            "line": 500,
+            "line": 501,
             "language": "rust",
             "file": "src/scalar.rs",
             "mode": "replace",
             "item": "pub fn eval_alu"
           },
           {
-            "line": 693,
+            "line": 694,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "append",
             "within": "impl Tensor"
           },
           {
-            "line": 726,
+            "line": 727,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 791,
+            "line": 792,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 851,
+            "line": 852,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub fn is_unary"
           },
           {
-            "line": 872,
+            "line": 873,
             "language": "rust",
             "file": "tests/math.rs",
             "mode": "write"
           },
           {
-            "line": 901,
+            "line": 902,
             "language": "rust",
             "file": "tests/tensor_native.rs",
             "mode": "replace",
             "item": "fn fused_reduction_rebinds_native_inputs"
           }
         ],
-        "check_line": 941,
+        "check_line": 942,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -1788,25 +1812,25 @@
         "title": "12.02 通常の UOp だけで数学関数を近似する",
         "operations": [
           {
-            "line": 954,
+            "line": 955,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 963,
+            "line": 964,
             "language": "rust",
             "file": "src/math_decomp.rs",
             "mode": "write"
           },
           {
-            "line": 1180,
+            "line": 1181,
             "language": "rust",
             "file": "tests/math_decomp.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1311,
+        "check_line": 1312,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -2107,27 +2131,27 @@
             "mode": "write"
           },
           {
-            "line": 1214,
+            "line": 1217,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 1279,
+            "line": 1284,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Axis"
           },
           {
-            "line": 1290,
+            "line": 1295,
             "language": "rust",
             "file": "tests/gpu_common.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1367,
+        "check_line": 1372,
         "requires": "metal",
         "command": "cargo test --features metal --test gpu_common -- --nocapture"
       },
@@ -2136,25 +2160,25 @@
         "title": "15.04 Tensor を Rust ホストから GPU 実行",
         "operations": [
           {
-            "line": 1380,
+            "line": 1385,
             "language": "rust",
             "file": "src/gpu_tensor.rs",
             "mode": "write"
           },
           {
-            "line": 1776,
+            "line": 1781,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 1790,
+            "line": 1795,
             "language": "rust",
             "file": "tests/tensor_gpu.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1981,
+        "check_line": 2002,
         "requires": "metal",
         "command": "cargo test --features metal --test tensor_gpu -- --nocapture"
       }
@@ -2223,13 +2247,13 @@
             "item": "pub fn render"
           },
           {
-            "line": 1196,
+            "line": 1199,
             "language": "rust",
             "file": "tests/tensor_gpu.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1387,
+        "check_line": 1406,
         "requires": "metal,opencl",
         "command": "cargo test --features metal,opencl --test tensor_gpu -- --nocapture"
       }
@@ -2507,67 +2531,67 @@
             "item": "fn render_impl"
           },
           {
-            "line": 2847,
+            "line": 2848,
             "language": "rust",
             "file": "src/gpu_tensor.rs",
             "mode": "write"
           },
           {
-            "line": 3286,
+            "line": 3287,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 3295,
+            "line": 3296,
             "language": "rust",
             "file": "src/queue.rs",
             "mode": "write"
           },
           {
-            "line": 3670,
+            "line": 3671,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 3737,
+            "line": 3738,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 3784,
+            "line": 3785,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 3850,
+            "line": 3853,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 3923,
+            "line": 3926,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 3985,
+            "line": 3988,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 4034,
+            "line": 4037,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -2575,7 +2599,7 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 4097,
+            "line": 4100,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -2583,20 +2607,20 @@
             "item": "fn infer_shape"
           },
           {
-            "line": 4254,
+            "line": 4257,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 4270,
+            "line": 4273,
             "language": "rust",
             "file": "tests/runtime_patch.rs",
             "mode": "write"
           }
         ],
-        "check_line": 4435,
+        "check_line": 4438,
         "requires": "metal,opencl",
         "command": "cargo test --features metal,opencl --test runtime_patch --test tensor_gpu -- --nocapture"
       },
@@ -2605,25 +2629,25 @@
         "title": "17.06 出力ループを分割する",
         "operations": [
           {
-            "line": 4448,
+            "line": 4451,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 4456,
+            "line": 4459,
             "language": "rust",
             "file": "src/optimization.rs",
             "mode": "write"
           },
           {
-            "line": 4678,
+            "line": 4681,
             "language": "rust",
             "file": "tests/loop_optimization.rs",
             "mode": "write"
           }
         ],
-        "check_line": 4730,
+        "check_line": 4733,
         "requires": "",
         "command": "cargo test --test loop_optimization"
       },
@@ -2632,19 +2656,19 @@
         "title": "17.07 独立した出力ループを交換する",
         "operations": [
           {
-            "line": 4743,
+            "line": 4746,
             "language": "rust",
             "file": "src/optimization.rs",
             "mode": "append"
           },
           {
-            "line": 4964,
+            "line": 4967,
             "language": "rust",
             "file": "tests/loop_interchange.rs",
             "mode": "write"
           }
         ],
-        "check_line": 5041,
+        "check_line": 5044,
         "requires": "",
         "command": "cargo test --test loop_interchange"
       },
@@ -2653,19 +2677,19 @@
         "title": "17.08 還元状態を保ってループ展開する",
         "operations": [
           {
-            "line": 5054,
+            "line": 5057,
             "language": "rust",
             "file": "src/optimization.rs",
             "mode": "append"
           },
           {
-            "line": 5229,
+            "line": 5232,
             "language": "rust",
             "file": "tests/loop_transforms.rs",
             "mode": "write"
           }
         ],
-        "check_line": 5465,
+        "check_line": 5468,
         "requires": "",
         "command": "cargo test --test loop_transforms"
       },
@@ -2674,25 +2698,25 @@
         "title": "17.09 独立した出力を CPU ワーカーへ配る",
         "operations": [
           {
-            "line": 5478,
+            "line": 5481,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 5486,
+            "line": 5489,
             "language": "rust",
             "file": "src/parallel.rs",
             "mode": "write"
           },
           {
-            "line": 5796,
+            "line": 5799,
             "language": "rust",
             "file": "tests/cpu_workers.rs",
             "mode": "write"
           }
         ],
-        "check_line": 5959,
+        "check_line": 5962,
         "requires": "",
         "command": "cargo test --test cpu_workers"
       },
@@ -2701,76 +2725,76 @@
         "title": "17.10 同じ LOAD と STORE を4要素のvectorへ広げる",
         "operations": [
           {
-            "line": 5972,
+            "line": 5975,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "fn ctype"
           },
           {
-            "line": 5989,
+            "line": 5992,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "replace",
             "item": "fn render_impl"
           },
           {
-            "line": 6413,
+            "line": 6417,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "append"
           },
           {
-            "line": 6504,
+            "line": 6508,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "fn ident"
           },
           {
-            "line": 6519,
+            "line": 6523,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "fn ty"
           },
           {
-            "line": 6536,
+            "line": 6540,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "pub fn render"
           },
           {
-            "line": 6849,
+            "line": 6854,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn dtype"
           },
           {
-            "line": 6869,
+            "line": 6874,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 6937,
+            "line": 6942,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum DType"
           },
           {
-            "line": 6952,
+            "line": 6957,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 7015,
+            "line": 7020,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -2778,13 +2802,13 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 7078,
+            "line": 7083,
             "language": "rust",
             "file": "tests/vector_cpu.rs",
             "mode": "write"
           }
         ],
-        "check_line": 7118,
+        "check_line": 7123,
         "requires": "",
         "command": "cargo test --offline --test vector_cpu"
       }
@@ -2835,47 +2859,47 @@
             "item": "pub fn render"
           },
           {
-            "line": 422,
+            "line": 423,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 491,
+            "line": 492,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 558,
+            "line": 561,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 622,
+            "line": 625,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Axis"
           },
           {
-            "line": 634,
+            "line": 637,
             "language": "rust",
             "file": "tests/gpu_reduction.rs",
             "mode": "write"
           },
           {
-            "line": 656,
+            "line": 659,
             "language": "rust",
             "file": "tests/support/mod.rs",
             "mode": "write"
           }
         ],
-        "check_line": 775,
+        "check_line": 778,
         "requires": "metal,opencl",
         "command": "cargo test --offline --features metal,opencl --test gpu_reduction -- --nocapture"
       },
@@ -2884,34 +2908,34 @@
         "title": "18.02 行数と端数のある幅を扱う",
         "operations": [
           {
-            "line": 788,
+            "line": 791,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "append",
             "within": "impl Builder"
           },
           {
-            "line": 803,
+            "line": 806,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "replace",
             "item": "pub fn local_reduction"
           },
           {
-            "line": 859,
+            "line": 862,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "append"
           },
           {
-            "line": 867,
+            "line": 870,
             "language": "rust",
             "file": "tests/gpu_reduction.rs",
             "mode": "replace",
             "item": "fn check"
           }
         ],
-        "check_line": 877,
+        "check_line": 880,
         "requires": "metal,opencl",
         "command": "cargo test --offline --features metal,opencl --test gpu_reduction -- --nocapture"
       }
@@ -3016,39 +3040,39 @@
             "mode": "write"
           },
           {
-            "line": 939,
+            "line": 940,
             "language": "rust",
             "file": "src/functions.rs",
             "mode": "replace",
             "item": "fn selector_bounds"
           },
           {
-            "line": 952,
+            "line": 953,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "write"
           },
           {
-            "line": 1301,
+            "line": 1302,
             "language": "rust",
             "file": "src/gpu_tensor.rs",
             "mode": "write"
           },
           {
-            "line": 1795,
+            "line": 1796,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "write"
           },
           {
-            "line": 1876,
+            "line": 1877,
             "language": "rust",
             "file": "src/parallel.rs",
             "mode": "replace",
             "item": "pub struct ParallelProgram"
           },
           {
-            "line": 1892,
+            "line": 1893,
             "language": "rust",
             "file": "src/parallel.rs",
             "mode": "replace",
@@ -3056,7 +3080,7 @@
             "item": "pub fn compile"
           },
           {
-            "line": 2073,
+            "line": 2074,
             "language": "rust",
             "file": "src/parallel.rs",
             "mode": "replace",
@@ -3064,42 +3088,42 @@
             "item": "pub fn run"
           },
           {
-            "line": 2082,
+            "line": 2083,
             "language": "rust",
             "file": "src/parallel.rs",
             "mode": "append",
             "within": "impl ParallelProgram"
           },
           {
-            "line": 2211,
+            "line": 2212,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "fn ident"
           },
           {
-            "line": 2227,
+            "line": 2228,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "pub fn render"
           },
           {
-            "line": 2561,
+            "line": 2565,
             "language": "rust",
             "file": "src/runtime.rs",
             "mode": "replace",
             "item": "pub struct Executable"
           },
           {
-            "line": 2576,
+            "line": 2580,
             "language": "rust",
             "file": "src/runtime.rs",
             "mode": "replace",
             "item": "pub unsafe fn compile_many_with_transform"
           },
           {
-            "line": 2666,
+            "line": 2670,
             "language": "rust",
             "file": "src/runtime.rs",
             "mode": "replace",
@@ -3107,75 +3131,75 @@
             "item": "pub fn run"
           },
           {
-            "line": 2768,
+            "line": 2772,
             "language": "rust",
             "file": "src/scalar.rs",
             "mode": "write"
           },
           {
-            "line": 3259,
+            "line": 3263,
             "language": "rust",
             "file": "src/symbolic.rs",
             "mode": "write"
           },
           {
-            "line": 3484,
+            "line": 3488,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "append",
             "within": "impl Tensor"
           },
           {
-            "line": 3493,
+            "line": 3497,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 3564,
+            "line": 3568,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn encode_arg"
           },
           {
-            "line": 3613,
+            "line": 3617,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn decode_arg"
           },
           {
-            "line": 3694,
+            "line": 3700,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 3783,
+            "line": 3789,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 3849,
+            "line": 3855,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Arg"
           },
           {
-            "line": 3906,
+            "line": 3912,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub struct Node"
           },
           {
-            "line": 3921,
+            "line": 3927,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -3183,7 +3207,7 @@
             "item": "pub fn new"
           },
           {
-            "line": 3955,
+            "line": 3961,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -3191,7 +3215,7 @@
             "item": "fn infer_dtype"
           },
           {
-            "line": 4022,
+            "line": 4028,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
@@ -3199,64 +3223,64 @@
             "item": "fn infer_shape"
           },
           {
-            "line": 4184,
+            "line": 4190,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "append",
             "within": "impl UOp"
           },
           {
-            "line": 4213,
+            "line": 4219,
             "language": "rust",
             "file": "tests/cpu_workers.rs",
             "mode": "write"
           },
           {
-            "line": 4453,
+            "line": 4459,
             "language": "rust",
             "file": "tests/gpu_conv.rs",
             "mode": "write"
           },
           {
-            "line": 4485,
+            "line": 4491,
             "language": "rust",
             "file": "tests/gpu_gemm.rs",
             "mode": "write"
           },
           {
-            "line": 4518,
+            "line": 4524,
             "language": "rust",
             "file": "tests/gpu_reduction.rs",
             "mode": "write"
           },
           {
-            "line": 4546,
+            "line": 4552,
             "language": "rust",
             "file": "tests/support/mod.rs",
             "mode": "replace",
             "item": "pub fn run_metal"
           },
           {
-            "line": 4607,
+            "line": 4613,
             "language": "rust",
             "file": "tests/support/mod.rs",
             "mode": "replace",
             "item": "pub fn run_cl"
           },
           {
-            "line": 4658,
+            "line": 4664,
             "language": "rust",
             "file": "tests/symbolic_scalar.rs",
             "mode": "write"
           },
           {
-            "line": 4739,
+            "line": 4745,
             "language": "rust",
             "file": "tests/tensor_gpu.rs",
             "mode": "append"
           }
         ],
-        "check_line": 4760,
+        "check_line": 4766,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -3265,44 +3289,44 @@
         "title": "20.02 最大容量と実行時の次元を分ける",
         "operations": [
           {
-            "line": 4778,
+            "line": 4784,
             "language": "rust",
             "file": "src/codegen.rs",
             "mode": "write"
           },
           {
-            "line": 5707,
+            "line": 5714,
             "language": "rust",
             "file": "src/dimensions.rs",
             "mode": "write"
           },
           {
-            "line": 5931,
+            "line": 5938,
             "language": "rust",
             "file": "src/gpu_tensor.rs",
             "mode": "write"
           },
           {
-            "line": 6434,
+            "line": 6441,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 6442,
+            "line": 6449,
             "language": "rust",
             "file": "src/runtime.rs",
             "mode": "write"
           },
           {
-            "line": 6699,
+            "line": 6706,
             "language": "rust",
             "file": "src/schedule.rs",
             "mode": "replace",
             "item": "pub fn create_schedule"
           },
           {
-            "line": 6879,
+            "line": 6886,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "replace",
@@ -3310,39 +3334,39 @@
             "item": "pub fn gradients"
           },
           {
-            "line": 7076,
+            "line": 7083,
             "language": "rust",
             "file": "src/tensor.rs",
             "mode": "append",
             "within": "impl Tensor"
           },
           {
-            "line": 7128,
+            "line": 7135,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn validate_node"
           },
           {
-            "line": 7222,
+            "line": 7229,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "write"
           },
           {
-            "line": 7923,
+            "line": 7974,
             "language": "rust",
             "file": "tests/symbolic.rs",
             "mode": "write"
           },
           {
-            "line": 8044,
+            "line": 8095,
             "language": "rust",
             "file": "tests/tensor_gpu.rs",
             "mode": "append"
           }
         ],
-        "check_line": 8086,
+        "check_line": 8137,
         "requires": "",
         "command": "cargo test --offline"
       },
@@ -3351,25 +3375,25 @@
         "title": "20.03 N=16 の特殊化と汎用経路を選ぶ",
         "operations": [
           {
-            "line": 8104,
+            "line": 8155,
             "language": "rust",
             "file": "src/lib.rs",
             "mode": "append"
           },
           {
-            "line": 8112,
+            "line": 8163,
             "language": "rust",
             "file": "src/specialization.rs",
             "mode": "write"
           },
           {
-            "line": 8205,
+            "line": 8256,
             "language": "rust",
             "file": "tests/specialization.rs",
             "mode": "write"
           }
         ],
-        "check_line": 8246,
+        "check_line": 8297,
         "requires": "",
         "command": "cargo test --offline"
       }
@@ -4064,74 +4088,74 @@
             "item": "fn render_impl"
           },
           {
-            "line": 575,
+            "line": 576,
             "language": "rust",
             "file": "src/gpu.rs",
             "mode": "append"
           },
           {
-            "line": 698,
+            "line": 699,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "fn ident"
           },
           {
-            "line": 713,
+            "line": 714,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "fn ty"
           },
           {
-            "line": 731,
+            "line": 732,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "replace",
             "item": "pub fn render"
           },
           {
-            "line": 1139,
+            "line": 1141,
             "language": "rust",
             "file": "src/renderers.rs",
             "mode": "append"
           },
           {
-            "line": 1155,
+            "line": 1157,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn dtype"
           },
           {
-            "line": 1176,
+            "line": 1178,
             "language": "rust",
             "file": "src/uir.rs",
             "mode": "replace",
             "item": "fn op"
           },
           {
-            "line": 1248,
+            "line": 1250,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum DType"
           },
           {
-            "line": 1264,
+            "line": 1266,
             "language": "rust",
             "file": "src/uop.rs",
             "mode": "replace",
             "item": "pub enum Ops"
           },
           {
-            "line": 1331,
+            "line": 1333,
             "language": "rust",
             "file": "tests/hardware_wmma.rs",
             "mode": "write"
           }
         ],
-        "check_line": 1374,
+        "check_line": 1376,
         "requires": "metal,wmma",
         "command": "cargo test --offline --features metal,opencl --test hardware_wmma"
       }

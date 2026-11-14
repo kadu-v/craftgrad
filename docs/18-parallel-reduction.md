@@ -160,7 +160,8 @@ pub fn render(
         let expr = match u.op {
             Ops::Const => {
                 match u.arg {
-                    Arg::F32(bits) => {
+                    Arg::Float(bits) => {
+                        let bits = (bits.value() as f32).to_bits();
                         match dialect {
                             Dialect::Metal => format!("as_type<float>((uint){bits})"),
                             Dialect::OpenCl => format!("as_float((uint){bits})"),
@@ -494,8 +495,10 @@ fn decode_arg(s: &str) -> Result<Arg> {
     let fields: Vec<_> = s.split(';').collect();
     Ok(match fields.as_slice() {
         ["none"] => Arg::None,
-        ["f32", v] if v.len() == 8 => {
-            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        ["float", v] if v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Arg::Float(crate::uop::ConstFloat::new(f64::from_bits(
+                u64::from_str_radix(v, 16).map_err(|_| "invalid float bits")?
+            )))
         }
         ["i32", v] => Arg::I32(number(v)?),
         ["i64", v] => Arg::Int(number(v)?),

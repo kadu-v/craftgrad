@@ -73,7 +73,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 435,
+    "line": 487,
     "section": "### 01-001 Cargo package と `scalar_const` example を必要な分だけ追加する。",
     "todo": "Cargo package と `scalar_const` example を必要な分だけ追加する。",
     "id": "01-001",
@@ -82,7 +82,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 441,
+    "line": 493,
     "section": "### 01-002 `Const(f32)` と root を保持し、一つのノードを構築する。",
     "todo": "`Const(f32)` と root を保持し、一つのノードを構築する。",
     "id": "01-002",
@@ -91,7 +91,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 447,
+    "line": 499,
     "section": "### 01-003 恒等 rewrite と依存順 linearize を経由して C を生成する。",
     "todo": "恒等 rewrite と依存順 linearize を経由して C を生成する。",
     "id": "01-003",
@@ -100,7 +100,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 453,
+    "line": 505,
     "section": "### 01-004 一時ディレクトリに C を書き、system clang を子プロセスとして起動する。",
     "todo": "一時ディレクトリに C を書き、system clang を子プロセスとして起動する。",
     "id": "01-004",
@@ -109,7 +109,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 459,
+    "line": 511,
     "section": "### 01-005 生成実行ファイルを実行し、成功終了と標準出力 `7` を照合する。",
     "todo": "生成実行ファイルを実行し、成功終了と標準出力 `7` を照合する。",
     "id": "01-005",
@@ -118,7 +118,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 465,
+    "line": 517,
     "section": "### 01-006 `Add` と `Mul` に二つの `NodeId` を持たせる。",
     "todo": "`Add` と `Mul` に二つの `NodeId` を持たせる。",
     "id": "01-006",
@@ -127,7 +127,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 471,
+    "line": 523,
     "section": "### 01-007 `Const(2)`, `Const(3)`, `Add`, `Const(4)`, `Mul` を組み立てる。",
     "todo": "`Const(2)`, `Const(3)`, `Add`, `Const(4)`, `Mul` を組み立てる。",
     "id": "01-007",
@@ -136,7 +136,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 477,
+    "line": 529,
     "section": "### 01-008 依存先を利用前に一度だけ並べる。",
     "todo": "依存先を利用前に一度だけ並べる。",
     "id": "01-008",
@@ -145,7 +145,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 483,
+    "line": 535,
     "section": "### 01-009 C renderer に加算と乗算を足し、生成コードを実行する。",
     "todo": "C renderer に加算と乗算を足し、生成コードを実行する。",
     "id": "01-009",
@@ -154,7 +154,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 489,
+    "line": 541,
     "section": "### 01-010 第 1 コミットの定数の実行例も再実行する。",
     "todo": "第 1 コミットの定数の実行例も再実行する。",
     "id": "01-010",
@@ -163,7 +163,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 495,
+    "line": 547,
     "section": "### 01-011 `--dump-graph` でノード番号、演算、入力を出す。",
     "todo": "`--dump-graph` でノード番号、演算、入力を出す。",
     "id": "01-011",
@@ -172,7 +172,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 501,
+    "line": 553,
     "section": "### 01-012 `--dump-source` で clang に渡した C を出す。",
     "todo": "`--dump-source` で clang に渡した C を出す。",
     "id": "01-012",
@@ -181,7 +181,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 507,
+    "line": 559,
     "section": "### 01-013 root の番号と演算の入力数を生成前に検証する。",
     "todo": "root の番号と演算の入力数を生成前に検証する。",
     "id": "01-013",
@@ -190,7 +190,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 513,
+    "line": 565,
     "section": "### 01-014 clang 不在とコンパイル失敗を区別する。",
     "todo": "clang 不在とコンパイル失敗を区別する。",
     "id": "01-014",
@@ -199,7 +199,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 519,
+    "line": 571,
     "section": "### 01-015 stdout の値を読み、予定値と比較する実行テストを作る。",
     "todo": "stdout の値を読み、予定値と比較する実行テストを作る。",
     "id": "01-015",
@@ -208,7 +208,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 525,
+    "line": 577,
     "section": "### 01-016 `scalar_const` が生成コードを実行して `7` を返す。",
     "todo": "`scalar_const` が生成コードを実行して `7` を返す。",
     "id": "01-016",
@@ -217,7 +217,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 531,
+    "line": 583,
     "section": "### 01-017 `scalar_arithmetic` が定数式 `(2+3)*4` を構築して `20` を返す。",
     "todo": "`scalar_arithmetic` が定数式 `(2+3)*4` を構築して `20` を返す。",
     "id": "01-017",
@@ -226,7 +226,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 537,
+    "line": 589,
     "section": "### 01-018 グラフで `ADD` の結果を `MUL` が参照している。",
     "todo": "グラフで `ADD` の結果を `MUL` が参照している。",
     "id": "01-018",
@@ -235,7 +235,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 543,
+    "line": 595,
     "section": "### 01-019 source に実際の `+` と `*` が残っている。",
     "todo": "source に実際の `+` と `*` が残っている。",
     "id": "01-019",
@@ -244,7 +244,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 549,
+    "line": 601,
     "section": "### 01-020 不正な root と入力数は clang の起動前にエラーになる。",
     "todo": "不正な root と入力数は clang の起動前にエラーになる。",
     "id": "01-020",
@@ -253,7 +253,7 @@
   },
   {
     "file": "docs/01-scalar-c.md",
-    "line": 555,
+    "line": 607,
     "section": "### 01-021 初回から恒等 rewrite と linearize を通過する。",
     "todo": "初回から恒等 rewrite と linearize を通過する。",
     "id": "01-021",
@@ -262,7 +262,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 573,
+    "line": 583,
     "section": "### 02-001 scalar `Param` を追加し、`slot` の有効性を検証する。",
     "todo": "scalar `Param` を追加し、`slot` の有効性を検証する。",
     "id": "02-001",
@@ -271,7 +271,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 579,
+    "line": 589,
     "section": "### 02-002 `a+b` の C 関数を生成し、example の入力を wrapper に渡す。",
     "todo": "`a+b` の C 関数を生成し、example の入力を wrapper に渡す。",
     "id": "02-002",
@@ -280,7 +280,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 585,
+    "line": 595,
     "section": "### 02-003 入力を C の定数にせず、実行時に受け取る。",
     "todo": "入力を C の定数にせず、実行時に受け取る。",
     "id": "02-003",
@@ -289,7 +289,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 591,
+    "line": 601,
     "section": "### 02-004 前章の定数実行例も同じ renderer で通す。",
     "todo": "前章の定数実行例も同じ renderer で通す。",
     "id": "02-004",
@@ -298,7 +298,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 597,
+    "line": 607,
     "section": "### 02-005 固定 ABI の `chibi_entry` と wrapper を生成する。",
     "todo": "固定 ABI の `chibi_entry` と wrapper を生成する。",
     "id": "02-005",
@@ -307,7 +307,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 603,
+    "line": 613,
     "section": "### 02-006 macOS は clang の `-dynamiclib`、対応する Linux は `-shared -fPIC` を使う。",
     "todo": "macOS は clang の `-dynamiclib`、対応する Linux は `-shared -fPIC` を使う。",
     "id": "02-006",
@@ -316,7 +316,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 609,
+    "line": 619,
     "section": "### 02-007 OS の動的 library 機構でロードし、入口を解決する。",
     "todo": "OS の動的 library 機構でロードし、入口を解決する。",
     "id": "02-007",
@@ -325,7 +325,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 615,
+    "line": 625,
     "section": "### 02-008 library の所有物を `CompiledScalar` に保持する。",
     "todo": "library の所有物を `CompiledScalar` に保持する。",
     "id": "02-008",
@@ -334,7 +334,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 621,
+    "line": 631,
     "section": "### 02-009 `a+b` を compile、load、run まで通し、結果 `5` を読む。",
     "todo": "`a+b` を compile、load、run まで通し、結果 `5` を読む。",
     "id": "02-009",
@@ -343,7 +343,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 627,
+    "line": 637,
     "section": "### 02-010 PARAM 三つで式を作る `scalar_inputs` example を追加する。",
     "todo": "PARAM 三つで式を作る `scalar_inputs` example を追加する。",
     "id": "02-010",
@@ -352,7 +352,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 633,
+    "line": 643,
     "section": "### 02-011 compile と run を別の呼出しにする。",
     "todo": "compile と run を別の呼出しにする。",
     "id": "02-011",
@@ -361,7 +361,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 639,
+    "line": 649,
     "section": "### 02-012 二回目はスロットのビット列だけを更新する。",
     "todo": "二回目はスロットのビット列だけを更新する。",
     "id": "02-012",
@@ -370,7 +370,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 645,
+    "line": 655,
     "section": "### 02-013 同じ入口と library を使ったことを example の計数で示す。",
     "todo": "同じ入口と library を使ったことを example の計数で示す。",
     "id": "02-013",
@@ -379,7 +379,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 651,
+    "line": 661,
     "section": "### 02-014 source の dump に入力値が含まれないことを確かめる。",
     "todo": "source の dump に入力値が含まれないことを確かめる。",
     "id": "02-014",
@@ -388,7 +388,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 657,
+    "line": 667,
     "section": "### 02-015 不足、余剰、存在しないスロットを run 前に拒否する。",
     "todo": "不足、余剰、存在しないスロットを run 前に拒否する。",
     "id": "02-015",
@@ -397,7 +397,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 663,
+    "line": 673,
     "section": "### 02-016 symbol 不在は library path と入口名を含むエラーにする。",
     "todo": "symbol 不在は library path と入口名を含むエラーにする。",
     "id": "02-016",
@@ -406,7 +406,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 669,
+    "line": 679,
     "section": "### 02-017 compile 失敗と run の入力エラーを区別する。",
     "todo": "compile 失敗と run の入力エラーを区別する。",
     "id": "02-017",
@@ -415,7 +415,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 675,
+    "line": 685,
     "section": "### 02-018 所有物の破棄で library と一時ファイルを解放する。",
     "todo": "所有物の破棄で library と一時ファイルを解放する。",
     "id": "02-018",
@@ -424,7 +424,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 681,
+    "line": 691,
     "section": "### 02-019 成功例で `20`、`12` を得る。",
     "todo": "成功例で `20`、`12` を得る。",
     "id": "02-019",
@@ -433,7 +433,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 687,
+    "line": 697,
     "section": "### 02-020 compile の予定計数が `1`、run が `2` になる。",
     "todo": "compile の予定計数が `1`、run が `2` になる。",
     "id": "02-020",
@@ -442,7 +442,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 693,
+    "line": 703,
     "section": "### 02-021 生成 C は実行時 scalar スロットを参照する。",
     "todo": "生成 C は実行時 scalar スロットを参照する。",
     "id": "02-021",
@@ -451,7 +451,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 699,
+    "line": 709,
     "section": "### 02-022 入力不足では FFI を実行しない。",
     "todo": "入力不足では FFI を実行しない。",
     "id": "02-022",
@@ -460,7 +460,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 705,
+    "line": 715,
     "section": "### 02-023 前章の定数例も成功する。",
     "todo": "前章の定数例も成功する。",
     "id": "02-023",
@@ -469,7 +469,7 @@
   },
   {
     "file": "docs/02-runtime-inputs.md",
-    "line": 711,
+    "line": 721,
     "section": "### 02-024 library の所有物を破棄した後に関数ポインタだけが公開されない。",
     "todo": "library の所有物を破棄した後に関数ポインタだけが公開されない。",
     "id": "02-024",
@@ -478,7 +478,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1686,
+    "line": 1795,
     "section": "### 03-001 arena に `HashMap<NodeKey, NodeId>` を追加する。",
     "todo": "arena に `HashMap<NodeKey, NodeId>` を追加する。",
     "id": "03-001",
@@ -487,7 +487,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1692,
+    "line": 1801,
     "section": "### 03-002 f32 のビットキーと演算の入力順を保持する。",
     "todo": "f32 のビットキーと演算の入力順を保持する。",
     "id": "03-002",
@@ -496,7 +496,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1698,
+    "line": 1807,
     "section": "### 03-003 同じ `a+b` を二回作ると同じ番号になるようにする。",
     "todo": "同じ `a+b` を二回作ると同じ番号になるようにする。",
     "id": "03-003",
@@ -505,7 +505,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1704,
+    "line": 1813,
     "section": "### 03-004 `(a+b)*(a+b)` を C まで通し、入力 `2,3` で `25` を得る。",
     "todo": "`(a+b)*(a+b)` を C まで通し、入力 `2,3` で `25` を得る。",
     "id": "03-004",
@@ -514,7 +514,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1710,
+    "line": 1819,
     "section": "### 03-005 dtype の導出と各演算の入力数を一か所で検証する。",
     "todo": "dtype の導出と各演算の入力数を一か所で検証する。",
     "id": "03-005",
@@ -523,7 +523,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1716,
+    "line": 1825,
     "section": "### 03-006 bool と i32 の ABI pack と C の復元処理を追加する。",
     "todo": "bool と i32 の ABI pack と C の復元処理を追加する。",
     "id": "03-006",
@@ -532,7 +532,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1722,
+    "line": 1831,
     "section": "### 03-007 加減乗算、比較、WHERE、CAST を interpreter と renderer に加える。",
     "todo": "加減乗算、比較、WHERE、CAST を interpreter と renderer に加える。",
     "id": "03-007",
@@ -541,7 +541,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1728,
+    "line": 1837,
     "section": "### 03-008 void 定数と混合 dtype を検証時に拒否する。",
     "todo": "void 定数と混合 dtype を検証時に拒否する。",
     "id": "03-008",
@@ -550,7 +550,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1734,
+    "line": 1843,
     "section": "### 03-009 `WHERE(a<3,a*2,a+1)` を `a=2` で `4`、`a=5` で `6` にする。",
     "todo": "`WHERE(a<3,a*2,a+1)` を `a=2` で `4`、`a=5` で `6` にする。",
     "id": "03-009",
@@ -559,7 +559,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1740,
+    "line": 1849,
     "section": "### 03-010 XOR、AND、OR、SHL、SHR、DIV、MOD を両経路に加える。",
     "todo": "XOR、AND、OR、SHL、SHR、DIV、MOD を両経路に加える。",
     "id": "03-010",
@@ -568,7 +568,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1746,
+    "line": 1855,
     "section": "### 03-011 RECIP と MAX を本文の f32 契約で実行する。",
     "todo": "RECIP と MAX を本文の f32 契約で実行する。",
     "id": "03-011",
@@ -577,7 +577,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1752,
+    "line": 1861,
     "section": "### 03-012 bounds と動的入力の範囲検証を追加する。",
     "todo": "bounds と動的入力の範囲検証を追加する。",
     "id": "03-012",
@@ -586,7 +586,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1758,
+    "line": 1867,
     "section": "### 03-013 危険な DIV、shift、CAST は安全性を証明できなければ拒否する。",
     "todo": "危険な DIV、shift、CAST は安全性を証明できなければ拒否する。",
     "id": "03-013",
@@ -595,7 +595,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1764,
+    "line": 1873,
     "section": "### 03-014 `((5 XOR 3) SHL 1)=12` と負数の DIV、MOD を C まで通す。",
     "todo": "`((5 XOR 3) SHL 1)=12` と負数の DIV、MOD を C まで通す。",
     "id": "03-014",
@@ -604,7 +604,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1770,
+    "line": 1879,
     "section": "### 03-015 子を先に再構築する rewrite を `match` で作る。",
     "todo": "子を先に再構築する rewrite を `match` で作る。",
     "id": "03-015",
@@ -613,7 +613,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1776,
+    "line": 1885,
     "section": "### 03-016 検証済み ALU evaluator を定数畳み込みにも使う。",
     "todo": "検証済み ALU evaluator を定数畳み込みにも使う。",
     "id": "03-016",
@@ -622,7 +622,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1782,
+    "line": 1891,
     "section": "### 03-017 `i32 x+0 → x`、`x XOR 0 → x`、`WHERE(true,a,b) → a` を加える。",
     "todo": "`i32 x+0 → x`、`x XOR 0 → x`、`WHERE(true,a,b) → a` を加える。",
     "id": "03-017",
@@ -631,7 +631,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1788,
+    "line": 1897,
     "section": "### 03-018 前後の dtype、bounds、ALU 数を dump に出す。",
     "todo": "前後の dtype、bounds、ALU 数を dump に出す。",
     "id": "03-018",
@@ -640,7 +640,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1794,
+    "line": 1903,
     "section": "### 03-019 三つの実行経路を入力 `-7,0,5` と定数例で比較する。",
     "todo": "三つの実行経路を入力 `-7,0,5` と定数例で比較する。",
     "id": "03-019",
@@ -649,7 +649,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1800,
+    "line": 1909,
     "section": "### 03-020 床除算、wrap、shift、f32 の特殊値で三経路が合う。",
     "todo": "床除算、wrap、shift、f32 の特殊値で三経路が合う。",
     "id": "03-020",
@@ -658,7 +658,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1806,
+    "line": 1915,
     "section": "### 03-021 NaN は `is_nan`、符号付きゼロはビット列で比較する。",
     "todo": "NaN は `is_nan`、符号付きゼロはビット列で比較する。",
     "id": "03-021",
@@ -667,7 +667,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1812,
+    "line": 1921,
     "section": "### 03-022 有限の一般 f32 は予定許容値 `atol=1e-6, rtol=1e-6` で比較する。",
     "todo": "有限の一般 f32 は予定許容値 `atol=1e-6, rtol=1e-6` で比較する。",
     "id": "03-022",
@@ -676,7 +676,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1818,
+    "line": 1927,
     "section": "### 03-023 dtype 不一致、void 入力、範囲外入力は生成か呼出しの前に失敗する。",
     "todo": "dtype 不一致、void 入力、範囲外入力は生成か呼出しの前に失敗する。",
     "id": "03-023",
@@ -685,7 +685,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1824,
+    "line": 1933,
     "section": "### 03-024 bounds が結果を含み、証明できない式を安全と判定しない。",
     "todo": "bounds が結果を含み、証明できない式を安全と判定しない。",
     "id": "03-024",
@@ -694,7 +694,7 @@
   },
   {
     "file": "docs/03-uop-rewrites.md",
-    "line": 1830,
+    "line": 1939,
     "section": "### 03-025 前章までの成功例も通る。",
     "todo": "前章までの成功例も通る。",
     "id": "03-025",
@@ -703,7 +703,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 913,
+    "line": 946,
     "section": "### 04-001 `FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。",
     "todo": "`FunctionId` と引数署名を、実際に呼ぶ関数一つに対して追加する。",
     "id": "04-001",
@@ -712,7 +712,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 919,
+    "line": 952,
     "section": "### 04-002 PARAM の intern key に所属関数を含める。",
     "todo": "PARAM の intern key に所属関数を含める。",
     "id": "04-002",
@@ -721,7 +721,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 925,
+    "line": 958,
     "section": "### 04-003 interpreter が呼出しごとに引数環境を作るようにする。",
     "todo": "interpreter が呼出しごとに引数環境を作るようにする。",
     "id": "04-003",
@@ -730,7 +730,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 931,
+    "line": 964,
     "section": "### 04-004 C 生成前に body を capture なしで inline する。",
     "todo": "C 生成前に body を capture なしで inline する。",
     "id": "04-004",
@@ -739,7 +739,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 937,
+    "line": 970,
     "section": "### 04-005 `f(2,3)=10` と `f(5,1)=12` を CPU まで通す。",
     "todo": "`f(2,3)=10` と `f(5,1)=12` を CPU まで通す。",
     "id": "04-005",
@@ -748,7 +748,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 943,
+    "line": 976,
     "section": "### 04-006 同型 scalar の STACK を interpreter と型導出へ加える。",
     "todo": "同型 scalar の STACK を interpreter と型導出へ加える。",
     "id": "04-006",
@@ -757,7 +757,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 949,
+    "line": 982,
     "section": "### 04-007 静的 INDEX の型と `0 <= index < len` を検証する。",
     "todo": "静的 INDEX の型と `0 <= index < len` を検証する。",
     "id": "04-007",
@@ -766,7 +766,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 955,
+    "line": 988,
     "section": "### 04-008 CALL の結果に固定長 STACK を許し、各要素を inline する。",
     "todo": "CALL の結果に固定長 STACK を許し、各要素を inline する。",
     "id": "04-008",
@@ -775,7 +775,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 961,
+    "line": 994,
     "section": "### 04-009 `pair(2,3)` から `5` と `-1` を取り出して C まで通す。",
     "todo": "`pair(2,3)` から `5` と `-1` を取り出して C まで通す。",
     "id": "04-009",
@@ -784,7 +784,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 967,
+    "line": 1000,
     "section": "### 04-010 対応演算だけの printer と parser を追加する。",
     "todo": "対応演算だけの printer と parser を追加する。",
     "id": "04-010",
@@ -793,7 +793,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 973,
+    "line": 1006,
     "section": "### 04-011 入力番号、関数名、dtype を検証してから arena へ入れる。",
     "todo": "入力番号、関数名、dtype を検証してから arena へ入れる。",
     "id": "04-011",
@@ -802,7 +802,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 979,
+    "line": 1012,
     "section": "### 04-012 f32 の特殊値もビット列で往復するようにする。",
     "todo": "f32 の特殊値もビット列で往復するようにする。",
     "id": "04-012",
@@ -811,7 +811,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 985,
+    "line": 1018,
     "section": "### 04-013 `pair` の UIR を出力し、読み戻したグラフから C を生成する。",
     "todo": "`pair` の UIR を出力し、読み戻したグラフから C を生成する。",
     "id": "04-013",
@@ -820,7 +820,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 991,
+    "line": 1024,
     "section": "### 04-014 読み戻し前後で `5` と `-1` が一致することを assertion で確かめる。",
     "todo": "読み戻し前後で `5` と `-1` が一致することを assertion で確かめる。",
     "id": "04-014",
@@ -829,7 +829,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 997,
+    "line": 1030,
     "section": "### 04-015 未束縛 PARAM と他関数の PARAM の直接参照を拒否する。",
     "todo": "未束縛 PARAM と他関数の PARAM の直接参照を拒否する。",
     "id": "04-015",
@@ -838,7 +838,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1003,
+    "line": 1036,
     "section": "### 04-016 CALL の引数不足、dtype 不一致、再帰を拒否する。",
     "todo": "CALL の引数不足、dtype 不一致、再帰を拒否する。",
     "id": "04-016",
@@ -847,7 +847,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1009,
+    "line": 1042,
     "section": "### 04-017 INDEX の負数と長さ以上の値を拒否する。",
     "todo": "INDEX の負数と長さ以上の値を拒否する。",
     "id": "04-017",
@@ -856,7 +856,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1015,
+    "line": 1048,
     "section": "### 04-018 `assert_uop` が意図的に誤った予定値で失敗することを確認する。",
     "todo": "`assert_uop` が意図的に誤った予定値で失敗することを確認する。",
     "id": "04-018",
@@ -865,7 +865,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1021,
+    "line": 1054,
     "section": "### 04-019 二つの呼出しで値を混同せず、`10` と `12` を返す。",
     "todo": "二つの呼出しで値を混同せず、`10` と `12` を返す。",
     "id": "04-019",
@@ -874,7 +874,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1027,
+    "line": 1060,
     "section": "### 04-020 STACK の選択結果が `5` と `-1` になる。",
     "todo": "STACK の選択結果が `5` と `-1` になる。",
     "id": "04-020",
@@ -883,7 +883,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1033,
+    "line": 1066,
     "section": "### 04-021 UIR の出力、入力、実行が一往復する。",
     "todo": "UIR の出力、入力、実行が一往復する。",
     "id": "04-021",
@@ -892,7 +892,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1039,
+    "line": 1072,
     "section": "### 04-022 異なる関数の PARAM が同じ NodeId に共有されない。",
     "todo": "異なる関数の PARAM が同じ NodeId に共有されない。",
     "id": "04-022",
@@ -901,7 +901,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1045,
+    "line": 1078,
     "section": "### 04-023 誤った予定値と不正な UIR の assertion が実際に失敗する。",
     "todo": "誤った予定値と不正な UIR の assertion が実際に失敗する。",
     "id": "04-023",
@@ -910,7 +910,7 @@
   },
   {
     "file": "docs/04-functions-stack.md",
-    "line": 1051,
+    "line": 1084,
     "section": "### 04-024 scalar の前章までの例も同じ pipeline で成功する。",
     "todo": "scalar の前章までの例も同じ pipeline で成功する。",
     "id": "04-024",
@@ -919,7 +919,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1726,
+    "line": 1730,
     "section": "### 05-001 BUFFER の束縛と ALLOC の固有 ID を追加する。",
     "todo": "BUFFER の束縛と ALLOC の固有 ID を追加する。",
     "id": "05-001",
@@ -928,7 +928,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1732,
+    "line": 1736,
     "section": "### 05-002 メモリ INDEX、LOAD、STORE を C と検証用 interpreter に加える。",
     "todo": "メモリ INDEX、LOAD、STORE を C と検証用 interpreter に加える。",
     "id": "05-002",
@@ -937,7 +937,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1738,
+    "line": 1742,
     "section": "### 05-003 buffer の PARAM を固定 ABI のポインタ配列へ接続する。",
     "todo": "buffer の PARAM を固定 ABI のポインタ配列へ接続する。",
     "id": "05-003",
@@ -946,7 +946,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1744,
+    "line": 1748,
     "section": "### 05-004 入力の長さと dtype を呼出し前に照合する。",
     "todo": "入力の長さと dtype を呼出し前に照合する。",
     "id": "05-004",
@@ -955,7 +955,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1750,
+    "line": 1754,
     "section": "### 05-005 `[10,20,30]` から生成コードで `31` を得る。",
     "todo": "`[10,20,30]` から生成コードで `31` を得る。",
     "id": "05-005",
@@ -964,7 +964,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1756,
+    "line": 1760,
     "section": "### 05-006 効果を依存順に実行し、到達可能な STORE を消さない。",
     "todo": "効果を依存順に実行し、到達可能な STORE を消さない。",
     "id": "05-006",
@@ -973,7 +973,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1762,
+    "line": 1766,
     "section": "### 05-007 AFTER の返す storage identity と状態を区別する。",
     "todo": "AFTER の返す storage identity と状態を区別する。",
     "id": "05-007",
@@ -982,7 +982,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1768,
+    "line": 1772,
     "section": "### 05-008 同じ位置へ `1`、次に `2` を書き、その後に読んで `2` を返す。",
     "todo": "同じ位置へ `1`、次に `2` を書き、その後に読んで `2` を返す。",
     "id": "05-008",
@@ -991,7 +991,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1774,
+    "line": 1778,
     "section": "### 05-009 LOAD の共有キーへ状態を含め、異なる時点の読出しを共有しない。",
     "todo": "LOAD の共有キーへ状態を含め、異なる時点の読出しを共有しない。",
     "id": "05-009",
@@ -1000,7 +1000,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1780,
+    "line": 1784,
     "section": "### 05-010 複数の効果を持つ CALL の出力を AFTER から読めるようにする。",
     "todo": "複数の効果を持つ CALL の出力を AFTER から読めるようにする。",
     "id": "05-010",
@@ -1009,7 +1009,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1786,
+    "line": 1790,
     "section": "### 05-011 `SHRINK(x,1,3)` と base offset を導出する。",
     "todo": "`SHRINK(x,1,3)` と base offset を導出する。",
     "id": "05-011",
@@ -1018,7 +1018,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1792,
+    "line": 1796,
     "section": "### 05-012 view の INDEX 0 を元 buffer の INDEX 1 へ変換する。",
     "todo": "view の INDEX 0 を元 buffer の INDEX 1 へ変換する。",
     "id": "05-012",
@@ -1027,7 +1027,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1798,
+    "line": 1802,
     "section": "### 05-013 storage_base と read、write の集合を dump に出す。",
     "todo": "storage_base と read、write の集合を dump に出す。",
     "id": "05-013",
@@ -1036,7 +1036,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1804,
+    "line": 1808,
     "section": "### 05-014 二入力 `[1,2,3]`, `[10,20,30]` を展開して `[11,22,33]` を作る。",
     "todo": "二入力 `[1,2,3]`, `[10,20,30]` を展開して `[11,22,33]` を作る。",
     "id": "05-014",
@@ -1045,7 +1045,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1810,
+    "line": 1814,
     "section": "### 05-015 同じ長さの二つの ALLOC が互いを上書きしないことを確かめる。",
     "todo": "同じ長さの二つの ALLOC が互いを上書きしないことを確かめる。",
     "id": "05-015",
@@ -1054,7 +1054,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1816,
+    "line": 1820,
     "section": "### 05-016 dtype、アドレス kind、保存領域の可変性を検証する。",
     "todo": "dtype、アドレス kind、保存領域の可変性を検証する。",
     "id": "05-016",
@@ -1063,7 +1063,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1822,
+    "line": 1826,
     "section": "### 05-017 SHRINK の `0 <= start <= end <= len` を検証する。",
     "todo": "SHRINK の `0 <= start <= end <= len` を検証する。",
     "id": "05-017",
@@ -1072,7 +1072,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1828,
+    "line": 1832,
     "section": "### 05-018 静的 INDEX が view の範囲内にあることを検証する。",
     "todo": "静的 INDEX が view の範囲内にあることを検証する。",
     "id": "05-018",
@@ -1081,7 +1081,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1834,
+    "line": 1838,
     "section": "### 05-019 未初期化出力の LOAD と AFTER の循環を拒否する。",
     "todo": "未初期化出力の LOAD と AFTER の循環を拒否する。",
     "id": "05-019",
@@ -1090,7 +1090,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1840,
+    "line": 1844,
     "section": "### 05-020 `len*itemsize` と offset の overflow をホスト上の checked 演算で拒否する。",
     "todo": "`len*itemsize` と offset の overflow をホスト上の checked 演算で拒否する。",
     "id": "05-020",
@@ -1099,7 +1099,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1846,
+    "line": 1850,
     "section": "### 05-021 固定アクセスの結果が `31`、view の結果が `20` になる。",
     "todo": "固定アクセスの結果が `31`、view の結果が `20` になる。",
     "id": "05-021",
@@ -1108,7 +1108,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1852,
+    "line": 1856,
     "section": "### 05-022 二入力の三要素加算が `[11,22,33]` になる。",
     "todo": "二入力の三要素加算が `[11,22,33]` になる。",
     "id": "05-022",
@@ -1117,7 +1117,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1858,
+    "line": 1862,
     "section": "### 05-023 書込み前後の LOAD が state を区別し、最終値 `2` を読む。",
     "todo": "書込み前後の LOAD が state を区別し、最終値 `2` を読む。",
     "id": "05-023",
@@ -1126,7 +1126,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1864,
+    "line": 1868,
     "section": "### 05-024 dump の base identity は view 作成前後で一致する。",
     "todo": "dump の base identity は view 作成前後で一致する。",
     "id": "05-024",
@@ -1135,7 +1135,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1870,
+    "line": 1874,
     "section": "### 05-025 accesses が入力を read、出力を write として列挙する。",
     "todo": "accesses が入力を read、出力を write として列挙する。",
     "id": "05-025",
@@ -1144,7 +1144,7 @@
   },
   {
     "file": "docs/05-memory-runtime.md",
-    "line": 1876,
+    "line": 1880,
     "section": "### 05-026 範囲外、型不一致、未初期化、効果循環が実行前にエラーになる。",
     "todo": "範囲外、型不一致、未初期化、効果循環が実行前にエラーになる。",
     "id": "05-026",
@@ -1153,7 +1153,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1248,
+    "line": 1253,
     "section": "### 06-001 RANGE と END を検証、interpreter、C renderer へ追加する。",
     "todo": "RANGE と END を検証、interpreter、C renderer へ追加する。",
     "id": "06-001",
@@ -1162,7 +1162,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1254,
+    "line": 1259,
     "section": "### 06-002 body に入ると添字を束縛し、END でスコープを閉じる。",
     "todo": "body に入ると添字を束縛し、END でスコープを閉じる。",
     "id": "06-002",
@@ -1171,7 +1171,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1260,
+    "line": 1265,
     "section": "### 06-003 LOAD と STORE の範囲を RANGE bounds から証明する。",
     "todo": "LOAD と STORE の範囲を RANGE bounds から証明する。",
     "id": "06-003",
@@ -1180,7 +1180,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1266,
+    "line": 1271,
     "section": "### 06-004 三要素加算を既存の固定 ABI で実行する。",
     "todo": "三要素加算を既存の固定 ABI で実行する。",
     "id": "06-004",
@@ -1189,7 +1189,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1272,
+    "line": 1277,
     "section": "### 06-005 第五章の固定添字の例も引き続き通す。",
     "todo": "第五章の固定添字の例も引き続き通す。",
     "id": "06-005",
@@ -1198,7 +1198,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1278,
+    "line": 1283,
     "section": "### 06-006 builder に外側 body 内で内側 RANGE を作る操作を加える。",
     "todo": "builder に外側 body 内で内側 RANGE を作る操作を加える。",
     "id": "06-006",
@@ -1207,7 +1207,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1284,
+    "line": 1289,
     "section": "### 06-007 END が内側、外側の順に閉じることを検証する。",
     "todo": "END が内側、外側の順に閉じることを検証する。",
     "id": "06-007",
@@ -1216,7 +1216,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1290,
+    "line": 1295,
     "section": "### 06-008 `offset = row*3+col` を作り、各反復で LOAD と STORE を行う。",
     "todo": "`offset = row*3+col` を作り、各反復で LOAD と STORE を行う。",
     "id": "06-008",
@@ -1225,7 +1225,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1296,
+    "line": 1301,
     "section": "### 06-009 `[1,2,3,4,5,6]` のコピーが同じ六要素を返すようにする。",
     "todo": "`[1,2,3,4,5,6]` のコピーが同じ六要素を返すようにする。",
     "id": "06-009",
@@ -1234,7 +1234,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1302,
+    "line": 1307,
     "section": "### 06-010 RANGE 0 と RANGE 1 を interpreter と C で実行する。",
     "todo": "RANGE 0 と RANGE 1 を interpreter と C で実行する。",
     "id": "06-010",
@@ -1243,7 +1243,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1308,
+    "line": 1313,
     "section": "### 06-011 空の body が入力を一度も LOAD しないようにする。",
     "todo": "空の body が入力を一度も LOAD しないようにする。",
     "id": "06-011",
@@ -1252,7 +1252,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1314,
+    "line": 1319,
     "section": "### 06-012 空出力には有効なホスト所有物を用意し、ポインタを dereference しない。",
     "todo": "空出力には有効なホスト所有物を用意し、ポインタを dereference しない。",
     "id": "06-012",
@@ -1261,7 +1261,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1320,
+    "line": 1325,
     "section": "### 06-013 一要素加算 `2+10` を生成コードから `12` として読む。",
     "todo": "一要素加算 `2+10` を生成コードから `12` として読む。",
     "id": "06-013",
@@ -1270,7 +1270,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1326,
+    "line": 1331,
     "section": "### 06-014 閉じた RANGE の値を別の body で使うグラフを拒否する。",
     "todo": "閉じた RANGE の値を別の body で使うグラフを拒否する。",
     "id": "06-014",
@@ -1279,7 +1279,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1332,
+    "line": 1337,
     "section": "### 06-015 交差する END、重複 END、未終了 RANGE を拒否する。",
     "todo": "交差する END、重複 END、未終了 RANGE を拒否する。",
     "id": "06-015",
@@ -1288,7 +1288,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1338,
+    "line": 1343,
     "section": "### 06-016 `INDEX(x,i+1)` が N 要素を越える場合を生成前に拒否する。",
     "todo": "`INDEX(x,i+1)` が N 要素を越える場合を生成前に拒否する。",
     "id": "06-016",
@@ -1297,7 +1297,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1344,
+    "line": 1349,
     "section": "### 06-017 bounds の積が i32 を越えるケースを拒否する。",
     "todo": "bounds の積が i32 を越えるケースを拒否する。",
     "id": "06-017",
@@ -1306,7 +1306,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1350,
+    "line": 1355,
     "section": "### 06-018 `--dump-kernel` に各命令の開いている軸を出す。",
     "todo": "`--dump-kernel` に各命令の開いている軸を出す。",
     "id": "06-018",
@@ -1315,7 +1315,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1356,
+    "line": 1361,
     "section": "### 06-019 単一ループの結果が `[11,22,33]` になる。",
     "todo": "単一ループの結果が `[11,22,33]` になる。",
     "id": "06-019",
@@ -1324,7 +1324,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1362,
+    "line": 1367,
     "section": "### 06-020 二重ループのコピーが `[1,2,3,4,5,6]` になる。",
     "todo": "二重ループのコピーが `[1,2,3,4,5,6]` になる。",
     "id": "06-020",
@@ -1333,7 +1333,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1368,
+    "line": 1373,
     "section": "### 06-021 空は空配列、一要素は `[12]` を返す。",
     "todo": "空は空配列、一要素は `[12]` を返す。",
     "id": "06-021",
@@ -1342,7 +1342,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1374,
+    "line": 1379,
     "section": "### 06-022 END の直前には対応する RANGE が開いている。",
     "todo": "END の直前には対応する RANGE が開いている。",
     "id": "06-022",
@@ -1351,7 +1351,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1380,
+    "line": 1385,
     "section": "### 06-023 最外側 END の後に未束縛の軸が残らない。",
     "todo": "最外側 END の後に未束縛の軸が残らない。",
     "id": "06-023",
@@ -1360,7 +1360,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1386,
+    "line": 1391,
     "section": "### 06-024 すべてのメモリアクセスを bounds と保存領域長から証明できる。",
     "todo": "すべてのメモリアクセスを bounds と保存領域長から証明できる。",
     "id": "06-024",
@@ -1369,7 +1369,7 @@
   },
   {
     "file": "docs/06-loops.md",
-    "line": 1392,
+    "line": 1397,
     "section": "### 06-025 範囲外、スコープ違反、添字 overflow は実行前に失敗する。",
     "todo": "範囲外、スコープ違反、添字 overflow は実行前に失敗する。",
     "id": "06-025",
@@ -1378,7 +1378,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 835,
+    "line": 838,
     "section": "### 07-001 REG allocation と初期化の region を実装する。",
     "todo": "REG allocation と初期化の region を実装する。",
     "id": "07-001",
@@ -1387,7 +1387,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 841,
+    "line": 844,
     "section": "### 07-002 反復内 LOAD と STORE を interpreter と C で順に実行する。",
     "todo": "反復内 LOAD と STORE を interpreter と C で順に実行する。",
     "id": "07-002",
@@ -1396,7 +1396,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 847,
+    "line": 850,
     "section": "### 07-003 ループ後の LOAD を END の完了へ依存させる。",
     "todo": "ループ後の LOAD を END の完了へ依存させる。",
     "id": "07-003",
@@ -1405,7 +1405,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 853,
+    "line": 856,
     "section": "### 07-004 `[1,2,3,4]` の総和を生成コードで `10` にする。",
     "todo": "`[1,2,3,4]` の総和を生成コードで `10` にする。",
     "id": "07-004",
@@ -1414,7 +1414,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 859,
+    "line": 862,
     "section": "### 07-005 長さ 0 では初期値 `0` を返す。",
     "todo": "長さ 0 では初期値 `0` を返す。",
     "id": "07-005",
@@ -1423,7 +1423,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 865,
+    "line": 868,
     "section": "### 07-006 外側 RANGE の body に accumulator 初期化を置く。",
     "todo": "外側 RANGE の body に accumulator 初期化を置く。",
     "id": "07-006",
@@ -1432,7 +1432,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 871,
+    "line": 874,
     "section": "### 07-007 内側 RANGE で列を累積する。",
     "todo": "内側 RANGE で列を累積する。",
     "id": "07-007",
@@ -1441,7 +1441,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 877,
+    "line": 880,
     "section": "### 07-008 内側 END の後、外側 END の前に行の出力を STORE する。",
     "todo": "内側 END の後、外側 END の前に行の出力を STORE する。",
     "id": "07-008",
@@ -1450,7 +1450,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 883,
+    "line": 886,
     "section": "### 07-009 `[1,2,3,4,5,6]` の行和を `[6,15]` にする。",
     "todo": "`[1,2,3,4,5,6]` の行和を `[6,15]` にする。",
     "id": "07-009",
@@ -1459,7 +1459,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 889,
+    "line": 892,
     "section": "### 07-010 空の列数なら各行を `0` にする。",
     "todo": "空の列数なら各行を `0` にする。",
     "id": "07-010",
@@ -1468,7 +1468,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 895,
+    "line": 898,
     "section": "### 07-011 `i`、`j`、`k` の三軸と row-major 添字を手で作る。",
     "todo": "`i`、`j`、`k` の三軸と row-major 添字を手で作る。",
     "id": "07-011",
@@ -1477,7 +1477,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 901,
+    "line": 904,
     "section": "### 07-012 各 `(i,j)` で accumulator をゼロへ戻す。",
     "todo": "各 `(i,j)` で accumulator をゼロへ戻す。",
     "id": "07-012",
@@ -1486,7 +1486,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 907,
+    "line": 910,
     "section": "### 07-013 reduction 軸 k の END の後に出力を STORE する。",
     "todo": "reduction 軸 k の END の後に出力を STORE する。",
     "id": "07-013",
@@ -1495,7 +1495,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 913,
+    "line": 916,
     "section": "### 07-014 2×3 と 3×2 の入力を既存 CPU runtime で呼ぶ。",
     "todo": "2×3 と 3×2 の入力を既存 CPU runtime で呼ぶ。",
     "id": "07-014",
@@ -1504,7 +1504,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 919,
+    "line": 922,
     "section": "### 07-015 ホストの独立した三重ループと結果を比較する。",
     "todo": "ホストの独立した三重ループと結果を比較する。",
     "id": "07-015",
@@ -1513,7 +1513,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 925,
+    "line": 928,
     "section": "### 07-016 出力位置 p と kernel 位置 k を RANGE で作る。",
     "todo": "出力位置 p と kernel 位置 k を RANGE で作る。",
     "id": "07-016",
@@ -1522,7 +1522,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 931,
+    "line": 934,
     "section": "### 07-017 `x[p+k]*w[k]` を累積する。",
     "todo": "`x[p+k]*w[k]` を累積する。",
     "id": "07-017",
@@ -1531,7 +1531,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 937,
+    "line": 940,
     "section": "### 07-018 `output_len=input_len-kernel_len+1` を checked 演算で求める。",
     "todo": "`output_len=input_len-kernel_len+1` を checked 演算で求める。",
     "id": "07-018",
@@ -1540,7 +1540,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 943,
+    "line": 946,
     "section": "### 07-019 `x=[1,2,3,4]`, `w=[2,1]` を `[4,7,10]` にする。",
     "todo": "`x=[1,2,3,4]`, `w=[2,1]` を `[4,7,10]` にする。",
     "id": "07-019",
@@ -1549,7 +1549,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 949,
+    "line": 952,
     "section": "### 07-020 kernel が入力より長い場合を明確な未対応エラーにする。",
     "todo": "kernel が入力より長い場合を明確な未対応エラーにする。",
     "id": "07-020",
@@ -1558,7 +1558,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 955,
+    "line": 958,
     "section": "### 07-021 総和が `10`、行和が `[6,15]` になる。",
     "todo": "総和が `10`、行和が `[6,15]` になる。",
     "id": "07-021",
@@ -1567,7 +1567,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 961,
+    "line": 964,
     "section": "### 07-022 空の総和と列数 0 の行和が加算の初期値を返す。",
     "todo": "空の総和と列数 0 の行和が加算の初期値を返す。",
     "id": "07-022",
@@ -1576,7 +1576,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 967,
+    "line": 970,
     "section": "### 07-023 GEMM が `[[22,28],[49,64]]`、convolution が `[4,7,10]` になる。",
     "todo": "GEMM が `[[22,28],[49,64]]`、convolution が `[4,7,10]` になる。",
     "id": "07-023",
@@ -1585,7 +1585,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 973,
+    "line": 976,
     "section": "### 07-024 dump に高水準 REDUCE がなく、累積を行う LOAD と STORE がある。",
     "todo": "dump に高水準 REDUCE がなく、累積を行う LOAD と STORE がある。",
     "id": "07-024",
@@ -1594,7 +1594,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 979,
+    "line": 982,
     "section": "### 07-025 accumulator の初期化が正しい外側 region にある。",
     "todo": "accumulator の初期化が正しい外側 region にある。",
     "id": "07-025",
@@ -1603,7 +1603,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 985,
+    "line": 988,
     "section": "### 07-026 入力を変えた二回目の run でも前回の accumulator が残らない。",
     "todo": "入力を変えた二回目の run でも前回の accumulator が残らない。",
     "id": "07-026",
@@ -1612,7 +1612,7 @@
   },
   {
     "file": "docs/07-scalar-reductions.md",
-    "line": 991,
+    "line": 994,
     "section": "### 07-027 一般 f32 は前章までの予定許容誤差で interpreter と CPU を比較する。",
     "todo": "一般 f32 は前章までの予定許容誤差で interpreter と CPU を比較する。",
     "id": "07-027",
@@ -1621,7 +1621,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2226,
+    "line": 2231,
     "section": "### 08-001 shape を scalar と rank 1 に限定して導出する。",
     "todo": "shape を scalar と rank 1 に限定して導出する。",
     "id": "08-001",
@@ -1630,7 +1630,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2232,
+    "line": 2237,
     "section": "### 08-002 同じ長さの入力二つから output RANGE を作る。",
     "todo": "同じ長さの入力二つから output RANGE を作る。",
     "id": "08-002",
@@ -1639,7 +1639,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2238,
+    "line": 2243,
     "section": "### 08-003 ALU の座標を入力へ伝え、INDEX と LOAD を生成する。",
     "todo": "ALU の座標を入力へ伝え、INDEX と LOAD を生成する。",
     "id": "08-003",
@@ -1648,7 +1648,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2244,
+    "line": 2249,
     "section": "### 08-004 高水準加算から `[1,2,3]+[10,20,30]=[11,22,33]` を得る。",
     "todo": "高水準加算から `[1,2,3]+[10,20,30]=[11,22,33]` を得る。",
     "id": "08-004",
@@ -1657,7 +1657,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2250,
+    "line": 2255,
     "section": "### 08-005 長さ不一致を kernel 生成前に拒否する。",
     "todo": "長さ不一致を kernel 生成前に拒否する。",
     "id": "08-005",
@@ -1666,7 +1666,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2256,
+    "line": 2261,
     "section": "### 08-006 scalar と長さ 1 の入力に EXPAND を加える。",
     "todo": "scalar と長さ 1 の入力に EXPAND を加える。",
     "id": "08-006",
@@ -1675,7 +1675,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2262,
+    "line": 2267,
     "section": "### 08-007 入力の singleton 座標を 0 にする。",
     "todo": "入力の singleton 座標を 0 にする。",
     "id": "08-007",
@@ -1684,7 +1684,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2268,
+    "line": 2273,
     "section": "### 08-008 MUL の出力を新規 buffer に保存し、次の ADD が読むようにする。",
     "todo": "MUL の出力を新規 buffer に保存し、次の ADD が読むようにする。",
     "id": "08-008",
@@ -1693,7 +1693,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2274,
+    "line": 2279,
     "section": "### 08-009 `x*2+1` を `[3,5,7]` にする。",
     "todo": "`x*2+1` を `[3,5,7]` にする。",
     "id": "08-009",
@@ -1702,7 +1702,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2280,
+    "line": 2285,
     "section": "### 08-010 `[1]` の bias `[10]` を展開し、`x+b` を `[11,12,13]` にする。",
     "todo": "`[1]` の bias `[10]` を展開し、`x+b` を `[11,12,13]` にする。",
     "id": "08-010",
@@ -1711,7 +1711,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2286,
+    "line": 2291,
     "section": "### 08-011 REDUCE の入力 shape と出力 scalar を検証する。",
     "todo": "REDUCE の入力 shape と出力 scalar を検証する。",
     "id": "08-011",
@@ -1720,7 +1720,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2292,
+    "line": 2297,
     "section": "### 08-012 reduction 軸 k と accumulator の初期化を生成する。",
     "todo": "reduction 軸 k と accumulator の初期化を生成する。",
     "id": "08-012",
@@ -1729,7 +1729,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2298,
+    "line": 2303,
     "section": "### 08-013 前章の逐次累積と同じ低水準 IR へ変換する。",
     "todo": "前章の逐次累積と同じ低水準 IR へ変換する。",
     "id": "08-013",
@@ -1738,7 +1738,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2304,
+    "line": 2309,
     "section": "### 08-014 `[1,2,3]` の総和を `6` にする。",
     "todo": "`[1,2,3]` の総和を `6` にする。",
     "id": "08-014",
@@ -1747,7 +1747,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2310,
+    "line": 2315,
     "section": "### 08-015 `sum(x*2)` を中間 MUL と別 reduction kernel で `12` にする。",
     "todo": "`sum(x*2)` を中間 MUL と別 reduction kernel で `12` にする。",
     "id": "08-015",
@@ -1756,7 +1756,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2316,
+    "line": 2321,
     "section": "### 08-016 REDUCE MAX の初期値を f32 の負の無限大にする。",
     "todo": "REDUCE MAX の初期値を f32 の負の無限大にする。",
     "id": "08-016",
@@ -1765,7 +1765,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2322,
+    "line": 2327,
     "section": "### 08-017 第三章の MAX の特殊値契約を interpreter と C で維持する。",
     "todo": "第三章の MAX の特殊値契約を interpreter と C で維持する。",
     "id": "08-017",
@@ -1774,7 +1774,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2328,
+    "line": 2333,
     "section": "### 08-018 `max([-5,-2,-7])=-2` を既存 CPU 経路で実行する。",
     "todo": "`max([-5,-2,-7])=-2` を既存 CPU 経路で実行する。",
     "id": "08-018",
@@ -1783,7 +1783,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2334,
+    "line": 2339,
     "section": "### 08-019 同じノードを二つの出力 RANGE から lower する fixture を作る。",
     "todo": "同じノードを二つの出力 RANGE から lower する fixture を作る。",
     "id": "08-019",
@@ -1792,7 +1792,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2340,
+    "line": 2345,
     "section": "### 08-020 軸の漏れ、違う座標の誤共有、scalar の保存長の誤りを検証する。",
     "todo": "軸の漏れ、違う座標の誤共有、scalar の保存長の誤りを検証する。",
     "id": "08-020",
@@ -1801,7 +1801,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2346,
+    "line": 2351,
     "section": "### 08-021 高水準の `x*2+1` が `[3,5,7]` になる。",
     "todo": "高水準の `x*2+1` が `[3,5,7]` になる。",
     "id": "08-021",
@@ -1810,7 +1810,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2352,
+    "line": 2357,
     "section": "### 08-022 affine の実行 kernel は二つで、中間 buffer が一つある。",
     "todo": "affine の実行 kernel は二つで、中間 buffer が一つある。",
     "id": "08-022",
@@ -1819,7 +1819,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2358,
+    "line": 2363,
     "section": "### 08-023 総和が `6`、`sum(x*2)` が `12`、MAX が `-2` になる。",
     "todo": "総和が `6`、`sum(x*2)` が `12`、MAX が `-2` になる。",
     "id": "08-023",
@@ -1828,7 +1828,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2364,
+    "line": 2369,
     "section": "### 08-024 scalar の出力 storage は一要素、shape は `[]` になる。",
     "todo": "scalar の出力 storage は一要素、shape は `[]` になる。",
     "id": "08-024",
@@ -1837,7 +1837,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2370,
+    "line": 2375,
     "section": "### 08-025 backend 入力に EXPAND と高水準 REDUCE が残らない。",
     "todo": "backend 入力に EXPAND と高水準 REDUCE が残らない。",
     "id": "08-025",
@@ -1846,7 +1846,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2376,
+    "line": 2381,
     "section": "### 08-026 各 kernel の RANGE は閉じ、INDEX はその kernel の座標を使う。",
     "todo": "各 kernel の RANGE は閉じ、INDEX はその kernel の座標を使う。",
     "id": "08-026",
@@ -1855,7 +1855,7 @@
   },
   {
     "file": "docs/08-shapes-rangeify.md",
-    "line": 2382,
+    "line": 2387,
     "section": "### 08-027 shape 不一致と不正 EXPAND は実行前にエラーになる。",
     "todo": "shape 不一致と不正 EXPAND は実行前にエラーになる。",
     "id": "08-027",
@@ -2152,7 +2152,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1483,
+    "line": 1485,
     "section": "### 10-001 出力の二次元 RANGE と row-major の平坦化を追加する。",
     "todo": "出力の二次元 RANGE と row-major の平坦化を追加する。",
     "id": "10-001",
@@ -2161,7 +2161,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1489,
+    "line": 1491,
     "section": "### 10-002 shape を右揃えし、入力側の長さ 1 の軸を座標 0 にする。",
     "todo": "shape を右揃えし、入力側の長さ 1 の軸を座標 0 にする。",
     "id": "10-002",
@@ -2170,7 +2170,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1495,
+    "line": 1497,
     "section": "### 10-003 `[2,3] + [3]` と `[2,1] + [1,3]` を CPU で実行する。",
     "todo": "`[2,3] + [3]` と `[2,1] + [1,3]` を CPU で実行する。",
     "id": "10-003",
@@ -2179,7 +2179,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1501,
+    "line": 1503,
     "section": "### 10-004 `[2,3] + [2]` は broadcast 不成立として codegen 前に拒否する。",
     "todo": "`[2,3] + [2]` は broadcast 不成立として codegen 前に拒否する。",
     "id": "10-004",
@@ -2188,7 +2188,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1507,
+    "line": 1509,
     "section": "### 10-005 要素数が等しい reshape だけを受け付ける。",
     "todo": "要素数が等しい reshape だけを受け付ける。",
     "id": "10-005",
@@ -2197,7 +2197,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1513,
+    "line": 1515,
     "section": "### 10-006 permute の軸が重複せず、全軸を一度ずつ含むことを検証する。",
     "todo": "permute の軸が重複せず、全軸を一度ずつ含むことを検証する。",
     "id": "10-006",
@@ -2206,7 +2206,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1519,
+    "line": 1521,
     "section": "### 10-007 論理的な平坦化と座標の復元を rangeify に追加する。",
     "todo": "論理的な平坦化と座標の復元を rangeify に追加する。",
     "id": "10-007",
@@ -2215,7 +2215,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1525,
+    "line": 1527,
     "section": "### 10-008 転置後の reshape を CPU 実行し、連続化した場合とも比較する。",
     "todo": "転置後の reshape を CPU 実行し、連続化した場合とも比較する。",
     "id": "10-008",
@@ -2224,7 +2224,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1531,
+    "line": 1533,
     "section": "### 10-009 shrink の半開区間 `start..end` を入力側の offset に変換する。",
     "todo": "shrink の半開区間 `start..end` を入力側の offset に変換する。",
     "id": "10-009",
@@ -2233,7 +2233,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1537,
+    "line": 1539,
     "section": "### 10-010 `0 <= start <= end <= input_size` を各軸で検証する。",
     "todo": "`0 <= start <= end <= input_size` を各軸で検証する。",
     "id": "10-010",
@@ -2242,7 +2242,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1543,
+    "line": 1545,
     "section": "### 10-011 pad の有効条件と、条件成立時だけ実行する LOAD を生成する。",
     "todo": "pad の有効条件と、条件成立時だけ実行する LOAD を生成する。",
     "id": "10-011",
@@ -2251,7 +2251,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1549,
+    "line": 1551,
     "section": "### 10-012 pad の外側はゼロを返し、無効なポインタへの LOAD を作らない。",
     "todo": "pad の外側はゼロを返し、無効なポインタへの LOAD を作らない。",
     "id": "10-012",
@@ -2260,7 +2260,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1555,
+    "line": 1557,
     "section": "### 10-013 非対称 pad と shrink の合成を interpreter と生成 C で照合する。",
     "todo": "非対称 pad と shrink の合成を interpreter と生成 C で照合する。",
     "id": "10-013",
@@ -2269,7 +2269,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1561,
+    "line": 1563,
     "section": "### 10-014 flip の座標を `size-1-coordinate` にする。",
     "todo": "flip の座標を `size-1-coordinate` にする。",
     "id": "10-014",
@@ -2278,7 +2278,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1567,
+    "line": 1569,
     "section": "### 10-015 flip の軸の範囲と重複を検証する。",
     "todo": "flip の軸の範囲と重複を検証する。",
     "id": "10-015",
@@ -2287,7 +2287,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1573,
+    "line": 1575,
     "section": "### 10-016 stack の先頭座標で入力を選び、残りの座標を各入力に渡す。",
     "todo": "stack の先頭座標で入力を選び、残りの座標を各入力に渡す。",
     "id": "10-016",
@@ -2296,7 +2296,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1579,
+    "line": 1581,
     "section": "### 10-017 入力選択の分岐内だけで該当入力を LOAD する。",
     "todo": "入力選択の分岐内だけで該当入力を LOAD する。",
     "id": "10-017",
@@ -2305,7 +2305,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1585,
+    "line": 1587,
     "section": "### 10-018 shape が異なる stack と、未知の軸指定を拒否する。",
     "todo": "shape が異なる stack と、未知の軸指定を拒否する。",
     "id": "10-018",
@@ -2314,7 +2314,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1591,
+    "line": 1593,
     "section": "### 10-019 整数で表せる上記の期待値は `f32` でも厳密に一致する。",
     "todo": "整数で表せる上記の期待値は `f32` でも厳密に一致する。",
     "id": "10-019",
@@ -2323,7 +2323,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1597,
+    "line": 1599,
     "section": "### 10-020 kernel IR に抽象 movement が残らず、添字式と条件付き LOAD になる。",
     "todo": "kernel IR に抽象 movement が残らず、添字式と条件付き LOAD になる。",
     "id": "10-020",
@@ -2332,7 +2332,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1603,
+    "line": 1605,
     "section": "### 10-021 元グラフの movement ノードは実行後にも残る。",
     "todo": "元グラフの movement ノードは実行後にも残る。",
     "id": "10-021",
@@ -2341,7 +2341,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1609,
+    "line": 1611,
     "section": "### 10-022 `tests/movement.rs` に不正 shape、軸重複、負の区間の拒否例を追加する。",
     "todo": "`tests/movement.rs` に不正 shape、軸重複、負の区間の拒否例を追加する。",
     "id": "10-022",
@@ -2350,7 +2350,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1615,
+    "line": 1617,
     "section": "### 10-023 同じ NodeId を異なる座標で読む例が、順序と値の両方で正しい。",
     "todo": "同じ NodeId を異なる座標で読む例が、順序と値の両方で正しい。",
     "id": "10-023",
@@ -2359,7 +2359,7 @@
   },
   {
     "file": "docs/10-movement.md",
-    "line": 1621,
+    "line": 1623,
     "section": "### 10-024 空の reshape、permute、shrink はメモリアクセスとゼロ除算を起こさない。",
     "todo": "空の reshape、permute、shrink はメモリアクセスとゼロ除算を起こさない。",
     "id": "10-024",
@@ -2593,7 +2593,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1331,
+    "line": 1332,
     "section": "### 12-001 SQRT の dtype と入力数を verifier に追加する。",
     "todo": "SQRT の dtype と入力数を verifier に追加する。",
     "id": "12-001",
@@ -2602,7 +2602,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1337,
+    "line": 1338,
     "section": "### 12-002 interpreter と C renderer の sqrt をそろえる。",
     "todo": "interpreter と C renderer の sqrt をそろえる。",
     "id": "12-002",
@@ -2611,7 +2611,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1343,
+    "line": 1344,
     "section": "### 12-003 コンパイルされた共有ライブラリから sqrtf を解決できるようにする。",
     "todo": "コンパイルされた共有ライブラリから sqrtf を解決できるようにする。",
     "id": "12-003",
@@ -2620,7 +2620,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1349,
+    "line": 1350,
     "section": "### 12-004 通常値、-0、負値、Inf、NaN を分類して比較する。",
     "todo": "通常値、-0、負値、Inf、NaN を分類して比較する。",
     "id": "12-004",
@@ -2629,7 +2629,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1355,
+    "line": 1356,
     "section": "### 12-005 SIN、LOG2、EXP2 を elementwise として rangeify に通す。",
     "todo": "SIN、LOG2、EXP2 を elementwise として rangeify に通す。",
     "id": "12-005",
@@ -2638,7 +2638,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1361,
+    "line": 1362,
     "section": "### 12-006 C 側を sinf、log2f、exp2f に下げる。",
     "todo": "C 側を sinf、log2f、exp2f に下げる。",
     "id": "12-006",
@@ -2647,7 +2647,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1367,
+    "line": 1368,
     "section": "### 12-007 `exp` と自然対数を定数の積と既存 UOp の合成で追加する。",
     "todo": "`exp` と自然対数を定数の積と既存 UOp の合成で追加する。",
     "id": "12-007",
@@ -2656,7 +2656,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1373,
+    "line": 1374,
     "section": "### 12-008 特殊値の期待する分類と定義域を API の説明に書く。",
     "todo": "特殊値の期待する分類と定義域を API の説明に書く。",
     "id": "12-008",
@@ -2665,7 +2665,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1379,
+    "line": 1380,
     "section": "### 12-009 `exp2(log2(x))` を正の小さい配列で実行する。",
     "todo": "`exp2(log2(x))` を正の小さい配列で実行する。",
     "id": "12-009",
@@ -2674,7 +2674,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1385,
+    "line": 1386,
     "section": "### 12-010 exp2 は `x=q+r`、`r∈[-0.5,0.5]` に分けて Horner 形式で評価する。",
     "todo": "exp2 は `x=q+r`、`r∈[-0.5,0.5]` に分けて Horner 形式で評価する。",
     "id": "12-010",
@@ -2683,7 +2683,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1391,
+    "line": 1392,
     "section": "### 12-011 `2^q` の再構成を定義し、整数変換の範囲を検査する。",
     "todo": "`2^q` の再構成を定義し、整数変換の範囲を検査する。",
     "id": "12-011",
@@ -2692,7 +2692,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1397,
+    "line": 1398,
     "section": "### 12-012 log2 は `x=2^e*m` に分け、m を限られた区間に正規化する。",
     "todo": "log2 は `x=2^e*m` に分け、m を限られた区間に正規化する。",
     "id": "12-012",
@@ -2701,7 +2701,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1403,
+    "line": 1404,
     "section": "### 12-013 係数、近似区間、次数、出典または係数生成方法を実装の近くに残す。",
     "todo": "係数、近似区間、次数、出典または係数生成方法を実装の近くに残す。",
     "id": "12-013",
@@ -2710,7 +2710,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1409,
+    "line": 1410,
     "section": "### 12-014 各段階を UOp にして既存 rewrite と renderer へ通す。",
     "todo": "各段階を UOp にして既存 rewrite と renderer へ通す。",
     "id": "12-014",
@@ -2719,7 +2719,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1415,
+    "line": 1416,
     "section": "### 12-015 周期と象限を求め、短い区間へ還元して符号を復元する。",
     "todo": "周期と象限を求め、短い区間へ還元して符号を復元する。",
     "id": "12-015",
@@ -2728,7 +2728,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1421,
+    "line": 1422,
     "section": "### 12-016 区間内だけの奇多項式を Horner 形式で評価する。",
     "todo": "区間内だけの奇多項式を Horner 形式で評価する。",
     "id": "12-016",
@@ -2737,7 +2737,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1427,
+    "line": 1428,
     "section": "### 12-017 `|x|<=32` の境界、π の倍数、その両隣をテストする。",
     "todo": "`|x|<=32` の境界、π の倍数、その両隣をテストする。",
     "id": "12-017",
@@ -2746,7 +2746,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1433,
+    "line": 1434,
     "section": "### 12-018 大きな有限値と Inf、NaN を libm 経路に分岐する。",
     "todo": "大きな有限値と Inf、NaN を libm 経路に分岐する。",
     "id": "12-018",
@@ -2755,7 +2755,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1439,
+    "line": 1440,
     "section": "### 12-019 高水準 SIN と近似展開後のグラフを両方 dump できるようにする。",
     "todo": "高水準 SIN と近似展開後のグラフを両方 dump できるようにする。",
     "id": "12-019",
@@ -2764,7 +2764,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1445,
+    "line": 1446,
     "section": "### 12-020 通常値の許容誤差と特殊値の分類を分けて判定する。",
     "todo": "通常値の許容誤差と特殊値の分類を分けて判定する。",
     "id": "12-020",
@@ -2773,7 +2773,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1451,
+    "line": 1452,
     "section": "### 12-021 sqrt(-0) の sign bit、log2(0) の -Inf、exp2(-Inf) の 0 を検査する。",
     "todo": "sqrt(-0) の sign bit、log2(0) の -Inf、exp2(-Inf) の 0 を検査する。",
     "id": "12-021",
@@ -2782,7 +2782,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1457,
+    "line": 1458,
     "section": "### 12-022 固定 seed の有限値集合と、区間境界の隣接 f32 を比較する。",
     "todo": "固定 seed の有限値集合と、区間境界の隣接 f32 を比較する。",
     "id": "12-022",
@@ -2791,7 +2791,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1463,
+    "line": 1464,
     "section": "### 12-023 近似対象外の値を libm に戻す分岐が生成コードに残る。",
     "todo": "近似対象外の値を libm に戻す分岐が生成コードに残る。",
     "id": "12-023",
@@ -2800,7 +2800,7 @@
   },
   {
     "file": "docs/12-math-functions.md",
-    "line": 1469,
+    "line": 1470,
     "section": "### 12-024 近似を選ばない既存 example の数値が変わらない。",
     "todo": "近似を選ばない既存 example の数値が変わらない。",
     "id": "12-024",
@@ -3304,7 +3304,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2001,
+    "line": 2022,
     "section": "### 15-001 利用可能な Metal device を検出し、未対応時の明示的エラーを作る。",
     "todo": "利用可能な Metal device を検出し、未対応時の明示的エラーを作る。",
     "id": "15-001",
@@ -3313,7 +3313,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2007,
+    "line": 2028,
     "section": "### 15-002 静的 f32 の加算用 MSL を共通 kernel IR から生成する。",
     "todo": "静的 f32 の加算用 MSL を共通 kernel IR から生成する。",
     "id": "15-002",
@@ -3322,7 +3322,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2013,
+    "line": 2034,
     "section": "### 15-003 公開 API で library と pipeline を作り、build error を返す。",
     "todo": "公開 API で library と pipeline を作り、build error を返す。",
     "id": "15-003",
@@ -3331,7 +3331,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2019,
+    "line": 2040,
     "section": "### 15-004 shared buffer の入力を書き、4 thread を dispatch する。",
     "todo": "shared buffer の入力を書き、4 thread を dispatch する。",
     "id": "15-004",
@@ -3340,7 +3340,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2025,
+    "line": 2046,
     "section": "### 15-005 完了待ち後に出力を読み、CPU の値と比較する。",
     "todo": "完了待ち後に出力を読み、CPU の値と比較する。",
     "id": "15-005",
@@ -3349,7 +3349,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2031,
+    "line": 2052,
     "section": "### 15-006 groups を `ceil(N/L)` で計算し、掛算 overflow を検査する。",
     "todo": "groups を `ceil(N/L)` で計算し、掛算 overflow を検査する。",
     "id": "15-006",
@@ -3358,7 +3358,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2037,
+    "line": 2058,
     "section": "### 15-007 `i<N` の内側に LOAD と STORE の両方を置く。",
     "todo": "`i<N` の内側に LOAD と STORE の両方を置く。",
     "id": "15-007",
@@ -3367,7 +3367,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2043,
+    "line": 2064,
     "section": "### 15-008 device と pipeline の上限を使って local size を検証する。",
     "todo": "device と pipeline の上限を使って local size を検証する。",
     "id": "15-008",
@@ -3376,7 +3376,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2049,
+    "line": 2070,
     "section": "### 15-009 N=1、L-1、L、L+1、257 を同じ lowering で実行する。",
     "todo": "N=1、L-1、L、L+1、257 を同じ lowering で実行する。",
     "id": "15-009",
@@ -3385,7 +3385,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2055,
+    "line": 2076,
     "section": "### 15-010 N=0 は host 側で空出力を返し、ゼロ個の group を dispatch しない。",
     "todo": "N=0 は host 側で空出力を返し、ゼロ個の group を dispatch しない。",
     "id": "15-010",
@@ -3394,7 +3394,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2061,
+    "line": 2082,
     "section": "### 15-011 Plan の入力 buffer を差し替えて再実行する。",
     "todo": "Plan の入力 buffer を差し替えて再実行する。",
     "id": "15-011",
@@ -3403,7 +3403,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2067,
+    "line": 2088,
     "section": "### 15-012 出力の平坦 ID を多次元座標へ復元する。",
     "todo": "出力の平坦 ID を多次元座標へ復元する。",
     "id": "15-012",
@@ -3412,7 +3412,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2073,
+    "line": 2094,
     "section": "### 15-013 movement と broadcast を CPU と同じ座標変換から生成する。",
     "todo": "movement と broadcast を CPU と同じ座標変換から生成する。",
     "id": "15-013",
@@ -3421,7 +3421,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2079,
+    "line": 2100,
     "section": "### 15-014 pad の有効条件が成立した場合だけ device buffer を LOAD する。",
     "todo": "pad の有効条件が成立した場合だけ device buffer を LOAD する。",
     "id": "15-014",
@@ -3430,7 +3430,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2085,
+    "line": 2106,
     "section": "### 15-015 無効 LOAD の値を事後に WHERE で隠す実装を拒否する。",
     "todo": "無効 LOAD の値を事後に WHERE で隠す実装を拒否する。",
     "id": "15-015",
@@ -3439,7 +3439,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2091,
+    "line": 2112,
     "section": "### 15-016 CPU、interpreter、Metal の三つの値を比較する。",
     "todo": "CPU、interpreter、Metal の三つの値を比較する。",
     "id": "15-016",
@@ -3448,7 +3448,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2097,
+    "line": 2118,
     "section": "### 15-017 一つの thread が一行を担当し、列方向を逐次累積する。",
     "todo": "一つの thread が一行を担当し、列方向を逐次累積する。",
     "id": "15-017",
@@ -3457,7 +3457,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2103,
+    "line": 2124,
     "section": "### 15-018 matmul は一つの thread が一出力 `(m,n)` を担当する。",
     "todo": "matmul は一つの thread が一出力 `(m,n)` を担当する。",
     "id": "15-018",
@@ -3466,7 +3466,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2109,
+    "line": 2130,
     "section": "### 15-019 reduction の初期値を各 thread のローカル変数に置く。",
     "todo": "reduction の初期値を各 thread のローカル変数に置く。",
     "id": "15-019",
@@ -3475,7 +3475,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2115,
+    "line": 2136,
     "section": "### 15-020 CPU と同じ shape graph から reduction と matmul を作る。",
     "todo": "CPU と同じ shape graph から reduction と matmul を作る。",
     "id": "15-020",
@@ -3484,7 +3484,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2121,
+    "line": 2142,
     "section": "### 15-021 小型 MLP の前向きと勾配にも同じ backend を選べるようにする。",
     "todo": "小型 MLP の前向きと勾配にも同じ backend を選べるようにする。",
     "id": "15-021",
@@ -3493,7 +3493,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2127,
+    "line": 2148,
     "section": "### 15-022 CPU 用テストは Metal がない環境でも実行できる。",
     "todo": "CPU 用テストは Metal がない環境でも実行できる。",
     "id": "15-022",
@@ -3502,7 +3502,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2133,
+    "line": 2154,
     "section": "### 15-023 未対応機器の skip を、実機の数値比較成功として報告しない。",
     "todo": "未対応機器の skip を、実機の数値比較成功として報告しない。",
     "id": "15-023",
@@ -3511,7 +3511,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2139,
+    "line": 2160,
     "section": "### 15-024 GPU の build error と command buffer の実行エラーを別々に伝える。",
     "todo": "GPU の build error と command buffer の実行エラーを別々に伝える。",
     "id": "15-024",
@@ -3520,7 +3520,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2145,
+    "line": 2166,
     "section": "### 15-025 結果を読む前の完了待ちとリソースの寿命が runtime に集約される。",
     "todo": "結果を読む前の完了待ちとリソースの寿命が runtime に集約される。",
     "id": "15-025",
@@ -3529,7 +3529,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2151,
+    "line": 2172,
     "section": "### 15-026 MSL に未対応 UOp が残る場合はコンパイル前に拒否する。",
     "todo": "MSL に未対応 UOp が残る場合はコンパイル前に拒否する。",
     "id": "15-026",
@@ -3538,7 +3538,7 @@
   },
   {
     "file": "docs/15-metal.md",
-    "line": 2157,
+    "line": 2178,
     "section": "### 15-027 空の加算をテストし、Metal 呼出しなしで空の結果を得る。",
     "todo": "空の加算をテストし、Metal 呼出しなしで空の結果を得る。",
     "id": "15-027",
@@ -3547,7 +3547,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1407,
+    "line": 1426,
     "section": "### 16-001 platform と device を列挙し、明示指定できる入口を追加する。",
     "todo": "platform と device を列挙し、明示指定できる入口を追加する。",
     "id": "16-001",
@@ -3556,7 +3556,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1413,
+    "line": 1432,
     "section": "### 16-002 f32 加算の kernel source を共通 IR から生成する。",
     "todo": "f32 加算の kernel source を共通 IR から生成する。",
     "id": "16-002",
@@ -3565,7 +3565,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1419,
+    "line": 1438,
     "section": "### 16-003 program build と kernel 作成、buffer の bind を実装する。",
     "todo": "program build と kernel 作成、buffer の bind を実装する。",
     "id": "16-003",
@@ -3574,7 +3574,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1425,
+    "line": 1444,
     "section": "### 16-004 入力転送、NDRange、同期読出しを一巡させる。",
     "todo": "入力転送、NDRange、同期読出しを一巡させる。",
     "id": "16-004",
@@ -3583,7 +3583,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1431,
+    "line": 1450,
     "section": "### 16-005 各 OpenCL エラーに API 名と戻り値を含める。",
     "todo": "各 OpenCL エラーに API 名と戻り値を含める。",
     "id": "16-005",
@@ -3592,7 +3592,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1437,
+    "line": 1456,
     "section": "### 16-006 共通 launch から global_work_size を計算する関数を作る。",
     "todo": "共通 launch から global_work_size を計算する関数を作る。",
     "id": "16-006",
@@ -3601,7 +3601,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1443,
+    "line": 1462,
     "section": "### 16-007 N=257、local=64 では global=320 を渡す。",
     "todo": "N=257、local=64 では global=320 を渡す。",
     "id": "16-007",
@@ -3610,7 +3610,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1449,
+    "line": 1468,
     "section": "### 16-008 `i<N` の内側でだけ LOAD と STORE を実行する。",
     "todo": "`i<N` の内側でだけ LOAD と STORE を実行する。",
     "id": "16-008",
@@ -3619,7 +3619,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1455,
+    "line": 1474,
     "section": "### 16-009 N=1、L-1、L、L+1 を CPU と比較する。",
     "todo": "N=1、L-1、L、L+1 を CPU と比較する。",
     "id": "16-009",
@@ -3628,7 +3628,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1461,
+    "line": 1480,
     "section": "### 16-010 N=0 は host 側で空出力を返し、ゼロサイズ NDRange を投入しない。",
     "todo": "N=0 は host 側で空出力を返し、ゼロサイズ NDRange を投入しない。",
     "id": "16-010",
@@ -3637,7 +3637,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1467,
+    "line": 1486,
     "section": "### 16-011 local size が機器の上限を越えたら起動前に拒否する。",
     "todo": "local size が機器の上限を越えたら起動前に拒否する。",
     "id": "16-011",
@@ -3646,7 +3646,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1473,
+    "line": 1492,
     "section": "### 16-012 二次元の平坦 ID を shape の座標へ戻す。",
     "todo": "二次元の平坦 ID を shape の座標へ戻す。",
     "id": "16-012",
@@ -3655,7 +3655,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1479,
+    "line": 1498,
     "section": "### 16-013 broadcast、転置後 reshape、shrink、pad を共通 lowering から生成する。",
     "todo": "broadcast、転置後 reshape、shrink、pad を共通 lowering から生成する。",
     "id": "16-013",
@@ -3664,7 +3664,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1485,
+    "line": 1504,
     "section": "### 16-014 pad の LOAD 自体を有効条件の分岐内に置く。",
     "todo": "pad の LOAD 自体を有効条件の分岐内に置く。",
     "id": "16-014",
@@ -3673,7 +3673,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1491,
+    "line": 1510,
     "section": "### 16-015 SQRT、SIN、LOG2、EXP2 を OpenCL の通常の数学関数へ下げる。",
     "todo": "SQRT、SIN、LOG2、EXP2 を OpenCL の通常の数学関数へ下げる。",
     "id": "16-015",
@@ -3682,7 +3682,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1497,
+    "line": 1516,
     "section": "### 16-016 native 高速近似関数は明示的な別モードにする。",
     "todo": "native 高速近似関数は明示的な別モードにする。",
     "id": "16-016",
@@ -3691,7 +3691,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1503,
+    "line": 1522,
     "section": "### 16-017 一つの work item に一行の逐次 SUM を担当させる。",
     "todo": "一つの work item に一行の逐次 SUM を担当させる。",
     "id": "16-017",
@@ -3700,7 +3700,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1509,
+    "line": 1528,
     "section": "### 16-018 matmul の出力 `(m,n)` を一つの work item に割り当てる。",
     "todo": "matmul の出力 `(m,n)` を一つの work item に割り当てる。",
     "id": "16-018",
@@ -3709,7 +3709,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1515,
+    "line": 1534,
     "section": "### 16-019 reduction の累積を work item ごとに初期化する。",
     "todo": "reduction の累積を work item ごとに初期化する。",
     "id": "16-019",
@@ -3718,7 +3718,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1521,
+    "line": 1540,
     "section": "### 16-020 CPU と OpenCL の出力、勾配を小さい固定値で比較する。",
     "todo": "CPU と OpenCL の出力、勾配を小さい固定値で比較する。",
     "id": "16-020",
@@ -3727,7 +3727,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1527,
+    "line": 1546,
     "section": "### 16-021 新しい重みを同じ Plan の入力 slot に渡して再実行する。",
     "todo": "新しい重みを同じ Plan の入力 slot に渡して再実行する。",
     "id": "16-021",
@@ -3736,7 +3736,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1533,
+    "line": 1552,
     "section": "### 16-022 in-order queue で前の転送と kernel の順序が守られる。",
     "todo": "in-order queue で前の転送と kernel の順序が守られる。",
     "id": "16-022",
@@ -3745,7 +3745,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1539,
+    "line": 1558,
     "section": "### 16-023 非同期 read を開始しただけの値を、完了した値として返さない。",
     "todo": "非同期 read を開始しただけの値を、完了した値として返さない。",
     "id": "16-023",
@@ -3754,7 +3754,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1545,
+    "line": 1564,
     "section": "### 16-024 device の不在、build 失敗、起動失敗を別々の診断にする。",
     "todo": "device の不在、build 失敗、起動失敗を別々の診断にする。",
     "id": "16-024",
@@ -3763,7 +3763,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1551,
+    "line": 1570,
     "section": "### 16-025 機器がないときは source 検査と未実施の実機項目を分けて記録する。",
     "todo": "機器がないときは source 検査と未実施の実機項目を分けて記録する。",
     "id": "16-025",
@@ -3772,7 +3772,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1557,
+    "line": 1576,
     "section": "### 16-026 runtime の API 呼出し以外に OpenCL 固有のロジックを広げない。",
     "todo": "runtime の API 呼出し以外に OpenCL 固有のロジックを広げない。",
     "id": "16-026",
@@ -3781,7 +3781,7 @@
   },
   {
     "file": "docs/16-opencl.md",
-    "line": 1563,
+    "line": 1582,
     "section": "### 16-027 空の加算をテストし、NDRange の投入なしで空の結果を得る。",
     "todo": "空の加算をテストし、NDRange の投入なしで空の結果を得る。",
     "id": "16-027",
@@ -3790,7 +3790,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7138,
+    "line": 7143,
     "section": "### 17-001 `i=outer*tile+inner` への置換を kernel IR に追加する。",
     "todo": "`i=outer*tile+inner` への置換を kernel IR に追加する。",
     "id": "17-001",
@@ -3799,7 +3799,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7144,
+    "line": 7149,
     "section": "### 17-002 outer の範囲を切上げ、元範囲の guard を作る。",
     "todo": "outer の範囲を切上げ、元範囲の guard を作る。",
     "id": "17-002",
@@ -3808,7 +3808,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7150,
+    "line": 7155,
     "section": "### 17-003 無効な要素の LOAD と STORE を guard の内側に置く。",
     "todo": "無効な要素の LOAD と STORE を guard の内側に置く。",
     "id": "17-003",
@@ -3817,7 +3817,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7156,
+    "line": 7161,
     "section": "### 17-004 tile=0、負値、添字の overflow を起動前に拒否する。",
     "todo": "tile=0、負値、添字の overflow を起動前に拒否する。",
     "id": "17-004",
@@ -3826,7 +3826,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7162,
+    "line": 7167,
     "section": "### 17-005 split 前と split 後を同じ入力で実行する。",
     "todo": "split 前と split 後を同じ入力で実行する。",
     "id": "17-005",
@@ -3835,7 +3835,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7168,
+    "line": 7173,
     "section": "### 17-006 独立した出力軸の順序を入れ替える変換を追加する。",
     "todo": "独立した出力軸の順序を入れ替える変換を追加する。",
     "id": "17-006",
@@ -3844,7 +3844,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7174,
+    "line": 7179,
     "section": "### 17-007 reduction 軸の再順序化は初版では明示的に禁止する。",
     "todo": "reduction 軸の再順序化は初版では明示的に禁止する。",
     "id": "17-007",
@@ -3853,7 +3853,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7180,
+    "line": 7185,
     "section": "### 17-008 小さい inner RANGE を定数座標ごとに複製する。",
     "todo": "小さい inner RANGE を定数座標ごとに複製する。",
     "id": "17-008",
@@ -3862,7 +3862,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7186,
+    "line": 7191,
     "section": "### 17-009 RANGE とローカル変数を複製先の scope ごとに作り直す。",
     "todo": "RANGE とローカル変数を複製先の scope ごとに作り直す。",
     "id": "17-009",
@@ -3871,7 +3871,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7192,
+    "line": 7197,
     "section": "### 17-010 展開後にも tail guard と累積の初期化位置を維持する。",
     "todo": "展開後にも tail guard と累積の初期化位置を維持する。",
     "id": "17-010",
@@ -3880,7 +3880,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7198,
+    "line": 7203,
     "section": "### 17-011 UPCAST 軸を固定個数の scalar 値へ展開する。",
     "todo": "UPCAST 軸を固定個数の scalar 値へ展開する。",
     "id": "17-011",
@@ -3889,7 +3889,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7204,
+    "line": 7209,
     "section": "### 17-012 連続した width=4 の f32 を vector 型へまとめる変換を別に追加する。",
     "todo": "連続した width=4 の f32 を vector 型へまとめる変換を別に追加する。",
     "id": "17-012",
@@ -3898,7 +3898,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7210,
+    "line": 7215,
     "section": "### 17-013 vector LOAD/STORE の合法性を調べ、misalignment には安全な方法を使う。",
     "todo": "vector LOAD/STORE の合法性を調べ、misalignment には安全な方法を使う。",
     "id": "17-013",
@@ -3907,7 +3907,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7216,
+    "line": 7221,
     "section": "### 17-014 端数は scalar loop に残し、full vector の範囲外 LOAD を避ける。",
     "todo": "端数は scalar loop に残し、full vector の範囲外 LOAD を避ける。",
     "id": "17-014",
@@ -3916,7 +3916,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7222,
+    "line": 7227,
     "section": "### 17-015 vector 非対応 backend は scalar へ戻す。",
     "todo": "vector 非対応 backend は scalar へ戻す。",
     "id": "17-015",
@@ -3925,7 +3925,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7228,
+    "line": 7233,
     "section": "### 17-016 CPU runtime に固定数の worker と join を追加する。",
     "todo": "CPU runtime に固定数の worker と join を追加する。",
     "id": "17-016",
@@ -3934,7 +3934,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7234,
+    "line": 7239,
     "section": "### 17-017 出力区間を重複と欠落がないように分割する。",
     "todo": "出力区間を重複と欠落がないように分割する。",
     "id": "17-017",
@@ -3943,7 +3943,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7240,
+    "line": 7245,
     "section": "### 17-018 区間の begin/end と引数表を worker ごとに持つ。",
     "todo": "区間の begin/end と引数表を worker ごとに持つ。",
     "id": "17-018",
@@ -3952,7 +3952,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7246,
+    "line": 7251,
     "section": "### 17-019 worker が同じ compiler やキャッシュへ同時に書かないよう、compile を先に完了する。",
     "todo": "worker が同じ compiler やキャッシュへ同時に書かないよう、compile を先に完了する。",
     "id": "17-019",
@@ -3961,7 +3961,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7252,
+    "line": 7257,
     "section": "### 17-020 thread 数 1、2、3、出力数より多い場合を比較する。",
     "todo": "thread 数 1、2、3、出力数より多い場合を比較する。",
     "id": "17-020",
@@ -3970,7 +3970,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7258,
+    "line": 7263,
     "section": "### 17-021 backend ごとに vector 幅、CPU thread、LOCAL、shared memory の可否を明示する。",
     "todo": "backend ごとに vector 幅、CPU thread、LOCAL、shared memory の可否を明示する。",
     "id": "17-021",
@@ -3979,7 +3979,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7264,
+    "line": 7269,
     "section": "### 17-022 未対応変換を黙って別の意味で実行しない。",
     "todo": "未対応変換を黙って別の意味で実行しない。",
     "id": "17-022",
@@ -3988,7 +3988,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7270,
+    "line": 7275,
     "section": "### 17-023 split、unroll、vector、thread を単独で検証した後に組み合わせる。",
     "todo": "split、unroll、vector、thread を単独で検証した後に組み合わせる。",
     "id": "17-023",
@@ -3997,7 +3997,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7276,
+    "line": 7281,
     "section": "### 17-024 compile、転送、実行、同期を別に測れる計測点だけを追加する。",
     "todo": "compile、転送、実行、同期を別に測れる計測点だけを追加する。",
     "id": "17-024",
@@ -4006,7 +4006,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7282,
+    "line": 7287,
     "section": "### 17-025 split と unroll の後にも scope と buffer 境界の verifier が通る。",
     "todo": "split と unroll の後にも scope と buffer 境界の verifier が通る。",
     "id": "17-025",
@@ -4015,7 +4015,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7288,
+    "line": 7293,
     "section": "### 17-026 未対応 vector の fallback と CPU thread 数 1 が基準版と一致する。",
     "todo": "未対応 vector の fallback と CPU thread 数 1 が基準版と一致する。",
     "id": "17-026",
@@ -4024,7 +4024,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7294,
+    "line": 7299,
     "section": "### 17-027 出力ごとの所有区間が明確で、reduction の累積を共有しない。",
     "todo": "出力ごとの所有区間が明確で、reduction の累積を共有しない。",
     "id": "17-027",
@@ -4033,7 +4033,7 @@
   },
   {
     "file": "docs/17-loop-optimizations.md",
-    "line": 7300,
+    "line": 7305,
     "section": "### 17-028 GPU local と CPU worker の capability を独立して表示する。",
     "todo": "GPU local と CPU worker の capability を独立して表示する。",
     "id": "17-028",
@@ -4042,7 +4042,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 897,
+    "line": 900,
     "section": "### 18-001 LOCAL storage と BARRIER を verifier、linearize、renderer に追加する。",
     "todo": "LOCAL storage と BARRIER を verifier、linearize、renderer に追加する。",
     "id": "18-001",
@@ -4051,7 +4051,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 903,
+    "line": 906,
     "section": "### 18-002 各 lane が `col=chunk*L+lane` の部分和を逐次計算する。",
     "todo": "各 lane が `col=chunk*L+lane` の部分和を逐次計算する。",
     "id": "18-002",
@@ -4060,7 +4060,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 909,
+    "line": 912,
     "section": "### 18-003 全 lane が LOCAL の自分の位置に一つ書く。",
     "todo": "全 lane が LOCAL の自分の位置に一つ書く。",
     "id": "18-003",
@@ -4069,7 +4069,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 915,
+    "line": 918,
     "section": "### 18-004 barrier 後だけ LOCAL を読み、lane 0 が一出力を書く。",
     "todo": "barrier 後だけ LOCAL を読み、lane 0 が一出力を書く。",
     "id": "18-004",
@@ -4078,7 +4078,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 921,
+    "line": 924,
     "section": "### 18-005 Metal と OpenCL の両方に同じ IR を下げる。",
     "todo": "Metal と OpenCL の両方に同じ IR を下げる。",
     "id": "18-005",
@@ -4087,7 +4087,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 927,
+    "line": 930,
     "section": "### 18-006 stride を L/2、L/4、…、1 として LOCAL の二要素を足す。",
     "todo": "stride を L/2、L/4、…、1 として LOCAL の二要素を足す。",
     "id": "18-006",
@@ -4096,7 +4096,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 933,
+    "line": 936,
     "section": "### 18-007 `lane<stride` の分岐では加算と LOCAL STORE だけを行う。",
     "todo": "`lane<stride` の分岐では加算と LOCAL STORE だけを行う。",
     "id": "18-007",
@@ -4105,7 +4105,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 939,
+    "line": 942,
     "section": "### 18-008 各 stride の後の barrier は全 lane が実行する位置に置く。",
     "todo": "各 stride の後の barrier は全 lane が実行する位置に置く。",
     "id": "18-008",
@@ -4114,7 +4114,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 945,
+    "line": 948,
     "section": "### 18-009 最終結果の global STORE は lane 0 だけに限定する。",
     "todo": "最終結果の global STORE は lane 0 だけに限定する。",
     "id": "18-009",
@@ -4123,7 +4123,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 951,
+    "line": 954,
     "section": "### 18-010 LOCAL の read-after-write と write-after-read の依存を保つ。",
     "todo": "LOCAL の read-after-write と write-after-read の依存を保つ。",
     "id": "18-010",
@@ -4132,7 +4132,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 957,
+    "line": 960,
     "section": "### 18-011 N=1、L-1、L、L+1、257 の部分和を同じ規則で作る。",
     "todo": "N=1、L-1、L、L+1、257 の部分和を同じ規則で作る。",
     "id": "18-011",
@@ -4141,7 +4141,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 963,
+    "line": 966,
     "section": "### 18-012 二次元の行和では group ID を row として使う。",
     "todo": "二次元の行和では group ID を row として使う。",
     "id": "18-012",
@@ -4150,7 +4150,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 969,
+    "line": 972,
     "section": "### 18-013 input の無効 LOAD と output の無効 STORE を別々に guard する。",
     "todo": "input の無効 LOAD と output の無効 STORE を別々に guard する。",
     "id": "18-013",
@@ -4159,7 +4159,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 975,
+    "line": 978,
     "section": "### 18-014 LOCAL を同じ kernel のループで再利用する場合、次の書込み前に barrier を入れる。",
     "todo": "LOCAL を同じ kernel のループで再利用する場合、次の書込み前に barrier を入れる。",
     "id": "18-014",
@@ -4168,7 +4168,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 981,
+    "line": 984,
     "section": "### 18-015 非 2 冪の local を明示的に拒否し、無言で誤った tree を作らない。",
     "todo": "非 2 冪の local を明示的に拒否し、無言で誤った tree を作らない。",
     "id": "18-015",
@@ -4177,7 +4177,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 987,
+    "line": 990,
     "section": "### 18-016 大きな入力を固定 chunk に分け、各 group の部分和を GLOBAL に保存する。",
     "todo": "大きな入力を固定 chunk に分け、各 group の部分和を GLOBAL に保存する。",
     "id": "18-016",
@@ -4186,7 +4186,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 993,
+    "line": 996,
     "section": "### 18-017 部分和バッファを次 kernel の PARAM slot に bind する。",
     "todo": "部分和バッファを次 kernel の PARAM slot に bind する。",
     "id": "18-017",
@@ -4195,7 +4195,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 999,
+    "line": 1002,
     "section": "### 18-018 二つの kernel の依存を schedule に明示する。",
     "todo": "二つの kernel の依存を schedule に明示する。",
     "id": "18-018",
@@ -4204,7 +4204,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1005,
+    "line": 1008,
     "section": "### 18-019 同じ queue 上の順序と最後の読出し完了を runtime で保証する。",
     "todo": "同じ queue 上の順序と最後の読出し完了を runtime で保証する。",
     "id": "18-019",
@@ -4213,7 +4213,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1011,
+    "line": 1014,
     "section": "### 18-020 単一 workgroup の barrier を全 GPU の barrier として扱わない。",
     "todo": "単一 workgroup の barrier を全 GPU の barrier として扱わない。",
     "id": "18-020",
@@ -4222,7 +4222,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1017,
+    "line": 1020,
     "section": "### 18-021 整数として正確に表せる小例は、期待値と厳密に一致する。",
     "todo": "整数として正確に表せる小例は、期待値と厳密に一致する。",
     "id": "18-021",
@@ -4231,7 +4231,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1023,
+    "line": 1026,
     "section": "### 18-022 通常の f32 は加算順序の差を考慮し、`1e-5+1e-5*abs(reference)` を初期目標にする。",
     "todo": "通常の f32 は加算順序の差を考慮し、`1e-5+1e-5*abs(reference)` を初期目標にする。",
     "id": "18-022",
@@ -4240,7 +4240,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1029,
+    "line": 1032,
     "section": "### 18-023 正負が相殺する入力と大小が混在する入力も比較する。",
     "todo": "正負が相殺する入力と大小が混在する入力も比較する。",
     "id": "18-023",
@@ -4249,7 +4249,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1035,
+    "line": 1038,
     "section": "### 18-024 barrier を通る回数が lane の ID と入力の有効性で変わらない。",
     "todo": "barrier を通る回数が lane の ID と入力の有効性で変わらない。",
     "id": "18-024",
@@ -4258,7 +4258,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1041,
+    "line": 1044,
     "section": "### 18-025 同じ入力を繰り返して偶然の一回の成功に依存していないことを確認する。",
     "todo": "同じ入力を繰り返して偶然の一回の成功に依存していないことを確認する。",
     "id": "18-025",
@@ -4267,7 +4267,7 @@
   },
   {
     "file": "docs/18-parallel-reduction.md",
-    "line": 1047,
+    "line": 1050,
     "section": "### 18-026 実機未実施の backend を数値一致済みとして報告しない。",
     "todo": "実機未実施の backend を数値一致済みとして報告しない。",
     "id": "18-026",
@@ -4591,7 +4591,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8271,
+    "line": 8322,
     "section": "### 20-001 VarSpec と Bindings を追加し、未束縛、二重指定、範囲外を起動前に拒否する。",
     "todo": "VarSpec と Bindings を追加し、未束縛、二重指定、範囲外を起動前に拒否する。",
     "id": "20-001",
@@ -4600,7 +4600,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8277,
+    "line": 8328,
     "section": "### 20-002 02と03の固定 ABI の scalar slot を使い、VarId から slot への対応を追加する。",
     "todo": "02と03の固定 ABI の scalar slot を使い、VarId から slot への対応を追加する。",
     "id": "20-002",
@@ -4609,7 +4609,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8283,
+    "line": 8334,
     "section": "### 20-003 `RANGE(N)` を C の実行時ループ上限へ出す。",
     "todo": "`RANGE(N)` を C の実行時ループ上限へ出す。",
     "id": "20-003",
@@ -4618,7 +4618,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8289,
+    "line": 8340,
     "section": "### 20-004 容量17の buffer に N=1、3、17を渡し、毎回異なる論理長の結果を返す。",
     "todo": "容量17の buffer に N=1、3、17を渡し、毎回異なる論理長の結果を返す。",
     "id": "20-004",
@@ -4627,7 +4627,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8295,
+    "line": 8346,
     "section": "### 20-005 純粋な元グラフを置換せず、束縛値を runtime の実行記録に置く。",
     "todo": "純粋な元グラフを置換せず、束縛値を runtime の実行記録に置く。",
     "id": "20-005",
@@ -4636,7 +4636,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8301,
+    "line": 8352,
     "section": "### 20-006 `Dim::Expr(NodeId)` を必要な次元式だけに追加し、`2*N` を式のまま運ぶ。",
     "todo": "`Dim::Expr(NodeId)` を必要な次元式だけに追加し、`2*N` を式のまま運ぶ。",
     "id": "20-006",
@@ -4645,7 +4645,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8307,
+    "line": 8358,
     "section": "### 20-007 `sum(x)` の縮約 RANGE に N を使い、初期値を実行ごとに設定する。",
     "todo": "`sum(x)` の縮約 RANGE に N を使い、初期値を実行ごとに設定する。",
     "id": "20-007",
@@ -4654,7 +4654,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8313,
+    "line": 8364,
     "section": "### 20-008 `reshape([N,2])` の必要要素数と入力の論理要素数を実行時に検証する。",
     "todo": "`reshape([N,2])` の必要要素数と入力の論理要素数を実行時に検証する。",
     "id": "20-008",
@@ -4663,7 +4663,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8319,
+    "line": 8370,
     "section": "### 20-009 同じ変数を使った broadcast は許可し、別変数の等値は Bindings で確認する。",
     "todo": "同じ変数を使った broadcast は許可し、別変数の等値は Bindings で確認する。",
     "id": "20-009",
@@ -4672,7 +4672,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8325,
+    "line": 8376,
     "section": "### 20-010 動的 shrink と pad の有効範囲を guard として INDEX に渡す。",
     "todo": "動的 shrink と pad の有効範囲を guard として INDEX に渡す。",
     "id": "20-010",
@@ -4681,7 +4681,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8331,
+    "line": 8382,
     "section": "### 20-011 確定できないアクセスを安全とみなさず、guard を生成するか未対応として拒否する。",
     "todo": "確定できないアクセスを安全とみなさず、guard を生成するか未対応として拒否する。",
     "id": "20-011",
@@ -4690,7 +4690,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8337,
+    "line": 8388,
     "section": "### 20-012 Metal の引数領域に N を置き、論理長から group 数を決める。",
     "todo": "Metal の引数領域に N を置き、論理長から group 数を決める。",
     "id": "20-012",
@@ -4699,7 +4699,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8343,
+    "line": 8394,
     "section": "### 20-013 `i<N` を LOAD と STORE の両方へ伝え、容量だけを guard に使わない。",
     "todo": "`i<N` を LOAD と STORE の両方へ伝え、容量だけを guard に使わない。",
     "id": "20-013",
@@ -4708,7 +4708,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8349,
+    "line": 8400,
     "section": "### 20-014 local reduction では無効 lane に0を与え、全 lane を barrier に到達させる。",
     "todo": "local reduction では無効 lane に0を与え、全 lane を barrier に到達させる。",
     "id": "20-014",
@@ -4717,7 +4717,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8355,
+    "line": 8406,
     "section": "### 20-015 OpenCL の scalar 引数と NDRange を同じ束縛値で設定する。",
     "todo": "OpenCL の scalar 引数と NDRange を同じ束縛値で設定する。",
     "id": "20-015",
@@ -4726,7 +4726,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8361,
+    "line": 8412,
     "section": "### 20-016 GPU に送る値と host で検証した値が同じになるよう、一回の Bindings を固定する。",
     "todo": "GPU に送る値と host で検証した値が同じになるよう、一回の Bindings を固定する。",
     "id": "20-016",
@@ -4735,7 +4735,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8367,
+    "line": 8418,
     "section": "### 20-017 generic kernel の key に VarId の正規化情報、上下限、制約、ABI を含める。",
     "todo": "generic kernel の key に VarId の正規化情報、上下限、制約、ABI を含める。",
     "id": "20-017",
@@ -4744,7 +4744,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8373,
+    "line": 8424,
     "section": "### 20-018 generic kernel の key に毎回の N の値を混ぜず、1、3、17で同じコードを再利用する。",
     "todo": "generic kernel の key に毎回の N の値を混ぜず、1、3、17で同じコードを再利用する。",
     "id": "20-018",
@@ -4753,7 +4753,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8379,
+    "line": 8430,
     "section": "### 20-019 `N=16` を条件とする特化版を一つ追加し、条件不成立なら generic に戻す。",
     "todo": "`N=16` を条件とする特化版を一つ追加し、条件不成立なら generic に戻す。",
     "id": "20-019",
@@ -4762,7 +4762,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8385,
+    "line": 8436,
     "section": "### 20-020 特化 key には N=16 と tile 条件を含め、N=17でその binary を選ばないようにする。",
     "todo": "特化 key には N=16 と tile 条件を含め、N=17でその binary を選ばないようにする。",
     "id": "20-020",
@@ -4771,7 +4771,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8391,
+    "line": 8442,
     "section": "### 20-021 添字式の memo key に node、出力座標、RANGE の scope を含めるか、scope 内に cache を閉じる。",
     "todo": "添字式の memo key に node、出力座標、RANGE の scope を含めるか、scope 内に cache を閉じる。",
     "id": "20-021",
@@ -4780,7 +4780,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8397,
+    "line": 8448,
     "section": "### 20-022 N の下限、上限、その外側、未束縛で期待どおり成功またはエラーになる。",
     "todo": "N の下限、上限、その外側、未束縛で期待どおり成功またはエラーになる。",
     "id": "20-022",
@@ -4789,7 +4789,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8403,
+    "line": 8454,
     "section": "### 20-023 整数の小例は期待値と完全一致する。",
     "todo": "整数の小例は期待値と完全一致する。",
     "id": "20-023",
@@ -4798,7 +4798,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8409,
+    "line": 8460,
     "section": "### 20-024 f32 の generic、specialized、静的版は `abs_err <= 1e-5 + 1e-5*abs(ref)` を初期基準として比較する。",
     "todo": "f32 の generic、specialized、静的版は `abs_err <= 1e-5 + 1e-5*abs(ref)` を初期基準として比較する。",
     "id": "20-024",
@@ -4807,7 +4807,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8415,
+    "line": 8466,
     "section": "### 20-025 RANGE の上限と buffer の容量を区別して dump に表示する。",
     "todo": "RANGE の上限と buffer の容量を区別して dump に表示する。",
     "id": "20-025",
@@ -4816,7 +4816,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8421,
+    "line": 8472,
     "section": "### 20-026 動的 reshape の積、GEMM の K、broadcast の等値を起動前に検証する。",
     "todo": "動的 reshape の積、GEMM の K、broadcast の等値を起動前に検証する。",
     "id": "20-026",
@@ -4825,7 +4825,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8427,
+    "line": 8478,
     "section": "### 20-027 Plan を連続再実行しても、束縛値と累積値が前回から残らない。",
     "todo": "Plan を連続再実行しても、束縛値と累積値が前回から残らない。",
     "id": "20-027",
@@ -4834,7 +4834,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8433,
+    "line": 8484,
     "section": "### 20-028 同じ node を転置前後で利用して、添字 cache が座標を混同しない。",
     "todo": "同じ node を転置前後で利用して、添字 cache が座標を混同しない。",
     "id": "20-028",
@@ -4843,7 +4843,7 @@
   },
   {
     "file": "docs/20-symbolic-shapes.md",
-    "line": 8439,
+    "line": 8490,
     "section": "### 20-029 GPU での失敗は CPU の成功で置き換えず、backend 別に確認結果を残す。",
     "todo": "GPU での失敗は CPU の成功で置き換えず、backend 別に確認結果を残す。",
     "id": "20-029",
@@ -5977,7 +5977,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1394,
+    "line": 1396,
     "section": "### 25-001 Metal device の family、API が返す実行幅、threadgroup 上限、local byte 上限を取得する。",
     "todo": "Metal device の family、API が返す実行幅、threadgroup 上限、local byte 上限を取得する。",
     "id": "25-001",
@@ -5986,7 +5986,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1400,
+    "line": 1402,
     "section": "### 25-002 必要な行列型と演算を持つ小 shader をコンパイルし、失敗理由を capability に保存する。",
     "todo": "必要な行列型と演算を持つ小 shader をコンパイルし、失敗理由を capability に保存する。",
     "id": "25-002",
@@ -5995,7 +5995,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1406,
+    "line": 1408,
     "section": "### 25-003 capability が使えない場合も19の f32 GEMM を実行し、同じ出力を得る。",
     "todo": "capability が使えない場合も19の f32 GEMM を実行し、同じ出力を得る。",
     "id": "25-003",
@@ -6004,7 +6004,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1412,
+    "line": 1414,
     "section": "### 25-004 capability を test 用に無効にし、通常経路を強制して確認する。",
     "todo": "capability を test 用に無効にし、通常経路を強制して確認する。",
     "id": "25-004",
@@ -6013,7 +6013,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1418,
+    "line": 1420,
     "section": "### 25-005 cache key に device capability、型、compiler と ABI の識別を含める。",
     "todo": "cache key に device capability、型、compiler と ABI の識別を含める。",
     "id": "25-005",
@@ -6022,7 +6022,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1424,
+    "line": 1426,
     "section": "### 25-006 まず公開の simdgroup load と store を使い、8x8の tile を一つだけ計算する。",
     "todo": "まず公開の simdgroup load と store を使い、8x8の tile を一つだけ計算する。",
     "id": "25-006",
@@ -6031,7 +6031,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1430,
+    "line": 1432,
     "section": "### 25-007 行列の row/column 順、leading dimension、転置指定を入力 layout と照合する。",
     "todo": "行列の row/column 順、leading dimension、転置指定を入力 layout と照合する。",
     "id": "25-007",
@@ -6040,7 +6040,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1436,
+    "line": 1438,
     "section": "### 25-008 shader で I@A と A@I を計算し、19の通常積和と CPU reference に比較する。",
     "todo": "shader で I@A と A@I を計算し、19の通常積和と CPU reference に比較する。",
     "id": "25-008",
@@ -6049,7 +6049,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1442,
+    "line": 1444,
     "section": "### 25-009 行列の一箇所だけが1の basis 入力で、出力座標の対応を検証する。",
     "todo": "行列の一箇所だけが1の basis 入力で、出力座標の対応を検証する。",
     "id": "25-009",
@@ -6058,7 +6058,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1448,
+    "line": 1450,
     "section": "### 25-010 shader を既存の Metal compiler、buffer bind、dispatch、同期、読出しの経路で動かす。",
     "todo": "shader を既存の Metal compiler、buffer bind、dispatch、同期、読出しの経路で動かす。",
     "id": "25-010",
@@ -6067,7 +6067,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1454,
+    "line": 1456,
     "section": "### 25-011 既存の `sum(A[i,k]*B[k,j], k)` の形と dtype を認識する。",
     "todo": "既存の `sum(A[i,k]*B[k,j], k)` の形と dtype を認識する。",
     "id": "25-011",
@@ -6076,7 +6076,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1460,
+    "line": 1462,
     "section": "### 25-012 MatrixTile を生成し、対応しない stride、型、alignment は通常版へ戻す。",
     "todo": "MatrixTile を生成し、対応しない stride、型、alignment は通常版へ戻す。",
     "id": "25-012",
@@ -6085,7 +6085,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1466,
+    "line": 1468,
     "section": "### 25-013 K=16、24で部分和を次の行列演算の accumulator に渡す。",
     "todo": "K=16、24で部分和を次の行列演算の accumulator に渡す。",
     "id": "25-013",
@@ -6094,7 +6094,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1472,
+    "line": 1474,
     "section": "### 25-014 M/N/K が8の倍数でない場合は、まず通常版へ戻して数値を保つ。",
     "todo": "M/N/K が8の倍数でない場合は、まず通常版へ戻して数値を保つ。",
     "id": "25-014",
@@ -6103,7 +6103,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1478,
+    "line": 1480,
     "section": "### 25-015 次のコミットで端数を local tile にゼロ詰めし、無効 LOAD と STORE を guard する。",
     "todo": "次のコミットで端数を local tile にゼロ詰めし、無効 LOAD と STORE を guard する。",
     "id": "25-015",
@@ -6112,7 +6112,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1484,
+    "line": 1486,
     "section": "### 25-016 capability が許す場合だけ、F16 入力と f32 累積を追加する。",
     "todo": "capability が許す場合だけ、F16 入力と f32 累積を追加する。",
     "id": "25-016",
@@ -6121,7 +6121,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1490,
+    "line": 1492,
     "section": "### 25-017 変換後の実 F16 入力値を f64 へ上げた reference と比較し、入力量子化の差を分ける。",
     "todo": "変換後の実 F16 入力値を f64 へ上げた reference と比較し、入力量子化の差を分ける。",
     "id": "25-017",
@@ -6130,7 +6130,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1496,
+    "line": 1498,
     "section": "### 25-018 負値、ゼロ、打消し、大きさの異なる値、K の複数 tile を確認する。",
     "todo": "負値、ゼロ、打消し、大きさの異なる値、K の複数 tile を確認する。",
     "id": "25-018",
@@ -6139,7 +6139,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1502,
+    "line": 1504,
     "section": "### 25-019 通常版、行列命令版、fallback の同一入力を比べ、選択経路を記録する。",
     "todo": "通常版、行列命令版、fallback の同一入力を比べ、選択経路を記録する。",
     "id": "25-019",
@@ -6148,7 +6148,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1508,
+    "line": 1510,
     "section": "### 25-020 正しさの確認後に compile、転送、kernel、同期、全体の計測を分ける。",
     "todo": "正しさの確認後に compile、転送、kernel、同期、全体の計測を分ける。",
     "id": "25-020",
@@ -6157,7 +6157,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1514,
+    "line": 1516,
     "section": "### 25-021 論文の演算一つ、compiler 変換一つ、または新しい device 一つを対象として選ぶ。",
     "todo": "論文の演算一つ、compiler 変換一つ、または新しい device 一つを対象として選ぶ。",
     "id": "25-021",
@@ -6166,7 +6166,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1520,
+    "line": 1522,
     "section": "### 25-022 入力、出力、数式、比較用の既存実装、対応 dtype と shape を短い仕様にする。",
     "todo": "入力、出力、数式、比較用の既存実装、対応 dtype と shape を短い仕様にする。",
     "id": "25-022",
@@ -6175,7 +6175,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1526,
+    "line": 1528,
     "section": "### 25-023 最初に既存 pipeline の baseline example を動かし、同じ入出力で拡張を差し替える。",
     "todo": "最初に既存 pipeline の baseline example を動かし、同じ入出力で拡張を差し替える。",
     "id": "25-023",
@@ -6184,7 +6184,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1532,
+    "line": 1534,
     "section": "### 25-024 小入力の期待値、ランダム比較、境界値、必要なら gradient 比較を追加する。",
     "todo": "小入力の期待値、ランダム比較、境界値、必要なら gradient 比較を追加する。",
     "id": "25-024",
@@ -6193,7 +6193,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1538,
+    "line": 1540,
     "section": "### 25-025 device と commit、再現コマンド、結果、未対応範囲を project の記録へ残す。",
     "todo": "device と commit、再現コマンド、結果、未対応範囲を project の記録へ残す。",
     "id": "25-025",
@@ -6202,7 +6202,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1544,
+    "line": 1546,
     "section": "### 25-026 identity と basis の期待値に一致し、K の部分和が失われない。",
     "todo": "identity と basis の期待値に一致し、K の部分和が失われない。",
     "id": "25-026",
@@ -6211,7 +6211,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1550,
+    "line": 1552,
     "section": "### 25-027 f32 は `abs_err <= 1e-4 + 1e-4*abs(ref)` を初期基準として全要素を比較する。",
     "todo": "f32 は `abs_err <= 1e-4 + 1e-4*abs(ref)` を初期基準として全要素を比較する。",
     "id": "25-027",
@@ -6220,7 +6220,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1556,
+    "line": 1558,
     "section": "### 25-028 F16 入力と f32 累積は、量子化済み入力 reference に `abs_err <= 1e-3 + 1e-3*abs(ref)` で比較する。",
     "todo": "F16 入力と f32 累積は、量子化済み入力 reference に `abs_err <= 1e-3 + 1e-3*abs(ref)` で比較する。",
     "id": "25-028",
@@ -6229,7 +6229,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1562,
+    "line": 1564,
     "section": "### 25-029 許容値が満たせない場合は誤差の原因と対象範囲を調べ、無条件で閾値を広げない。",
     "todo": "許容値が満たせない場合は誤差の原因と対象範囲を調べ、無条件で閾値を広げない。",
     "id": "25-029",
@@ -6238,7 +6238,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1568,
+    "line": 1570,
     "section": "### 25-030 capability 無効、非対応型、不正 shape、端数のケースで安全に fallback またはエラーになる。",
     "todo": "capability 無効、非対応型、不正 shape、端数のケースで安全に fallback またはエラーになる。",
     "id": "25-030",
@@ -6247,7 +6247,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1574,
+    "line": 1576,
     "section": "### 25-031 実行経路と数値の両方を確認し、source 内の命令名だけで完了にしない。",
     "todo": "実行経路と数値の両方を確認し、source 内の命令名だけで完了にしない。",
     "id": "25-031",
@@ -6256,7 +6256,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1580,
+    "line": 1582,
     "section": "### 25-032 小 MLP と LLM の一回の更新を回帰確認し、lowering の変更が勾配の意味を変えない。",
     "todo": "小 MLP と LLM の一回の更新を回帰確認し、lowering の変更が勾配の意味を変えない。",
     "id": "25-032",
@@ -6265,7 +6265,7 @@
   },
   {
     "file": "docs/25-hardware-extensions.md",
-    "line": 1586,
+    "line": 1588,
     "section": "### 25-033 独立課題は baseline と拡張を同じコマンドで比較でき、未確認の実機を明示する。",
     "todo": "独立課題は baseline と拡張を同じコマンドで比較でき、未確認の実機を明示する。",
     "id": "25-033",

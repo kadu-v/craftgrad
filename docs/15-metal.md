@@ -1040,8 +1040,11 @@ pub fn render(
         };
         let expr = match u.op {
             Ops::Const => match u.arg {
-                Arg::F32(bits) => match dialect {
-                    Dialect::Metal => format!("as_type<float>((uint){bits})"),
+                Arg::Float(bits) => {
+                    let bits = (bits.value() as f32).to_bits();
+                    match dialect {
+                        Dialect::Metal => format!("as_type<float>((uint){bits})"),
+                    }
                 },
                 Arg::I32(x) => format!("{x}"),
                 Arg::Int(x) => format!("{x}L"),
@@ -1217,8 +1220,10 @@ fn decode_arg(s: &str) -> Result<Arg> {
     let fields: Vec<_> = s.split(';').collect();
     Ok(match fields.as_slice() {
         ["none"] => Arg::None,
-        ["f32", v] if v.len() == 8 => {
-            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        ["float", v] if v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Arg::Float(crate::uop::ConstFloat::new(f64::from_bits(
+                u64::from_str_radix(v, 16).map_err(|_| "invalid float bits")?
+            )))
         }
         ["i32", v] => Arg::I32(number(v)?),
         ["i64", v] => Arg::Int(number(v)?),
@@ -1976,6 +1981,22 @@ fn unary_broadcast_stack_and_empty_outputs() {
         }
     }
 }
+
+#[test]
+fn gpu_constant_encoding_keeps_special_values() {
+    let values = [0.0f32, -0.0, f32::INFINITY, f32::NEG_INFINITY, 1.1, f32::NAN];
+    let outputs = values.into_iter().map(Tensor::scalar).collect::<Vec<_>>();
+    for backend in backends() {
+        let mut executable = GpuExecutable::compile(&outputs, backend).unwrap();
+        let actual = executable.run(&[], &HashMap::new()).unwrap();
+        for (buffer, expected) in actual.iter().zip(values) {
+            let value = buffer.data[0];
+            if expected.is_nan() { assert!(value.is_nan()); }
+            else { assert_eq!(value.to_bits(), expected.to_bits()); }
+        }
+    }
+}
+
 ```
 
 ```sh

@@ -671,7 +671,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }
@@ -2312,9 +2313,12 @@ pub fn render(
         };
         let expr = match u.op {
             Ops::Const => match u.arg {
-                Arg::F32(bits) => match dialect {
-                    Dialect::Metal => format!("as_type<float>((uint){bits})"),
-                    Dialect::OpenCl => format!("as_float((uint){bits})"),
+                Arg::Float(bits) => {
+                    let bits = (bits.value() as f32).to_bits();
+                    match dialect {
+                        Dialect::Metal => format!("as_type<float>((uint){bits})"),
+                        Dialect::OpenCl => format!("as_float((uint){bits})"),
+                    }
                 },
                 Arg::I32(x) => format!("{x}"),
                 Arg::Int(x) => format!("{x}L"),
@@ -2813,7 +2817,7 @@ impl Value {
             Arg::Bool(v) => Self::Bool(v),
             Arg::I32(v) => Self::I32(v),
             Arg::Int(v) => Self::I64(v),
-            Arg::F32(v) => Self::F32Bits(v),
+            Arg::Float(v) => Self::F32Bits((v.value() as f32).to_bits()),
             _ => return None,
         })
     }
@@ -3569,7 +3573,7 @@ fn encode_arg(a: &Arg) -> String {
             format!("variable;{};{min};{max}", hex(name.as_bytes()))
         }
         Arg::None => "none".into(),
-        Arg::F32(v) => format!("f32;{v:08x}"),
+        Arg::Float(v) => format!("float;{:016x}", v.value().to_bits()),
         Arg::I32(v) => format!("i32;{v}"),
         Arg::Int(v) => format!("i64;{v}"),
         Arg::Bool(v) => format!("bool;{}", *v as u8),
@@ -3627,8 +3631,10 @@ fn decode_arg(s: &str) -> Result<Arg> {
                 max,
             }
         }
-        ["f32", v] if v.len() == 8 => {
-            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        ["float", v] if v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Arg::Float(crate::uop::ConstFloat::new(f64::from_bits(
+                u64::from_str_radix(v, 16).map_err(|_| "invalid float bits")?
+            )))
         }
         ["i32", v] => Arg::I32(number(v)?),
         ["i64", v] => Arg::Int(number(v)?),
@@ -3855,7 +3861,7 @@ pub enum Arg {
         max: i64,
     },
     None,
-    F32(u32),
+    Float(ConstFloat),
     I32(i32),
     Int(i64),
     Bool(bool),
@@ -3957,7 +3963,7 @@ pub struct Node {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,
@@ -5442,7 +5448,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }
@@ -7307,6 +7314,30 @@ pub enum Axis {
     Global,
     Local,
 }
+#[derive(Clone, Copy, Debug)]
+pub struct ConstFloat(f64);
+impl ConstFloat {
+    pub fn new(value: f64) -> Self {
+        Self(if value.is_nan() {
+            f64::from_bits(0x7ff8_0000_0000_0000)
+        } else {
+            value
+        })
+    }
+    pub fn value(self) -> f64 { self.0 }
+}
+impl PartialEq for ConstFloat {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 || (self.0.is_nan() && other.0.is_nan())
+    }
+}
+impl Eq for ConstFloat {}
+impl Hash for ConstFloat {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let bits = if self.0 == 0.0 { 0 } else { self.0.to_bits() };
+        bits.hash(state);
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Arg {
     Variable {
@@ -7315,7 +7346,7 @@ pub enum Arg {
         max: i64,
     },
     None,
-    F32(u32),
+    Float(ConstFloat),
     I32(i32),
     Int(i64),
     Bool(bool),
@@ -7372,11 +7403,31 @@ pub struct Node {
 }
 #[derive(Clone, Debug)]
 pub struct UOp(Rc<Node>);
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 struct Key {
     op: Ops,
     src: Vec<u64>,
     arg: Arg,
+}
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.op == other.op && self.src == other.src && match (&self.arg, &other.arg) {
+            (Arg::Float(a), Arg::Float(b)) => a.value().to_bits() == b.value().to_bits(),
+            (a, b) => a == b,
+        }
+    }
+}
+impl Eq for Key {}
+impl Hash for Key {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.op.hash(state);
+        self.src.hash(state);
+        std::mem::discriminant(&self.arg).hash(state);
+        match &self.arg {
+            Arg::Float(value) => value.value().to_bits().hash(state),
+            other => other.hash(state),
+        }
+    }
 }
 #[derive(Default)]
 struct Interner {
@@ -7484,7 +7535,7 @@ impl UOp {
         Self::new(self.op, src, self.arg.clone())
     }
     pub fn f32(x: f32) -> Self {
-        Self::new(Ops::Const, vec![], Arg::F32(x.to_bits()))
+        Self::new(Ops::Const, vec![], Arg::Float(ConstFloat::new(f64::from(x))))
     }
     pub fn i32(x: i32) -> Self {
         Self::new(Ops::Const, vec![], Arg::I32(x))
@@ -7601,7 +7652,7 @@ impl UOp {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,

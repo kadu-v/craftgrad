@@ -65,7 +65,7 @@ pub fn expression(root: &UOp) -> String {
         };
         let term = match node.op {
             Ops::Const => match node.arg {
-                Arg::F32(bits) => format!("{:e}f", f32::from_bits(bits)),
+                Arg::Float(value) => format!("chibi_float({}u)", (value.value() as f32).to_bits()),
                 _ => unreachable!(),
             },
             Ops::Add => format!("({} + {})", source(0), source(1)),
@@ -90,7 +90,7 @@ pub fn source(root: &UOp, parameters: usize) -> String {
         .map(|i| format!("float p{i} = strtof(argv[{}], 0);", i + 1))
         .collect::<String>();
     format!(
-        "#include <stdio.h>\n#include <stdlib.h>\nint main(int argc, char **argv) {{ {}printf(\"%.9g\\n\", (double)({})); }}\n",
+        "#include <stdint.h>\n#include <string.h>\nstatic float chibi_float(uint32_t bits) {{ float value; memcpy(&value, &bits, 4); return value; }}\n#include <stdio.h>\n#include <stdlib.h>\nint main(int argc, char **argv) {{ {}printf(\"%.9g\\n\", (double)({})); }}\n",
         declarations, expression(root)
     )
 }
@@ -141,7 +141,7 @@ pub enum Ops {
 // file="src/uop.rs" mode="replace" item="pub enum Arg"
 pub enum Arg {
     None,
-    F32(u32),
+    Float(ConstFloat),
     ScalarParam { index: usize },
 }
 ```
@@ -161,6 +161,11 @@ pub enum Arg {
 // file="tests/scalar.rs" mode="replace" item="fn constant_runs_native_code"
 fn constant_runs_native_code() {
     assert_eq!(run(&(UOp::f32(7.0)), &[]).unwrap(), 7.0);
+    for value in [0.0, -0.0, f32::INFINITY, f32::NEG_INFINITY, 1.1, f32::from_bits(1), f32::MAX] {
+        assert_eq!(run(&UOp::f32(value), &[]).unwrap().to_bits(), value.to_bits());
+    }
+    let value = f32::NAN;
+    assert!(run(&UOp::f32(value), &[]).unwrap().is_nan());
 }
 ```
 
@@ -282,7 +287,7 @@ pub fn expression(root: &UOp) -> String {
         };
         let term = match node.op {
             Ops::Const => match node.arg {
-                Arg::F32(bits) => format!("{:e}f", f32::from_bits(bits)),
+                Arg::Float(value) => format!("chibi_float({}u)", (value.value() as f32).to_bits()),
                 _ => unreachable!(),
             },
             Ops::Add => format!("({} + {})", source(0), source(1)),
@@ -302,7 +307,7 @@ pub fn emit_scalar(root: &UOp, parameters: usize) -> String {
         .map(|i| format!("float p{i}; memcpy(&p{i}, args + {}, 4);\n", 4 * i))
         .collect::<String>();
     format!(
-        "#include <string.h>\nvoid scalar(unsigned char *args) {{\n{declarations}float result = {};\nmemcpy(args + {}, &result, 4);\n}}\n",
+        "#include <stdint.h>\n#include <string.h>\nstatic float chibi_float(uint32_t bits) {{ float value; memcpy(&value, &bits, 4); return value; }}\nvoid scalar(unsigned char *args) {{\n{declarations}float result = {};\nmemcpy(args + {}, &result, 4);\n}}\n",
         expression(root), 4 * parameters
     )
 }
@@ -429,6 +434,11 @@ fn run(root: &UOp, inputs: &[f32]) -> f32 {
 #[test]
 fn constant_runs_native_code() {
     assert_eq!(run(& (UOp::f32(7.0)), & []), 7.0);
+    for value in [0.0, -0.0, f32::INFINITY, f32::NEG_INFINITY, 1.1, f32::from_bits(1), f32::MAX] {
+        assert_eq!(run(&UOp::f32(value), &[]).to_bits(), value.to_bits());
+    }
+    let value = f32::NAN;
+    assert!(run(&UOp::f32(value), &[]).is_nan());
 }
 #[test]
 fn addition_runs_native_code() {

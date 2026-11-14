@@ -1719,7 +1719,7 @@ impl Executable {
             Arg::Bool(v) => Self::Bool(v),
             Arg::I32(v) => Self::I32(v),
             Arg::Int(v) => Self::I64(v),
-            Arg::F32(v) => Self::F32Bits(v),
+            Arg::Float(v) => Self::F32Bits((v.value() as f32).to_bits()),
             _ => return None,
         })
     }
@@ -2596,7 +2596,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }
@@ -3739,7 +3740,7 @@ fn op(s: &str) -> Result<Ops> {
 fn encode_arg(a: &Arg) -> String {
     match a {
         Arg::None => "none".into(),
-        Arg::F32(v) => format!("f32;{v:08x}"),
+        Arg::Float(v) => format!("float;{:016x}", v.value().to_bits()),
         Arg::I32(v) => format!("i32;{v}"),
         Arg::Int(v) => format!("i64;{v}"),
         Arg::Bool(v) => format!("bool;{}", *v as u8),
@@ -3787,8 +3788,10 @@ fn decode_arg(s: &str) -> Result<Arg> {
     let fields: Vec<_> = s.split(';').collect();
     Ok(match fields.as_slice() {
         ["none"] => Arg::None,
-        ["f32", v] if v.len() == 8 => {
-            Arg::F32(u32::from_str_radix(v, 16).map_err(|_| "invalid f32 bits")?)
+        ["float", v] if v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Arg::Float(crate::uop::ConstFloat::new(f64::from_bits(
+                u64::from_str_radix(v, 16).map_err(|_| "invalid float bits")?
+            )))
         }
         ["i32", v] => Arg::I32(number(v)?),
         ["i64", v] => Arg::Int(number(v)?),
@@ -3986,7 +3989,7 @@ pub enum Ops {
 // file="src/uop.rs" mode="replace" item="pub enum Arg"
 pub enum Arg {
     None,
-    F32(u32),
+    Float(ConstFloat),
     I32(i32),
     Int(i64),
     Bool(bool),
@@ -4036,7 +4039,7 @@ pub enum Arg {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,
@@ -6162,7 +6165,8 @@ fn render_impl(linear: &UOp, entry: &str, status_slot: Option<usize>) -> Result<
             }
         }
         let expression = match (&u.op, &u.arg) {
-            (Ops::Const, Arg::F32(bits)) => {
+            (Ops::Const, Arg::Float(bits)) => {
+                let bits = (bits.value() as f32).to_bits();
                 values.insert(u.id, format!("chibi_float({bits}u)"));
                 continue;
             }
@@ -6608,7 +6612,8 @@ pub fn render(
         let expr = match u.op {
             Ops::Const => {
                 match u.arg {
-                    Arg::F32(bits) => {
+                    Arg::Float(bits) => {
+                        let bits = (bits.value() as f32).to_bits();
                         match dialect {
                             Dialect::Metal => format!("as_type<float>((uint){bits})"),
                             Dialect::OpenCl => format!("as_float((uint){bits})"),
@@ -7017,7 +7022,7 @@ pub enum Ops {
     fn infer_dtype(&self) -> DType {
         match self.op {
             Ops::Const => match self.arg {
-                Arg::F32(_) => DType::F32,
+                Arg::Float(_) => DType::F32,
                 Arg::I32(_) => DType::I32,
                 Arg::Int(_) => DType::I64,
                 Arg::Bool(_) => DType::Bool,
